@@ -335,14 +335,16 @@ async function syncEntry(
   try {
     await client.query("BEGIN");
 
-    // Parse timezone from BLOB (may contain null bytes)
+    // Parse timezone from BLOB — it's a binary plist (NSKeyedArchiver)
+    // containing an IANA timezone name like "America/Los_Angeles"
     let timezone: string | null = null;
     if (entry.ZTIMEZONE) {
       const raw =
         entry.ZTIMEZONE instanceof Buffer
           ? entry.ZTIMEZONE.toString("utf-8")
           : String(entry.ZTIMEZONE);
-      timezone = sanitize(raw);
+      const match = raw.match(/([A-Z][a-z]+(?:\/[A-Za-z_-]+[a-z])+)/);
+      timezone = match ? match[1] : sanitize(raw);
     }
 
     // Upsert entry
