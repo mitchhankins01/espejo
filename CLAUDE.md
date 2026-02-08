@@ -24,7 +24,7 @@ If a test fails, read the full error output. Test names map to specs in `specs/t
 
 ```bash
 pnpm install
-docker compose up -d                    # Dev PG on port 5432
+docker compose up -d                    # Dev PG on port 5434
 pnpm migrate                            # Apply schema
 pnpm sync                               # Sync from DayOne.sqlite (set DAYONE_SQLITE_PATH in .env)
 pnpm embed                              # Generate embeddings via OpenAI
@@ -163,7 +163,8 @@ Media files (photos, videos, audio) are uploaded to Cloudflare R2 during sync if
 Each test gets a clean database state:
 - `beforeEach`: truncate all tables, re-seed from fixtures
 - Fixtures include pre-computed embedding vectors (no OpenAI calls during tests)
-- Test DB runs on port 5433 to avoid collision with dev DB on 5432
+- Test DB runs on port 5433 (dev DB is on port 5434)
+- Test Docker Compose uses project name `espejo-test` (`-p espejo-test`) to isolate from dev containers — test teardown won't destroy dev volumes
 
 ### Pre-Computed Embeddings in Fixtures
 
@@ -191,11 +192,39 @@ When writing new assertions, always include a `Hint:` pointing to the file and f
 
 | Environment | DB Name | Port | Config Source | Notes |
 |-------------|---------|------|---------------|-------|
-| Development | `journal_dev` | 5432 | `.env.development` | Full journal data, persistent volume |
+| Development | `journal_dev` | 5434 | `.env` (gitignored) | Full journal data, persistent volume |
 | Test | `journal_test` | 5433 | `.env.test` | Fixture data only, tmpfs (RAM), auto-managed |
 | Production | Railway PG | — | Railway env vars | `DATABASE_URL` injected by Railway |
 
 The `src/config.ts` module selects the right config based on `NODE_ENV`. Default is `development`.
+
+### Dotenv Loading
+
+Scripts and `src/config.ts` use env-aware dotenv:
+
+```typescript
+import dotenv from "dotenv";
+if (process.env.NODE_ENV !== "production") {
+  dotenv.config({ path: process.env.NODE_ENV === "test" ? ".env.test" : ".env", override: true });
+}
+```
+
+- **Development/test**: Loads `.env` or `.env.test` with `override: true` (overrides shell env vars)
+- **Production**: Skips dotenv entirely — uses env vars from the caller (Railway, or CLI for manual sync)
+
+### Connecting to dev database
+
+```
+Host:     localhost
+Port:     5434
+Database: journal_dev
+User:     dev
+Password: dev
+```
+
+Or as a connection string: `postgresql://dev:dev@localhost:5434/journal_dev`
+
+**Note:** Some tools (TablePlus, pgAdmin, psql) need each field entered separately. If you get `database "dev" does not exist`, the tool is using the username as the database name — make sure to specify `journal_dev` explicitly.
 
 ## Adding a New Tool
 
@@ -238,6 +267,31 @@ No Docker needed.
 ### Add a migration
 
 Create a new `.sql` file in a `migrations/` directory (if using file-based migrations) or add to `specs/schema.sql` and reset. For a personal project, schema resets are fine — no need for reversible migrations.
+
+### Sync local data to production
+
+After journaling new entries in Day One, push them to Railway:
+
+```bash
+# 1. Sync new entries from DayOne.sqlite → local dev DB
+pnpm sync --skip-media
+
+# 2. Embed any new entries missing embeddings
+pnpm embed
+
+# 3. Push to production (Railway)
+NODE_ENV=production DATABASE_URL=<railway_url> OPENAI_API_KEY=<key> pnpm sync --skip-media
+NODE_ENV=production DATABASE_URL=<railway_url> OPENAI_API_KEY=<key> pnpm embed
+```
+
+`NODE_ENV=production` skips dotenv loading, so the inline `DATABASE_URL` is used directly. Both sync and embed are idempotent — they only process new/changed entries.
+
+For media upload to R2, drop `--skip-media` and add R2 env vars:
+
+```bash
+NODE_ENV=production DATABASE_URL=<url> R2_ACCOUNT_ID=<id> R2_ACCESS_KEY_ID=<key> \
+  R2_SECRET_ACCESS_KEY=<secret> R2_BUCKET_NAME=<bucket> DAYONE_SQLITE_PATH=<path> pnpm sync
+```
 
 ### Re-embed after model change
 

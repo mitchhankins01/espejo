@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import dotenv from "dotenv";
-dotenv.config({ path: process.env.NODE_ENV === "test" ? ".env.test" : ".env", override: true });
+if (process.env.NODE_ENV !== "production") {
+  dotenv.config({ path: process.env.NODE_ENV === "test" ? ".env.test" : ".env", override: true });
+}
 import { readFileSync } from "fs";
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";

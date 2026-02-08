@@ -1,5 +1,7 @@
 import dotenv from "dotenv";
-dotenv.config({ path: process.env.NODE_ENV === "test" ? ".env.test" : ".env", override: true });
+if (process.env.NODE_ENV !== "production") {
+  dotenv.config({ path: process.env.NODE_ENV === "test" ? ".env.test" : ".env", override: true });
+}
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
