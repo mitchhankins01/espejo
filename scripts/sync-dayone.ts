@@ -1,4 +1,5 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+dotenv.config({ override: true });
 import Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
@@ -26,9 +27,16 @@ function coreDataToIso(timestamp: number | null): string | null {
 // Text normalization
 // ---------------------------------------------------------------------------
 
+/** Strip null bytes that PostgreSQL rejects in text columns */
+function sanitize(s: string | null): string | null {
+  return s ? s.replace(/\0/g, "") : s;
+}
+
 function normalizeText(text: string): string {
   return (
     text
+      // Strip null bytes (PostgreSQL rejects 0x00 in text/json columns)
+      .replace(/\0/g, "")
       // Strip Day One's backslash escapes on punctuation: \. \- \( \) \! \* \+ \{ \} \[ \]
       .replace(/\\([.\-()!*+{}[\]])/g, "$1")
       // Remove dayone-moment:// image/media references
@@ -153,7 +161,7 @@ interface AttachmentRow {
 
 const databaseUrl =
   process.env.DATABASE_URL ||
-  "postgresql://dev:dev@localhost:5432/journal_dev";
+  "postgresql://dev:dev@localhost:5434/journal_dev";
 
 const skipMedia = process.argv.includes("--skip-media");
 
@@ -325,13 +333,14 @@ async function syncEntry(
   try {
     await client.query("BEGIN");
 
-    // Parse timezone from BLOB
+    // Parse timezone from BLOB (may contain null bytes)
     let timezone: string | null = null;
     if (entry.ZTIMEZONE) {
-      timezone =
+      const raw =
         entry.ZTIMEZONE instanceof Buffer
           ? entry.ZTIMEZONE.toString("utf-8")
           : String(entry.ZTIMEZONE);
+      timezone = sanitize(raw);
     }
 
     // Upsert entry
@@ -383,7 +392,7 @@ async function syncEntry(
       [
         entry.ZUUID,
         entry.ZMARKDOWNTEXT ? normalizeText(entry.ZMARKDOWNTEXT) : null,
-        entry.ZRICHTEXTJSON ?? null,
+        sanitize(entry.ZRICHTEXTJSON ?? null),
         coreDataToIso(entry.ZCREATIONDATE),
         coreDataToIso(entry.ZMODIFIEDDATE),
         timezone,
@@ -392,27 +401,27 @@ async function syncEntry(
         entry.ZSTARRED === 1,
         entry.ZEDITINGTIME ?? null,
         entry.ZDURATION ?? null,
-        entry.ZCREATIONDEVICE ?? null,
-        entry.ZCREATIONDEVICEMODEL ?? null,
-        entry.ZCREATIONDEVICETYPE ?? null,
-        entry.ZCREATIONOSNAME ?? null,
-        entry.ZCREATIONOSVERSION ?? null,
+        sanitize(entry.ZCREATIONDEVICE ?? null),
+        sanitize(entry.ZCREATIONDEVICEMODEL ?? null),
+        sanitize(entry.ZCREATIONDEVICETYPE ?? null),
+        sanitize(entry.ZCREATIONOSNAME ?? null),
+        sanitize(entry.ZCREATIONOSVERSION ?? null),
         entry.ZLATITUDE ?? null,
         entry.ZLONGITUDE ?? null,
-        entry.ZLOCALITYNAME ?? null,
-        entry.ZCOUNTRY ?? null,
-        entry.ZPLACENAME ?? null,
-        entry.ZADMINISTRATIVEAREA ?? null,
+        sanitize(entry.ZLOCALITYNAME ?? null),
+        sanitize(entry.ZCOUNTRY ?? null),
+        sanitize(entry.ZPLACENAME ?? null),
+        sanitize(entry.ZADMINISTRATIVEAREA ?? null),
         entry.ZTEMPERATURECELSIUS ?? null,
-        entry.ZCONDITIONSDESCRIPTION ?? null,
+        sanitize(entry.ZCONDITIONSDESCRIPTION ?? null),
         entry.ZRELATIVEHUMIDITY ?? null,
         entry.ZMOONPHASE ?? null,
         coreDataToIso(entry.ZSUNRISEDATE),
         coreDataToIso(entry.ZSUNSETDATE),
-        entry.ZACTIVITYNAME ?? null,
+        sanitize(entry.ZACTIVITYNAME ?? null),
         entry.ZSTEPCOUNT ?? null,
-        entry.ZTEMPLATETITLE ?? null,
-        entry.ZSOURCESTRING ?? null,
+        sanitize(entry.ZTEMPLATETITLE ?? null),
+        sanitize(entry.ZSOURCESTRING ?? null),
       ]
     );
 

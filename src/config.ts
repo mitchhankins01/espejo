@@ -1,11 +1,12 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+dotenv.config({ path: process.env.NODE_ENV === "test" ? ".env.test" : ".env", override: true });
 
 const env = process.env.NODE_ENV || "development";
 
 const databaseUrl =
   process.env.DATABASE_URL ||
   ({
-    development: "postgresql://dev:dev@localhost:5432/journal_dev",
+    development: "postgresql://dev:dev@localhost:5434/journal_dev",
     test: "postgresql://test:test@localhost:5433/journal_test",
     production: "",
   }[env] ??

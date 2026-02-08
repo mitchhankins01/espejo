@@ -1,4 +1,5 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+dotenv.config({ path: process.env.NODE_ENV === "test" ? ".env.test" : ".env", override: true });
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -10,7 +11,7 @@ const databaseUrl =
   process.env.DATABASE_URL ||
   (process.env.NODE_ENV === "test"
     ? "postgresql://test:test@localhost:5433/journal_test"
-    : "postgresql://dev:dev@localhost:5432/journal_dev");
+    : "postgresql://dev:dev@localhost:5434/journal_dev");
 
 async function migrate(): Promise<void> {
   const pool = new pg.Pool({ connectionString: databaseUrl });

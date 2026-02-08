@@ -1,10 +1,11 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+dotenv.config({ override: true });
 import pg from "pg";
 import OpenAI from "openai";
 
 const databaseUrl =
   process.env.DATABASE_URL ||
-  "postgresql://dev:dev@localhost:5432/journal_dev";
+  "postgresql://dev:dev@localhost:5434/journal_dev";
 
 const EMBEDDING_MODEL = "text-embedding-3-small";
 const EMBEDDING_DIMENSIONS = 1536;
@@ -24,7 +25,9 @@ async function embedEntries(force: boolean): Promise<void> {
   const pool = new pg.Pool({ connectionString: databaseUrl });
 
   // Get entries that need embedding
-  const whereClause = force ? "" : "WHERE embedding IS NULL";
+  const whereClause = force
+    ? "WHERE text IS NOT NULL AND trim(text) != ''"
+    : "WHERE embedding IS NULL AND text IS NOT NULL AND trim(text) != ''";
   const countResult = await pool.query(
     `SELECT COUNT(*)::int AS count FROM entries ${whereClause}`
   );
@@ -39,15 +42,14 @@ async function embedEntries(force: boolean): Promise<void> {
   console.log(`Embedding ${totalCount} entries (batch size: ${BATCH_SIZE})...`);
 
   let processed = 0;
-  let offset = 0;
 
   while (processed < totalCount) {
-    // Fetch batch
+    // Fetch batch (no OFFSET — completed rows drop out of the WHERE filter)
     const batch = await pool.query(
       `SELECT id, text FROM entries ${whereClause}
        ORDER BY id
-       LIMIT $1 OFFSET $2`,
-      [BATCH_SIZE, offset]
+       LIMIT $1`,
+      [BATCH_SIZE]
     );
 
     if (batch.rows.length === 0) break;
@@ -80,16 +82,14 @@ async function embedEntries(force: boolean): Promise<void> {
       console.log(`  ${processed}/${totalCount} embedded`);
     } catch (err) {
       console.error(
-        `  Error embedding batch at offset ${offset}: ${err instanceof Error ? err.message : err}`
+        `  Error embedding batch at ${processed}: ${err instanceof Error ? err.message : err}`
       );
-      // Continue with next batch
-      processed += batch.rows.length;
+      // Skip this batch — entries stay unembedded for retry
+      break;
     }
 
-    offset += BATCH_SIZE;
-
     // Rate limiting
-    if (offset < totalCount) {
+    if (processed < totalCount) {
       await new Promise((resolve) => setTimeout(resolve, SLEEP_MS));
     }
   }

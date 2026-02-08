@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("dotenv/config", () => ({ default: {} }));
+vi.mock("dotenv", () => ({ default: { config: () => {} } }));
 
 describe("config", () => {
   const savedEnv = { ...process.env };
@@ -47,7 +47,7 @@ describe("config", () => {
     delete process.env.DATABASE_URL;
 
     const { config } = await import("../../src/config.js");
-    expect(config.database.url).toContain("localhost:5432");
+    expect(config.database.url).toContain("localhost:5434");
     expect(config.database.url).toContain("journal_dev");
   });
 
@@ -108,7 +108,7 @@ describe("config", () => {
 
     const { config } = await import("../../src/config.js");
     expect(config.env).toBe("development");
-    expect(config.database.url).toContain("localhost:5432");
+    expect(config.database.url).toContain("localhost:5434");
   });
 
   it("reads OPENAI_API_KEY from env", async () => {
