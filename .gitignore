@@ -7,5 +7,6 @@ dist/
 coverage/
 .vscode/
 .idea/
+.pnpm-store/
 Journal.json
 *.sqlite

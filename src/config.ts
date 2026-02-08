@@ -29,7 +29,7 @@ export const config = {
     url: databaseUrl,
   },
   openai: {
-    apiKey: process.env.OPENAI_API_KEY || "",
+    apiKey: /* v8 ignore next -- env var fallback */ process.env.OPENAI_API_KEY || "",
     embeddingModel: "text-embedding-3-small" as const,
     embeddingDimensions: 1536,
   },

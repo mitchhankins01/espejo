@@ -30,6 +30,7 @@ function makeEntry(overrides: Partial<EntryRow> = {}): EntryRow {
     photo_count: 0,
     video_count: 0,
     audio_count: 0,
+    media: [],
     ...overrides,
   };
 }
@@ -99,6 +100,47 @@ describe("formatEntry", () => {
     const result = formatEntry(makeEntry({ photo_count: 3, video_count: 1 }));
     expect(result).toContain("3 photos");
     expect(result).toContain("1 video");
+  });
+
+  it("uses singular photo and plural videos", () => {
+    const result = formatEntry(makeEntry({ photo_count: 1, video_count: 2 }));
+    expect(result).toContain("1 photo");
+    expect(result).not.toContain("1 photos");
+    expect(result).toContain("2 videos");
+  });
+
+  it("includes activity info when present", () => {
+    const result = formatEntry(
+      makeEntry({ user_activity: "Walking", step_count: 5000 })
+    );
+    expect(result).toContain("Walking");
+    expect(result).toContain("steps");
+  });
+
+  it("includes step count only when activity is null", () => {
+    const result = formatEntry(makeEntry({ step_count: 3000 }));
+    expect(result).toContain("steps");
+  });
+
+  it("includes media URLs when present", () => {
+    const result = formatEntry(
+      makeEntry({
+        photo_count: 2,
+        media: [
+          { type: "photo", url: "https://r2.dev/photos/a.jpeg", dimensions: null },
+          { type: "video", url: "https://r2.dev/videos/b.mov", dimensions: null },
+          { type: "audio", url: "https://r2.dev/audios/c.m4a", dimensions: null },
+        ],
+      })
+    );
+    expect(result).toContain("https://r2.dev/photos/a.jpeg");
+    expect(result).toContain("https://r2.dev/videos/b.mov");
+    expect(result).toContain("https://r2.dev/audios/c.m4a");
+  });
+
+  it("includes audio count", () => {
+    const result = formatEntry(makeEntry({ audio_count: 2 }));
+    expect(result).toContain("2 audio");
   });
 
   it("handles minimal entry with no metadata", () => {

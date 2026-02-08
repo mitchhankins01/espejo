@@ -30,6 +30,7 @@ export function createServer(pool: pg.Pool, version: string): McpServer {
   // Register each tool from the spec
   for (const [name, spec] of Object.entries(toolSpecs)) {
     const handler = toolHandlers[name];
+    /* v8 ignore next -- defensive: all specs have handlers */
     if (!handler) continue;
 
     server.registerTool(

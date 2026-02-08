@@ -247,6 +247,45 @@ If you change the embedding model, re-embed everything:
 pnpm embed --force   # Re-embeds all entries, not just those missing embeddings
 ```
 
+## CI/CD
+
+### GitHub Actions
+
+`.github/workflows/ci.yml` runs on every push/PR to `main` with two jobs:
+
+1. **lint** — `pnpm typecheck` + `pnpm lint`
+2. **test** (needs lint) — `pnpm test -- --coverage` (unit + integration + 100% coverage)
+
+Integration tests use Docker Compose inside CI (same as local). The vitest `globalSetup` starts the test DB container automatically. Docker is pre-installed on GitHub's `ubuntu-latest` runners.
+
+### Coverage
+
+100% line/function/branch/statement coverage enforced via `@vitest/coverage-v8`. Thresholds configured in `vitest.config.ts`. Coverage only runs with `--coverage` flag — `pnpm check` stays fast for local dev.
+
+Files excluded from coverage via config: `src/index.ts` (entry point) and `src/db/client.ts` (module-level pool). Defensive branches in `src/db/queries.ts` and `src/server.ts` use `/* v8 ignore next */` pragmas.
+
+Run `pnpm test:coverage` locally to check coverage before pushing.
+
+### Local CI with act
+
+[act](https://github.com/nektos/act) runs GitHub Actions workflows locally in Docker. Configured via `.actrc`.
+
+```bash
+act push -j lint      # Typecheck + lint (works fully on macOS)
+act push              # Full pipeline (integration tests need Docker-in-Docker)
+```
+
+The `lint` job runs cleanly on Apple Silicon. The `test` job may fail locally due to Docker-in-Docker limitations under QEMU emulation — this is expected. Use `pnpm check` for full local validation including integration tests.
+
+### Pipeline
+
+| Environment | Trigger | What runs |
+|-------------|---------|-----------|
+| Local | `pnpm check` | typecheck → lint → test (no coverage) |
+| Local (act) | `act push -j lint` | typecheck → lint (in Docker, matches CI) |
+| CI | Push/PR to main | lint → test + coverage (100%) |
+| Production | Merge to main | Railway auto-deploy via Dockerfile |
+
 ## Deployment
 
 Deployed to Railway. Mirrors the deployment pattern from [oura-ring-mcp](https://github.com/mitchhankins01/oura-ring-mcp).
@@ -255,10 +294,12 @@ Deployed to Railway. Mirrors the deployment pattern from [oura-ring-mcp](https:/
 - `DATABASE_URL` — auto-set by Railway PostgreSQL addon (must have pgvector extension)
 - `OPENAI_API_KEY` — for query-time embedding in `search_entries`
 - `NODE_ENV=production`
+- `R2_PUBLIC_URL` — Cloudflare R2 public bucket URL
 
 **Optional:**
 - `PORT` — auto-set by Railway
 - `MCP_SECRET` — static bearer token for Claude Desktop HTTP access
+- `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME` — for media sync
 
 The Dockerfile is multi-stage: TypeScript build → slim Node.js runtime. The production image does not include dev dependencies, test fixtures, or Docker Compose files.
 

@@ -204,7 +204,7 @@ export async function searchEntries(
     city: row.city,
     starred: row.starred,
     preview: row.preview,
-    tags: row.tags || [],
+    tags: /* v8 ignore next -- defensive: SQL coalesces to '{}' */ row.tags || [],
     rrf_score: parseFloat(row.rrf_score),
     has_semantic: row.has_semantic,
     has_fulltext: row.has_fulltext,
@@ -263,11 +263,11 @@ export async function getEntryByUuid(
     step_count: row.step_count,
     template_name: row.template_name,
     editing_time: row.editing_time,
-    tags: row.tags || [],
+    tags: /* v8 ignore next -- defensive: SQL coalesces to '{}' */ row.tags || [],
     photo_count: row.photo_count,
     video_count: row.video_count,
     audio_count: row.audio_count,
-    media: row.media || [],
+    media: /* v8 ignore next -- defensive: SQL coalesces to '[]' */ row.media || [],
   };
 }
 
@@ -364,7 +364,7 @@ export async function findSimilarEntries(
     created_at: row.created_at,
     preview: row.preview,
     city: row.city,
-    tags: row.tags || [],
+    tags: /* v8 ignore next -- defensive: SQL coalesces to '{}' */ row.tags || [],
     similarity_score: parseFloat(row.similarity_score),
   }));
 }
@@ -507,6 +507,7 @@ export async function getEntryStats(
     entries_by_dow: entriesByDow,
     entries_by_month: entriesByMonth,
     avg_entries_per_week: avgPerWeek,
+    /* v8 ignore next 2 -- defensive: streak query always returns a row */
     longest_streak_days: streakResult.rows[0]?.longest_streak ?? 0,
     current_streak_days: streakResult.rows[0]?.current_streak ?? 0,
   };
@@ -540,7 +541,7 @@ function mapEntryRow(row: Record<string, unknown>): EntryRow {
     step_count: row.step_count as number | null,
     template_name: row.template_name as string | null,
     editing_time: row.editing_time as number | null,
-    tags: (row.tags as string[]) || [],
+    tags: (row.tags as string[]) || [] /* v8 ignore next -- defensive: SQL coalesces to '{}' */,
     photo_count: row.photo_count as number,
     video_count: row.video_count as number,
     audio_count: row.audio_count as number,

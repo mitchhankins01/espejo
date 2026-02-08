@@ -110,6 +110,13 @@ describe("formatSearchResults", () => {
     ]);
     expect(result).toContain("...");
   });
+
+  it("handles null preview", () => {
+    const result = formatSearchResults([
+      makeSearchResult({ preview: null as unknown as string }),
+    ]);
+    expect(result).toContain("TEST-UUID");
+  });
 });
 
 describe("formatSimilarResults", () => {
@@ -127,6 +134,48 @@ describe("formatSimilarResults", () => {
 
   it("includes UUID", () => {
     const result = formatSimilarResults([makeSimilarResult()]);
+    expect(result).toContain("TEST-UUID");
+  });
+
+  it("shows tags when present", () => {
+    const result = formatSimilarResults([
+      makeSimilarResult({ tags: ["work", "health"] }),
+    ]);
+    expect(result).toContain("work, health");
+  });
+
+  it("shows city when present", () => {
+    const result = formatSimilarResults([
+      makeSimilarResult({ city: "Barcelona" }),
+    ]);
+    expect(result).toContain("Barcelona");
+  });
+
+  it("truncates long previews", () => {
+    const longText = "a".repeat(300);
+    const result = formatSimilarResults([
+      makeSimilarResult({ preview: longText }),
+    ]);
+    expect(result).toContain("...");
+  });
+
+  it("uses singular for single result", () => {
+    const result = formatSimilarResults([makeSimilarResult()]);
+    expect(result).toContain("1 similar entry");
+  });
+
+  it("uses plural for multiple results", () => {
+    const result = formatSimilarResults([
+      makeSimilarResult({ uuid: "A" }),
+      makeSimilarResult({ uuid: "B" }),
+    ]);
+    expect(result).toContain("2 similar entries");
+  });
+
+  it("handles null preview", () => {
+    const result = formatSimilarResults([
+      makeSimilarResult({ preview: null as unknown as string }),
+    ]);
     expect(result).toContain("TEST-UUID");
   });
 });
