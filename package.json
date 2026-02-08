@@ -27,11 +27,13 @@
     "dev:db:reset": "docker compose down -v && docker compose up -d",
     "dev:db:logs": "docker compose logs -f db",
     "migrate": "tsx scripts/migrate.ts",
-    "import": "tsx scripts/import-journal.ts",
+    "sync": "tsx scripts/sync-dayone.ts",
     "embed": "tsx scripts/embed-entries.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.985.0",
     "@modelcontextprotocol/sdk": "^1.25.3",
+    "better-sqlite3": "^11.7.0",
     "dotenv": "^16.4.7",
     "express": "^5.1.0",
     "openai": "^4.77.0",
@@ -41,6 +43,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
+    "@types/better-sqlite3": "^7.6.12",
     "@types/express": "^5.0.0",
     "@types/node": "^20.17.12",
     "@types/pg": "^8.11.11",

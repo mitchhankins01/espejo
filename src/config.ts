@@ -17,6 +17,12 @@ if (env === "production" && !databaseUrl) {
   );
 }
 
+if (env === "production" && !process.env.R2_PUBLIC_URL) {
+  throw new Error(
+    "R2_PUBLIC_URL is required in production. Set it as an environment variable."
+  );
+}
+
 export const config = {
   env,
   database: {
@@ -29,6 +35,13 @@ export const config = {
   },
   embedding: {
     batchSize: 100,
+  },
+  r2: {
+    accountId: process.env.R2_ACCOUNT_ID || "",
+    accessKeyId: process.env.R2_ACCESS_KEY_ID || "",
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || "",
+    bucketName: process.env.R2_BUCKET_NAME || "espejo-media",
+    publicUrl: process.env.R2_PUBLIC_URL || "",
   },
   server: {
     port: parseInt(process.env.PORT || "3000", 10),

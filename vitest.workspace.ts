@@ -17,6 +17,10 @@ export default defineWorkspace([
       include: ["tests/integration/**/*.test.ts"],
       globalSetup: ["tests/setup/global-setup.ts"],
       setupFiles: ["tests/setup/per-test-setup.ts"],
+      env: {
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test:test@localhost:5433/journal_test",
+      },
     },
   },
 ]);

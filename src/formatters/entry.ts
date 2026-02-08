@@ -76,6 +76,12 @@ export function formatEntry(entry: EntryRow): string {
   if (mediaCounts.length > 0) {
     lines.push(`\uD83D\uDDBC\uFE0F ${mediaCounts.join(", ")}`);
   }
+  if (entry.media && entry.media.length > 0) {
+    for (const m of entry.media) {
+      const icon = m.type === "photo" ? "\uD83D\uDCF7" : m.type === "video" ? "\uD83C\uDFAC" : "\uD83C\uDFA4";
+      lines.push(`  ${icon} ${m.url}`);
+    }
+  }
 
   // UUID for reference
   lines.push(`\uD83D\uDD11 ${entry.uuid}`);

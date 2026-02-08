@@ -43,7 +43,7 @@ function generateBaseEmbedding(seed: number): number[] {
   return normalize(vec);
 }
 
-function addNoise(base: number[], noiseSeed: number, amount = 0.05): number[] {
+function addNoise(base: number[], noiseSeed: number, amount = 0.005): number[] {
   return normalize(
     base.map(
       (v, i) =>

@@ -1,7 +1,7 @@
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
-CREATE TABLE entries (
+CREATE TABLE IF NOT EXISTS entries (
     id SERIAL PRIMARY KEY,
     uuid TEXT UNIQUE NOT NULL,
 
@@ -63,18 +63,18 @@ CREATE TABLE entries (
     ) STORED
 );
 
-CREATE TABLE tags (
+CREATE TABLE IF NOT EXISTS tags (
     id SERIAL PRIMARY KEY,
     name TEXT UNIQUE NOT NULL
 );
 
-CREATE TABLE entry_tags (
+CREATE TABLE IF NOT EXISTS entry_tags (
     entry_id INT REFERENCES entries(id) ON DELETE CASCADE,
     tag_id INT REFERENCES tags(id) ON DELETE CASCADE,
     PRIMARY KEY (entry_id, tag_id)
 );
 
-CREATE TABLE media (
+CREATE TABLE IF NOT EXISTS media (
     id SERIAL PRIMARY KEY,
     entry_id INT REFERENCES entries(id) ON DELETE CASCADE,
     type TEXT NOT NULL,
@@ -83,7 +83,9 @@ CREATE TABLE media (
     dimensions JSONB,
     duration FLOAT,
     camera_info JSONB,
-    location JSONB
+    location JSONB,
+    storage_key TEXT,
+    url TEXT
 );
 
 CREATE TABLE IF NOT EXISTS _migrations (
@@ -93,10 +95,10 @@ CREATE TABLE IF NOT EXISTS _migrations (
 );
 
 -- Indexes
-CREATE INDEX idx_entries_created ON entries(created_at);
-CREATE INDEX idx_entries_text_search ON entries USING GIN(text_search);
-CREATE INDEX idx_entries_embedding ON entries USING ivfflat(embedding vector_cosine_ops) WITH (lists = 50);
-CREATE INDEX idx_entries_trgm ON entries USING GIN(text gin_trgm_ops);
-CREATE INDEX idx_entries_city ON entries(city);
-CREATE INDEX idx_entries_template ON entries(template_name);
-CREATE INDEX idx_tags_name ON tags(name);
+CREATE INDEX IF NOT EXISTS idx_entries_created ON entries(created_at);
+CREATE INDEX IF NOT EXISTS idx_entries_text_search ON entries USING GIN(text_search);
+CREATE INDEX IF NOT EXISTS idx_entries_embedding ON entries USING ivfflat(embedding vector_cosine_ops) WITH (lists = 50);
+CREATE INDEX IF NOT EXISTS idx_entries_trgm ON entries USING GIN(text gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_entries_city ON entries(city);
+CREATE INDEX IF NOT EXISTS idx_entries_template ON entries(template_name);
+CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name);

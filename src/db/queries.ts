@@ -4,6 +4,12 @@ import type pg from "pg";
 // Result types
 // ============================================================================
 
+export interface MediaItem {
+  type: "photo" | "video" | "audio";
+  url: string;
+  dimensions: { width: number; height: number } | null;
+}
+
 export interface EntryRow {
   id: number;
   uuid: string;
@@ -31,6 +37,7 @@ export interface EntryRow {
   photo_count: number;
   video_count: number;
   audio_count: number;
+  media: MediaItem[];
 }
 
 export interface SearchResultRow {
@@ -220,7 +227,11 @@ export async function getEntryByUuid(
       ) AS tags,
       (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'photo') AS photo_count,
       (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'video') AS video_count,
-      (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'audio') AS audio_count
+      (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'audio') AS audio_count,
+      (SELECT COALESCE(json_agg(json_build_object(
+        'type', m.type, 'url', m.url, 'dimensions', m.dimensions
+      ) ORDER BY m.id) FILTER (WHERE m.url IS NOT NULL), '[]'::json)
+      FROM media m WHERE m.entry_id = e.id) AS media
     FROM entries e
     WHERE e.uuid = $1`,
     [uuid]
@@ -256,6 +267,7 @@ export async function getEntryByUuid(
     photo_count: row.photo_count,
     video_count: row.video_count,
     audio_count: row.audio_count,
+    media: row.media || [],
   };
 }
 
@@ -532,5 +544,6 @@ function mapEntryRow(row: Record<string, unknown>): EntryRow {
     photo_count: row.photo_count as number,
     video_count: row.video_count as number,
     audio_count: row.audio_count as number,
+    media: [],
   };
 }

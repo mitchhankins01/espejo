@@ -26,7 +26,7 @@ If a test fails, read the full error output. Test names map to specs in `specs/t
 pnpm install
 docker compose up -d                    # Dev PG on port 5432
 pnpm migrate                            # Apply schema
-pnpm import -- path/to/Journal.json     # Import Day One export
+pnpm sync                               # Sync from DayOne.sqlite (set DAYONE_SQLITE_PATH in .env)
 pnpm embed                              # Generate embeddings via OpenAI
 pnpm dev                                # Start MCP server (stdio)
 ```
@@ -66,18 +66,19 @@ src/
     find-similar.ts — Cosine similarity from a source entry.
     list-tags.ts    — All tags with counts.
     entry-stats.ts  — Writing frequency and trends.
+  storage/
+    r2.ts           — Cloudflare R2 client. Upload, exists check, public URL.
   formatters/
-    entry.ts        — Raw DB row → human-readable string with emoji, metadata.
+    entry.ts        — Raw DB row → human-readable string with emoji, metadata, media URLs.
     search-results.ts — Ranked results with RRF score context.
 scripts/
-  import-journal.ts — Day One JSON → PG. Idempotent (ON CONFLICT DO UPDATE).
+  sync-dayone.ts  — DayOne.sqlite → PG. Idempotent (ON CONFLICT DO UPDATE).
   embed-entries.ts  — Batch embed all entries missing embeddings.
   migrate.ts        — Runs SQL files, tracks applied migrations in _migrations table.
 specs/
   schema.sql        — Canonical DB schema.
   tools.spec.ts     — Tool contracts: params, types, descriptions, examples.
   fixtures/
-    sample-export.json — Small realistic Day One export for import script tests.
     seed.ts         — Test data with pre-computed embeddings for determinism.
 ```
 
@@ -136,9 +137,11 @@ Keep formatters pure functions with no side effects.
 
 Tags live in a separate `tags` table with a junction table `entry_tags`. This enables efficient tag-based queries and `list_tags` aggregation. When importing, upsert tags (`ON CONFLICT (name) DO NOTHING`) and create junction records.
 
-### Import Is Idempotent
+### Sync Is Idempotent
 
-`scripts/import-journal.ts` uses `ON CONFLICT (uuid) DO UPDATE` so re-running it updates existing entries instead of failing on duplicates. This means you can re-export from Day One and re-import without manual cleanup.
+`scripts/sync-dayone.ts` reads directly from the DayOne.sqlite database and uses `ON CONFLICT (uuid) DO UPDATE` so re-running it updates existing entries. Run `pnpm sync` any time to pick up new or modified entries from Day One.
+
+Media files (photos, videos, audio) are uploaded to Cloudflare R2 during sync if R2 credentials are configured. The sync checks if each file already exists in R2 (HEAD request) and skips re-upload. Use `--skip-media` for a quick metadata-only sync. Attachments with `ZHASDATA=0` (iCloud-only, not downloaded locally) are skipped with a warning.
 
 ## Test Strategy
 
@@ -212,7 +215,7 @@ The `src/config.ts` module selects the right config based on `NODE_ENV`. Default
 ```bash
 docker compose down -v && docker compose up -d
 pnpm migrate
-pnpm import -- path/to/Journal.json
+pnpm sync
 pnpm embed
 ```
 
@@ -280,6 +283,8 @@ The Dockerfile is multi-stage: TypeScript build → slim Node.js runtime. The pr
 | `openai` | Embedding generation |
 | `zod` | Runtime param validation |
 | `dotenv` | Env file loading |
+| `@aws-sdk/client-s3` | Cloudflare R2 media storage (S3-compatible) |
+| `better-sqlite3` | Read DayOne.sqlite during sync |
 
 ## What's Out of Scope
 
