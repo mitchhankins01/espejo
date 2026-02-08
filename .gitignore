@@ -10,3 +10,6 @@ coverage/
 .pnpm-store/
 Journal.json
 *.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.claude/
