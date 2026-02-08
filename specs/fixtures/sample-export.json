@@ -1,0 +1,384 @@
+{
+  "entries": [
+    {
+      "uuid": "SAMPLE-001",
+      "creationDate": "2024-03-15T09:30:00Z",
+      "modifiedDate": "2024-03-15T09:45:00Z",
+      "text": "Feeling overwhelmed by the project deadline. The client keeps changing requirements.",
+      "richText": {},
+      "creationDevice": "MacBook Pro",
+      "creationDeviceModel": "MacBookPro18,1",
+      "creationDeviceType": "MacBook",
+      "creationOSName": "macOS",
+      "creationOSVersion": "14.3",
+      "editingTime": 180,
+      "isAllDay": false,
+      "isPinned": false,
+      "starred": true,
+      "timeZone": "Europe/Madrid",
+      "duration": 0,
+      "location": {
+        "latitude": 41.3851,
+        "longitude": 2.1734,
+        "localityName": "Barcelona",
+        "country": "Spain",
+        "placeName": "Eixample",
+        "administrativeArea": "Catalonia"
+      },
+      "weather": {
+        "temperatureCelsius": 18,
+        "conditionsDescription": "Partly Cloudy",
+        "relativeHumidity": 65,
+        "moonPhase": 0.45,
+        "sunriseDate": "2024-03-15T07:15:00Z",
+        "sunsetDate": "2024-03-15T18:45:00Z",
+        "windSpeedKPH": 12,
+        "pressureMB": 1013
+      },
+      "userActivity": {
+        "activityName": "Stationary",
+        "stepCount": 2100
+      },
+      "tags": ["morning-review", "work"],
+      "template": {
+        "name": "5 Minute AM",
+        "uuid": "TEMPLATE-001"
+      },
+      "photos": [
+        {
+          "type": "jpeg",
+          "width": 4032,
+          "height": 3024,
+          "fileSize": 2048000,
+          "md5": "abc123sample001"
+        }
+      ],
+      "videos": [],
+      "audios": [],
+      "sourceString": null
+    },
+    {
+      "uuid": "SAMPLE-002",
+      "creationDate": "2024-03-20T21:00:00Z",
+      "text": "Another day of back-to-back meetings. I can feel the burnout creeping in.",
+      "creationDevice": "iPhone",
+      "creationDeviceModel": "iPhone15,2",
+      "creationDeviceType": "iPhone",
+      "creationOSName": "iOS",
+      "creationOSVersion": "17.4",
+      "editingTime": 240,
+      "isAllDay": false,
+      "isPinned": false,
+      "starred": false,
+      "timeZone": "Europe/Madrid",
+      "duration": 0,
+      "location": {
+        "latitude": 41.4035,
+        "longitude": 2.1567,
+        "localityName": "Barcelona",
+        "country": "Spain",
+        "placeName": "Gracia",
+        "administrativeArea": "Catalonia"
+      },
+      "weather": {
+        "temperatureCelsius": 16,
+        "conditionsDescription": "Clear",
+        "relativeHumidity": 55
+      },
+      "tags": ["evening-review", "work", "burnout"],
+      "photos": [],
+      "videos": [],
+      "audios": []
+    },
+    {
+      "uuid": "SAMPLE-003",
+      "creationDate": "2024-06-15T06:30:00Z",
+      "text": "Woke up at 6am, did the cold plunge and 20 minutes of breathwork.",
+      "creationDevice": "iPhone",
+      "creationDeviceModel": "iPhone15,2",
+      "creationDeviceType": "iPhone",
+      "creationOSName": "iOS",
+      "creationOSVersion": "17.5",
+      "editingTime": 120,
+      "isAllDay": false,
+      "isPinned": false,
+      "starred": true,
+      "timeZone": "America/Los_Angeles",
+      "duration": 0,
+      "location": {
+        "latitude": 32.7465,
+        "longitude": -117.1297,
+        "localityName": "San Diego",
+        "country": "United States",
+        "placeName": "North Park",
+        "administrativeArea": "California"
+      },
+      "weather": {
+        "temperatureCelsius": 22,
+        "conditionsDescription": "Sunny",
+        "relativeHumidity": 70
+      },
+      "userActivity": {
+        "activityName": "Walking",
+        "stepCount": 8432
+      },
+      "tags": ["morning-review", "health", "routine"],
+      "template": {
+        "name": "5 Minute AM",
+        "uuid": "TEMPLATE-001"
+      },
+      "photos": [],
+      "videos": [],
+      "audios": []
+    },
+    {
+      "uuid": "SAMPLE-004",
+      "creationDate": "2023-06-15T07:00:00Z",
+      "text": "Quick morning entry. Coffee, sunlight, a few pages of reading.",
+      "creationDevice": "iPhone",
+      "creationDeviceModel": "iPhone14,5",
+      "creationDeviceType": "iPhone",
+      "creationOSName": "iOS",
+      "creationOSVersion": "16.5",
+      "isAllDay": false,
+      "isPinned": false,
+      "starred": false,
+      "timeZone": "America/Los_Angeles",
+      "duration": 0,
+      "location": {
+        "latitude": 32.7488,
+        "longitude": -117.1617,
+        "localityName": "San Diego",
+        "country": "United States",
+        "placeName": "Hillcrest",
+        "administrativeArea": "California"
+      },
+      "weather": {
+        "temperatureCelsius": 20,
+        "conditionsDescription": "Sunny",
+        "relativeHumidity": 68
+      },
+      "tags": ["morning-review"],
+      "template": {
+        "name": "5 Minute AM",
+        "uuid": "TEMPLATE-001"
+      },
+      "photos": [],
+      "videos": [],
+      "audios": []
+    },
+    {
+      "uuid": "SAMPLE-005",
+      "creationDate": "2024-10-22T19:00:00Z",
+      "text": "First full day in Barcelona. Walked through the Gothic Quarter.",
+      "creationDevice": "iPhone",
+      "creationDeviceModel": "iPhone15,2",
+      "creationDeviceType": "iPhone",
+      "creationOSName": "iOS",
+      "creationOSVersion": "18.0",
+      "editingTime": 300,
+      "isAllDay": false,
+      "isPinned": false,
+      "starred": true,
+      "timeZone": "Europe/Madrid",
+      "duration": 0,
+      "location": {
+        "latitude": 41.3851,
+        "longitude": 2.1821,
+        "localityName": "Barcelona",
+        "country": "Spain",
+        "placeName": "El Born",
+        "administrativeArea": "Catalonia"
+      },
+      "weather": {
+        "temperatureCelsius": 21,
+        "conditionsDescription": "Sunny",
+        "relativeHumidity": 58
+      },
+      "userActivity": {
+        "activityName": "Walking",
+        "stepCount": 18234
+      },
+      "tags": ["travel", "barcelona"],
+      "photos": [
+        {
+          "type": "jpeg",
+          "width": 4032,
+          "height": 3024,
+          "fileSize": 3072000,
+          "md5": "abc123sample005a"
+        },
+        {
+          "type": "jpeg",
+          "width": 4032,
+          "height": 3024,
+          "fileSize": 2560000,
+          "md5": "abc123sample005b"
+        }
+      ],
+      "videos": [],
+      "audios": []
+    },
+    {
+      "uuid": "SAMPLE-006",
+      "creationDate": "2025-01-10T08:00:00Z",
+      "text": "Woke up feeling depleted. The nicotine yesterday definitely crashed my dopamine baseline.",
+      "creationDevice": "MacBook Pro",
+      "creationDeviceModel": "MacBookPro18,1",
+      "creationDeviceType": "MacBook",
+      "creationOSName": "macOS",
+      "creationOSVersion": "15.2",
+      "isAllDay": false,
+      "isPinned": false,
+      "starred": false,
+      "timeZone": "Europe/Madrid",
+      "duration": 0,
+      "location": {
+        "latitude": 41.3888,
+        "longitude": 2.17,
+        "localityName": "Barcelona",
+        "country": "Spain",
+        "placeName": "Eixample",
+        "administrativeArea": "Catalonia"
+      },
+      "weather": {
+        "temperatureCelsius": 10,
+        "conditionsDescription": "Overcast",
+        "relativeHumidity": 75
+      },
+      "userActivity": {
+        "activityName": "Stationary",
+        "stepCount": 1200
+      },
+      "tags": ["morning-review", "nicotine", "health"],
+      "template": {
+        "name": "5 Minute AM",
+        "uuid": "TEMPLATE-001"
+      },
+      "photos": [],
+      "videos": [],
+      "audios": []
+    },
+    {
+      "uuid": "SAMPLE-007",
+      "creationDate": "2024-12-31T23:00:00Z",
+      "text": "Looking back at the past year, I've grown more than I give myself credit for.",
+      "creationDevice": "MacBook Pro",
+      "creationDeviceModel": "MacBookPro18,1",
+      "creationDeviceType": "MacBook",
+      "creationOSName": "macOS",
+      "creationOSVersion": "15.2",
+      "editingTime": 600,
+      "isAllDay": false,
+      "isPinned": false,
+      "starred": true,
+      "timeZone": "Europe/Madrid",
+      "duration": 0,
+      "location": {
+        "latitude": 41.387,
+        "longitude": 2.169,
+        "localityName": "Barcelona",
+        "country": "Spain",
+        "placeName": "Eixample",
+        "administrativeArea": "Catalonia"
+      },
+      "weather": {
+        "temperatureCelsius": 12,
+        "conditionsDescription": "Clear",
+        "relativeHumidity": 60
+      },
+      "tags": ["reflection", "year-review"],
+      "photos": [],
+      "videos": [],
+      "audios": []
+    },
+    {
+      "uuid": "SAMPLE-008",
+      "creationDate": "2024-08-01T14:00:00Z",
+      "text": "Just a quick thought dump. Sometimes you don't need a prompt or a template.",
+      "isAllDay": false,
+      "isPinned": false,
+      "starred": false,
+      "photos": [],
+      "videos": [],
+      "audios": []
+    },
+    {
+      "uuid": "SAMPLE-009",
+      "creationDate": "2024-10-28T18:00:00Z",
+      "text": "Lisbon is a city that rewards wandering. Got lost in Alfama for three hours.",
+      "creationDevice": "iPhone",
+      "creationDeviceModel": "iPhone15,2",
+      "creationDeviceType": "iPhone",
+      "creationOSName": "iOS",
+      "creationOSVersion": "18.0",
+      "editingTime": 200,
+      "isAllDay": false,
+      "isPinned": false,
+      "starred": false,
+      "timeZone": "Europe/Lisbon",
+      "duration": 0,
+      "location": {
+        "latitude": 38.7139,
+        "longitude": -9.1337,
+        "localityName": "Lisbon",
+        "country": "Portugal",
+        "placeName": "Alfama",
+        "administrativeArea": "Lisboa"
+      },
+      "weather": {
+        "temperatureCelsius": 19,
+        "conditionsDescription": "Sunny",
+        "relativeHumidity": 52
+      },
+      "userActivity": {
+        "activityName": "Walking",
+        "stepCount": 22000
+      },
+      "tags": ["travel"],
+      "photos": [],
+      "videos": [],
+      "audios": []
+    },
+    {
+      "uuid": "SAMPLE-010",
+      "creationDate": "2025-03-15T07:30:00Z",
+      "text": "Sleep has been terrible this week. HRV dropped to 15ms last night.",
+      "creationDevice": "iPhone",
+      "creationDeviceModel": "iPhone15,2",
+      "creationDeviceType": "iPhone",
+      "creationOSName": "iOS",
+      "creationOSVersion": "18.3",
+      "isAllDay": false,
+      "isPinned": false,
+      "starred": false,
+      "timeZone": "America/Los_Angeles",
+      "duration": 0,
+      "location": {
+        "latitude": 32.7465,
+        "longitude": -117.1297,
+        "localityName": "San Diego",
+        "country": "United States",
+        "placeName": "North Park",
+        "administrativeArea": "California"
+      },
+      "weather": {
+        "temperatureCelsius": 16,
+        "conditionsDescription": "Foggy",
+        "relativeHumidity": 85
+      },
+      "userActivity": {
+        "activityName": "Stationary",
+        "stepCount": 500
+      },
+      "tags": ["health", "sleep", "morning-review"],
+      "template": {
+        "name": "5 Minute AM",
+        "uuid": "TEMPLATE-001"
+      },
+      "photos": [],
+      "videos": [],
+      "audios": []
+    }
+  ]
+}

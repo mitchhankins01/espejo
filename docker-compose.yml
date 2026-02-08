@@ -1,0 +1,20 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: journal_dev
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: dev
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./specs/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dev -d journal_dev"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
