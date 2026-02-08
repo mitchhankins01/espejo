@@ -3,7 +3,9 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { config } from "../config.js";
 
-export async function startHttpServer(server: McpServer): Promise<void> {
+type ServerFactory = () => McpServer;
+
+export async function startHttpServer(createServer: ServerFactory): Promise<void> {
   const port = config.server.port;
   const app = express();
 
@@ -27,13 +29,25 @@ export async function startHttpServer(server: McpServer): Promise<void> {
     res.json({ status: "ok" });
   });
 
-  // MCP endpoint
+  // MCP endpoint — fresh server + transport per request (SDK requirement)
   app.post("/mcp", async (req, res) => {
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-    });
-    await server.connect(transport);
-    await transport.handleRequest(req, res, req.body);
+    try {
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+      });
+      const server = createServer();
+      await server.connect(transport);
+      await transport.handleRequest(req, res, req.body);
+    } catch (err) {
+      console.error("MCP request error:", err);
+      if (!res.headersSent) {
+        res.status(500).json({
+          jsonrpc: "2.0",
+          error: { code: -32603, message: String(err) },
+          id: null,
+        });
+      }
+    }
   });
 
   app.listen(port, "0.0.0.0", () => {

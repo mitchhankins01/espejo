@@ -49,7 +49,7 @@ describe("startHttpServer", () => {
   });
 
   it("creates express app and listens on configured port", async () => {
-    await startHttpServer({ connect: vi.fn() } as any);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
 
     expect(mockApp.listen).toHaveBeenCalledWith(
       3000,
@@ -59,22 +59,22 @@ describe("startHttpServer", () => {
   });
 
   it("sets trust proxy", async () => {
-    await startHttpServer({ connect: vi.fn() } as any);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
     expect(mockApp.set).toHaveBeenCalledWith("trust proxy", 1);
   });
 
   it("registers json middleware", async () => {
-    await startHttpServer({ connect: vi.fn() } as any);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
     expect(mockApp.use).toHaveBeenCalled();
   });
 
   it("registers health endpoint", async () => {
-    await startHttpServer({ connect: vi.fn() } as any);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
     expect(mockApp.get).toHaveBeenCalledWith("/health", expect.any(Function));
   });
 
   it("health endpoint returns status ok", async () => {
-    await startHttpServer({ connect: vi.fn() } as any);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
 
     const healthCall = mockApp.get.mock.calls.find(
       (c: any[]) => c[0] === "/health"
@@ -87,23 +87,25 @@ describe("startHttpServer", () => {
   });
 
   it("registers MCP endpoint", async () => {
-    await startHttpServer({ connect: vi.fn() } as any);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
     expect(mockApp.post).toHaveBeenCalledWith("/mcp", expect.any(Function));
   });
 
   it("MCP endpoint creates transport and handles request", async () => {
     const mockConnect = vi.fn();
-    await startHttpServer({ connect: mockConnect } as any);
+    const mockFactory = vi.fn(() => ({ connect: mockConnect }));
+    await startHttpServer(mockFactory as any);
 
     const mcpCall = mockApp.post.mock.calls.find(
       (c: any[]) => c[0] === "/mcp"
     );
     const mcpHandler = mcpCall![1];
     const mockReq = { body: { test: true } };
-    const mockRes = {};
+    const mockRes = { headersSent: false, status: vi.fn().mockReturnThis(), json: vi.fn() };
 
     await mcpHandler(mockReq, mockRes);
 
+    expect(mockFactory).toHaveBeenCalled();
     expect(mockConnect).toHaveBeenCalled();
     expect(mockHandleRequest).toHaveBeenCalledWith(
       mockReq,
@@ -113,7 +115,7 @@ describe("startHttpServer", () => {
   });
 
   it("CORS middleware sets headers for non-OPTIONS requests", async () => {
-    await startHttpServer({ connect: vi.fn() } as any);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
 
     // Find the CORS middleware (a use() call with a function argument)
     const corsCall = mockApp.use.mock.calls.find(
@@ -143,7 +145,7 @@ describe("startHttpServer", () => {
   });
 
   it("CORS middleware returns 204 for OPTIONS requests", async () => {
-    await startHttpServer({ connect: vi.fn() } as any);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
 
     const corsCall = mockApp.use.mock.calls.find(
       (c: any[]) => typeof c[0] === "function"

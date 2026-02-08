@@ -19,13 +19,12 @@ const VERSION: string = pkg.version;
 const args = process.argv.slice(2);
 const useHttp = args.includes("--http");
 
-const server = createServer(pool, VERSION);
-
 async function main(): Promise<void> {
   if (useHttp) {
     const { startHttpServer } = await import("./transports/http.js");
-    await startHttpServer(server);
+    await startHttpServer(() => createServer(pool, VERSION));
   } else {
+    const server = createServer(pool, VERSION);
     const transport = new StdioServerTransport();
     await server.connect(transport);
     console.error("espejo-mcp running on stdio");
