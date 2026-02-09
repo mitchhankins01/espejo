@@ -49,5 +49,7 @@ export const config = {
   server: {
     port: parseInt(process.env.PORT || "3000", 10),
     mcpSecret: process.env.MCP_SECRET || "",
+    oauthClientId: process.env.OAUTH_CLIENT_ID || "",
+    oauthClientSecret: process.env.OAUTH_CLIENT_SECRET || "",
   },
 } as const;

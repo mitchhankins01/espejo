@@ -15,13 +15,19 @@ const mockApp = {
 vi.mock("express", () => {
   const fn = vi.fn(() => mockApp);
   (fn as any).json = vi.fn(() => "json-middleware");
+  (fn as any).urlencoded = vi.fn(() => "urlencoded-middleware");
   return { default: fn };
 });
 
 vi.mock("../../src/config.js", () => ({
   config: {
-    server: { port: 3000, mcpSecret: "" },
+    server: { port: 3000, mcpSecret: "", oauthClientId: "", oauthClientSecret: "" },
   },
+}));
+
+vi.mock("../../src/transports/oauth.js", () => ({
+  registerOAuthRoutes: vi.fn(),
+  isValidOAuthToken: vi.fn(() => false),
 }));
 
 const mockHandleRequest = vi.fn();

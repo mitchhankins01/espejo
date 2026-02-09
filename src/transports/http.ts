@@ -2,6 +2,7 @@ import express from "express";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { config } from "../config.js";
+import { registerOAuthRoutes, isValidOAuthToken } from "./oauth.js";
 
 type ServerFactory = () => McpServer;
 
@@ -11,6 +12,7 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
 
   app.set("trust proxy", 1);
   app.use(express.json());
+  app.use(express.urlencoded({ extended: false }));
 
   // CORS
   app.use((_req, res, next) => {
@@ -24,17 +26,31 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
     next();
   });
 
-  // Health check
+  // Health check (public)
   app.get("/health", (_req, res) => {
     res.json({ status: "ok" });
   });
 
-  // Bearer token auth — skip if MCP_SECRET is not configured
+  // OAuth routes (public — needed for the auth flow itself)
+  registerOAuthRoutes(app);
+
+  // Bearer token auth on /mcp — accepts MCP_SECRET or OAuth access tokens
   const secret = config.server.mcpSecret;
   app.use("/mcp", (req, res, next) => {
-    if (!secret) return next();
+    if (!secret && !config.server.oauthClientId) return next();
     const auth = req.headers.authorization;
-    if (auth === `Bearer ${secret}`) return next();
+    if (!auth || !auth.startsWith("Bearer ")) {
+      res.status(401).json({
+        jsonrpc: "2.0",
+        error: { code: -32600, message: "Unauthorized" },
+        id: null,
+      });
+      return;
+    }
+    const token = auth.slice(7);
+    if ((secret && token === secret) || isValidOAuthToken(token)) {
+      return next();
+    }
     res.status(401).json({
       jsonrpc: "2.0",
       error: { code: -32600, message: "Unauthorized" },
