@@ -29,6 +29,19 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
     res.json({ status: "ok" });
   });
 
+  // Bearer token auth — skip if MCP_SECRET is not configured
+  const secret = config.server.mcpSecret;
+  app.use("/mcp", (req, res, next) => {
+    if (!secret) return next();
+    const auth = req.headers.authorization;
+    if (auth === `Bearer ${secret}`) return next();
+    res.status(401).json({
+      jsonrpc: "2.0",
+      error: { code: -32600, message: "Unauthorized" },
+      id: null,
+    });
+  });
+
   // MCP endpoint — fresh server + transport per request (SDK requirement)
   app.post("/mcp", async (req, res) => {
     try {
