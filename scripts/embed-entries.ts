@@ -1,6 +1,9 @@
 import dotenv from "dotenv";
-if (process.env.NODE_ENV !== "production") {
-  dotenv.config({ path: process.env.NODE_ENV === "test" ? ".env.test" : ".env", override: true });
+if (process.env.NODE_ENV === "production") {
+  dotenv.config({ path: ".env" });
+  dotenv.config({ path: ".env.production.local", override: true });
+} else if (process.env.NODE_ENV !== "test") {
+  dotenv.config({ path: ".env", override: true });
 }
 import pg from "pg";
 import OpenAI from "openai";
@@ -14,7 +17,14 @@ const EMBEDDING_DIMENSIONS = 1536;
 const BATCH_SIZE = 100;
 const SLEEP_MS = 1000;
 
+function elapsed(start: bigint): string {
+  const ms = Number(process.hrtime.bigint() - start) / 1e6;
+  if (ms < 1000) return `${ms.toFixed(0)}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
 async function embedEntries(force: boolean): Promise<void> {
+  const t0 = process.hrtime.bigint();
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     console.error(
@@ -25,6 +35,11 @@ async function embedEntries(force: boolean): Promise<void> {
 
   const openai = new OpenAI({ apiKey });
   const pool = new pg.Pool({ connectionString: databaseUrl });
+
+  // Verify DB connection
+  const connTest = process.hrtime.bigint();
+  await pool.query("SELECT 1");
+  console.log(`PostgreSQL connected [ping: ${elapsed(connTest)}]`);
 
   // Get entries that need embedding
   const whereClause = force
@@ -41,11 +56,16 @@ async function embedEntries(force: boolean): Promise<void> {
     return;
   }
 
-  console.log(`Embedding ${totalCount} entries (batch size: ${BATCH_SIZE})...`);
+  const totalBatches = Math.ceil(totalCount / BATCH_SIZE);
+  console.log(`Embedding ${totalCount} entries (${totalBatches} batches of ${BATCH_SIZE})...`);
 
   let processed = 0;
+  let batchNum = 0;
 
   while (processed < totalCount) {
+    batchNum++;
+    const batchStart = process.hrtime.bigint();
+
     // Fetch batch (no OFFSET — completed rows drop out of the WHERE filter)
     const batch = await pool.query(
       `SELECT id, text FROM entries ${whereClause}
@@ -63,25 +83,36 @@ async function embedEntries(force: boolean): Promise<void> {
 
     try {
       // Generate embeddings
+      const apiStart = process.hrtime.bigint();
       const response = await openai.embeddings.create({
         model: EMBEDDING_MODEL,
         input: texts,
         dimensions: EMBEDDING_DIMENSIONS,
       });
+      const apiTime = elapsed(apiStart);
 
       const sorted = response.data.sort((a, b) => a.index - b.index);
 
-      // Update entries with embeddings
-      for (let i = 0; i < ids.length; i++) {
-        const embeddingStr = `[${sorted[i].embedding.join(",")}]`;
-        await pool.query(
-          "UPDATE entries SET embedding = $1::vector WHERE id = $2",
-          [embeddingStr, ids[i]]
-        );
-      }
+      // Batch update all entries in one query using unnest()
+      const dbStart = process.hrtime.bigint();
+      const embeddingStrs = sorted.map(
+        (d) => `[${d.embedding.join(",")}]`
+      );
+      await pool.query(
+        `UPDATE entries SET embedding = data.emb::vector
+         FROM unnest($1::int[], $2::text[]) AS data(id, emb)
+         WHERE entries.id = data.id`,
+        [ids, embeddingStrs]
+      );
+      const dbTime = elapsed(dbStart);
 
       processed += batch.rows.length;
-      console.log(`  ${processed}/${totalCount} embedded`);
+      const remaining = totalCount - processed;
+      const batchMs = Number(process.hrtime.bigint() - batchStart) / 1e6;
+      const etaMin = (remaining / BATCH_SIZE) * (batchMs + SLEEP_MS) / 60000;
+      console.log(
+        `  Batch ${batchNum}/${totalBatches}: ${processed}/${totalCount} [API: ${apiTime}, DB: ${dbTime}, ETA: ${etaMin.toFixed(1)}min]`
+      );
     } catch (err) {
       console.error(
         `  Error embedding batch at ${processed}: ${err instanceof Error ? err.message : err}`
@@ -96,7 +127,7 @@ async function embedEntries(force: boolean): Promise<void> {
     }
   }
 
-  console.log(`Done. Embedded ${processed} entries.`);
+  console.log(`Done. Embedded ${processed} entries. [${elapsed(t0)}]`);
   await pool.end();
 }
 

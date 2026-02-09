@@ -29,7 +29,9 @@
     "dev:db:logs": "docker compose logs -f db",
     "migrate": "tsx scripts/migrate.ts",
     "sync": "tsx scripts/sync-dayone.ts",
-    "embed": "tsx scripts/embed-entries.ts"
+    "sync:prod": "NODE_ENV=production tsx scripts/sync-dayone.ts --skip-media",
+    "embed": "tsx scripts/embed-entries.ts",
+    "embed:prod": "NODE_ENV=production tsx scripts/embed-entries.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.985.0",

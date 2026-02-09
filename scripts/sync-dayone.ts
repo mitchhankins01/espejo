@@ -1,6 +1,9 @@
 import dotenv from "dotenv";
-if (process.env.NODE_ENV !== "production") {
-  dotenv.config({ path: process.env.NODE_ENV === "test" ? ".env.test" : ".env", override: true });
+if (process.env.NODE_ENV === "production") {
+  dotenv.config({ path: ".env" });
+  dotenv.config({ path: ".env.production.local", override: true });
+} else if (process.env.NODE_ENV !== "test") {
+  dotenv.config({ path: ".env", override: true });
 }
 import Database from "better-sqlite3";
 import fs from "fs";
@@ -166,6 +169,7 @@ const databaseUrl =
   "postgresql://dev:dev@localhost:5434/journal_dev";
 
 const skipMedia = process.argv.includes("--skip-media");
+const SYNC_BATCH_SIZE = 50;
 
 function getSqlitePath(): string {
   const flagIdx = process.argv.indexOf("--sqlite-path");
@@ -191,7 +195,14 @@ function getSqlitePath(): string {
 // Main
 // ---------------------------------------------------------------------------
 
+function elapsed(start: bigint): string {
+  const ms = Number(process.hrtime.bigint() - start) / 1e6;
+  if (ms < 1000) return `${ms.toFixed(0)}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
 async function syncDayOne(): Promise<void> {
+  const t0 = process.hrtime.bigint();
   const sqlitePath = getSqlitePath();
   const dayOneDir = path.dirname(sqlitePath);
   console.log(`Reading from: ${sqlitePath}`);
@@ -225,7 +236,7 @@ async function syncDayOne(): Promise<void> {
     )
     .all() as EntryRow[];
 
-  console.log(`Found ${entries.length} entries in DayOne.sqlite`);
+  console.log(`Found ${entries.length} entries in DayOne.sqlite [${elapsed(t0)}]`);
 
   // Read all entry-tag relationships
   const tagRows = sqlite
@@ -263,8 +274,10 @@ async function syncDayOne(): Promise<void> {
   }
 
   sqlite.close();
+  console.log(`SQLite read complete [${elapsed(t0)}]`);
 
   // Connect to PostgreSQL
+  console.log(`Connecting to PostgreSQL...`);
   const pool = new pg.Pool({ connectionString: databaseUrl });
 
   // Initialize R2 client if uploading media
@@ -280,39 +293,54 @@ async function syncDayOne(): Promise<void> {
     console.log("Media upload skipped (--skip-media)");
   }
 
+  // Verify connection works before starting the loop
+  const connTest = process.hrtime.bigint();
+  await pool.query("SELECT 1");
+  console.log(`PostgreSQL connected [ping: ${elapsed(connTest)}]`);
+
   let synced = 0;
   let errors = 0;
   let mediaUploaded = 0;
   let mediaAlreadyInR2 = 0;
   let mediaNoData = 0;
+  const totalBatches = Math.ceil(entries.length / SYNC_BATCH_SIZE);
 
-  for (const entry of entries) {
+  for (let i = 0; i < entries.length; i += SYNC_BATCH_SIZE) {
+    const batch = entries.slice(i, i + SYNC_BATCH_SIZE);
+    const batchNum = Math.floor(i / SYNC_BATCH_SIZE) + 1;
+    const batchStart = process.hrtime.bigint();
+
     try {
-      const stats = await syncEntry(
+      const batchStats = await syncBatch(
         pool,
-        entry,
+        batch,
         tagsByEntry,
         attachmentsByEntry,
         r2Client,
         dayOneDir
       );
-      mediaUploaded += stats.uploaded;
-      mediaAlreadyInR2 += stats.skipped;
-      mediaNoData += stats.noData;
-      synced++;
-      if (synced % 100 === 0) {
-        console.log(`  Entries: ${synced}/${entries.length}...`);
-      }
+      mediaUploaded += batchStats.uploaded;
+      mediaAlreadyInR2 += batchStats.skipped;
+      mediaNoData += batchStats.noData;
+      synced += batch.length;
+
+      const batchMs = Number(process.hrtime.bigint() - batchStart) / 1e6;
+      const perEntry = batchMs / batch.length;
+      const remaining = entries.length - synced;
+      const etaMin = (remaining * perEntry) / 60000;
+      console.log(
+        `  Batch ${batchNum}/${totalBatches}: ${synced}/${entries.length} [${elapsed(batchStart)}, ~${perEntry.toFixed(0)}ms/entry, ETA: ${etaMin.toFixed(1)}min]`
+      );
     } catch (err) {
-      errors++;
+      errors += batch.length;
       console.error(
-        `  Error syncing ${entry.ZUUID}: ${err instanceof Error ? err.message : err}`
+        `  Error in batch ${batchNum}: ${err instanceof Error ? err.message : err}`
       );
     }
   }
 
   console.log(
-    `\nDone. Entries synced: ${synced}, Errors: ${errors}, Total: ${entries.length}`
+    `\nDone. Entries synced: ${synced}, Errors: ${errors}, Total: ${entries.length} [${elapsed(t0)}]`
   );
   if (r2Client) {
     console.log(
@@ -322,9 +350,9 @@ async function syncDayOne(): Promise<void> {
   await pool.end();
 }
 
-async function syncEntry(
+async function syncBatch(
   pool: pg.Pool,
-  entry: EntryRow,
+  batch: EntryRow[],
   tagsByEntry: Map<number, string[]>,
   attachmentsByEntry: Map<number, AttachmentRow[]>,
   r2Client: S3Client | null,
@@ -335,20 +363,90 @@ async function syncEntry(
   try {
     await client.query("BEGIN");
 
-    // Parse timezone from BLOB — it's a binary plist (NSKeyedArchiver)
-    // containing an IANA timezone name like "America/Los_Angeles"
-    let timezone: string | null = null;
-    if (entry.ZTIMEZONE) {
-      const raw =
-        entry.ZTIMEZONE instanceof Buffer
-          ? entry.ZTIMEZONE.toString("utf-8")
-          : String(entry.ZTIMEZONE);
-      const match = raw.match(/([A-Z][a-z]+(?:\/[A-Za-z_-]+[a-z])+)/);
-      timezone = match ? match[1] : sanitize(raw);
+    // --- 1. Prepare column arrays for batch entry upsert ---
+    const col = {
+      uuids: [] as string[],
+      texts: [] as (string | null)[],
+      richTexts: [] as (string | null)[],
+      createdAts: [] as (string | null)[],
+      modifiedAts: [] as (string | null)[],
+      timezones: [] as (string | null)[],
+      isAllDays: [] as boolean[],
+      isPinneds: [] as boolean[],
+      starreds: [] as boolean[],
+      editingTimes: [] as (number | null)[],
+      durations: [] as (number | null)[],
+      creationDevices: [] as (string | null)[],
+      deviceModels: [] as (string | null)[],
+      deviceTypes: [] as (string | null)[],
+      osNames: [] as (string | null)[],
+      osVersions: [] as (string | null)[],
+      latitudes: [] as (number | null)[],
+      longitudes: [] as (number | null)[],
+      cities: [] as (string | null)[],
+      countries: [] as (string | null)[],
+      placeNames: [] as (string | null)[],
+      adminAreas: [] as (string | null)[],
+      temperatures: [] as (number | null)[],
+      weatherConditions: [] as (string | null)[],
+      humidities: [] as (number | null)[],
+      moonPhases: [] as (number | null)[],
+      sunrises: [] as (string | null)[],
+      sunsets: [] as (string | null)[],
+      userActivities: [] as (string | null)[],
+      stepCounts: [] as (number | null)[],
+      templateNames: [] as (string | null)[],
+      sourceStrings: [] as (string | null)[],
+    };
+
+    for (const entry of batch) {
+      // Parse timezone from BLOB (binary plist with IANA name like "America/Los_Angeles")
+      let timezone: string | null = null;
+      if (entry.ZTIMEZONE) {
+        const raw =
+          entry.ZTIMEZONE instanceof Buffer
+            ? entry.ZTIMEZONE.toString("utf-8")
+            : String(entry.ZTIMEZONE);
+        const match = raw.match(/([A-Z][a-z]+(?:\/[A-Za-z_-]+[a-z])+)/);
+        timezone = match ? match[1] : sanitize(raw);
+      }
+
+      col.uuids.push(entry.ZUUID);
+      col.texts.push(entry.ZMARKDOWNTEXT ? normalizeText(entry.ZMARKDOWNTEXT) : null);
+      col.richTexts.push(sanitize(entry.ZRICHTEXTJSON ?? null));
+      col.createdAts.push(coreDataToIso(entry.ZCREATIONDATE));
+      col.modifiedAts.push(coreDataToIso(entry.ZMODIFIEDDATE));
+      col.timezones.push(timezone);
+      col.isAllDays.push(entry.ZISALLDAY === 1);
+      col.isPinneds.push(entry.ZISPINNED === 1);
+      col.starreds.push(entry.ZSTARRED === 1);
+      col.editingTimes.push(entry.ZEDITINGTIME ?? null);
+      col.durations.push(entry.ZDURATION ?? null);
+      col.creationDevices.push(sanitize(entry.ZCREATIONDEVICE ?? null));
+      col.deviceModels.push(sanitize(entry.ZCREATIONDEVICEMODEL ?? null));
+      col.deviceTypes.push(sanitize(entry.ZCREATIONDEVICETYPE ?? null));
+      col.osNames.push(sanitize(entry.ZCREATIONOSNAME ?? null));
+      col.osVersions.push(sanitize(entry.ZCREATIONOSVERSION ?? null));
+      col.latitudes.push(entry.ZLATITUDE ?? null);
+      col.longitudes.push(entry.ZLONGITUDE ?? null);
+      col.cities.push(sanitize(entry.ZLOCALITYNAME ?? null));
+      col.countries.push(sanitize(entry.ZCOUNTRY ?? null));
+      col.placeNames.push(sanitize(entry.ZPLACENAME ?? null));
+      col.adminAreas.push(sanitize(entry.ZADMINISTRATIVEAREA ?? null));
+      col.temperatures.push(entry.ZTEMPERATURECELSIUS ?? null);
+      col.weatherConditions.push(sanitize(entry.ZCONDITIONSDESCRIPTION ?? null));
+      col.humidities.push(entry.ZRELATIVEHUMIDITY ?? null);
+      col.moonPhases.push(entry.ZMOONPHASE ?? null);
+      col.sunrises.push(coreDataToIso(entry.ZSUNRISEDATE));
+      col.sunsets.push(coreDataToIso(entry.ZSUNSETDATE));
+      col.userActivities.push(sanitize(entry.ZACTIVITYNAME ?? null));
+      col.stepCounts.push(entry.ZSTEPCOUNT ?? null);
+      col.templateNames.push(sanitize(entry.ZTEMPLATETITLE ?? null));
+      col.sourceStrings.push(sanitize(entry.ZSOURCESTRING ?? null));
     }
 
-    // Upsert entry
-    const result = await client.query(
+    // --- 2. Batch upsert entries (1 query for all 50) ---
+    const entryResult = await client.query(
       `INSERT INTO entries (
         uuid, text, rich_text, created_at, modified_at, timezone,
         is_all_day, is_pinned, starred, editing_time, duration,
@@ -356,10 +454,28 @@ async function syncEntry(
         latitude, longitude, city, country, place_name, admin_area,
         temperature, weather_conditions, humidity, moon_phase, sunrise, sunset,
         user_activity, step_count, template_name, source_string
-      ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-        $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
-        $23, $24, $25, $26, $27, $28, $29, $30, $31, $32
+      )
+      SELECT
+        d_uuid, d_text, d_rich::jsonb, d_created, d_modified, d_tz,
+        d_allday, d_pinned, d_starred, d_edittime, d_dur,
+        d_cdev, d_dmodel, d_dtype, d_os, d_osver,
+        d_lat, d_lon, d_city, d_country, d_place, d_admin,
+        d_temp, d_weather, d_humid, d_moon, d_sunrise, d_sunset,
+        d_activity, d_steps, d_template, d_source
+      FROM unnest(
+        $1::text[], $2::text[], $3::text[], $4::timestamptz[], $5::timestamptz[], $6::text[],
+        $7::boolean[], $8::boolean[], $9::boolean[], $10::float8[], $11::int[],
+        $12::text[], $13::text[], $14::text[], $15::text[], $16::text[],
+        $17::float8[], $18::float8[], $19::text[], $20::text[], $21::text[], $22::text[],
+        $23::float8[], $24::text[], $25::float8[], $26::float8[], $27::timestamptz[], $28::timestamptz[],
+        $29::text[], $30::int[], $31::text[], $32::text[]
+      ) AS d(
+        d_uuid, d_text, d_rich, d_created, d_modified, d_tz,
+        d_allday, d_pinned, d_starred, d_edittime, d_dur,
+        d_cdev, d_dmodel, d_dtype, d_os, d_osver,
+        d_lat, d_lon, d_city, d_country, d_place, d_admin,
+        d_temp, d_weather, d_humid, d_moon, d_sunrise, d_sunset,
+        d_activity, d_steps, d_template, d_source
       )
       ON CONFLICT (uuid) DO UPDATE SET
         text = EXCLUDED.text,
@@ -392,128 +508,157 @@ async function syncEntry(
         step_count = EXCLUDED.step_count,
         template_name = EXCLUDED.template_name,
         source_string = EXCLUDED.source_string
-      RETURNING id`,
+      RETURNING id, uuid`,
       [
-        entry.ZUUID,
-        entry.ZMARKDOWNTEXT ? normalizeText(entry.ZMARKDOWNTEXT) : null,
-        sanitize(entry.ZRICHTEXTJSON ?? null),
-        coreDataToIso(entry.ZCREATIONDATE),
-        coreDataToIso(entry.ZMODIFIEDDATE),
-        timezone,
-        entry.ZISALLDAY === 1,
-        entry.ZISPINNED === 1,
-        entry.ZSTARRED === 1,
-        entry.ZEDITINGTIME ?? null,
-        entry.ZDURATION ?? null,
-        sanitize(entry.ZCREATIONDEVICE ?? null),
-        sanitize(entry.ZCREATIONDEVICEMODEL ?? null),
-        sanitize(entry.ZCREATIONDEVICETYPE ?? null),
-        sanitize(entry.ZCREATIONOSNAME ?? null),
-        sanitize(entry.ZCREATIONOSVERSION ?? null),
-        entry.ZLATITUDE ?? null,
-        entry.ZLONGITUDE ?? null,
-        sanitize(entry.ZLOCALITYNAME ?? null),
-        sanitize(entry.ZCOUNTRY ?? null),
-        sanitize(entry.ZPLACENAME ?? null),
-        sanitize(entry.ZADMINISTRATIVEAREA ?? null),
-        entry.ZTEMPERATURECELSIUS ?? null,
-        sanitize(entry.ZCONDITIONSDESCRIPTION ?? null),
-        entry.ZRELATIVEHUMIDITY ?? null,
-        entry.ZMOONPHASE ?? null,
-        coreDataToIso(entry.ZSUNRISEDATE),
-        coreDataToIso(entry.ZSUNSETDATE),
-        sanitize(entry.ZACTIVITYNAME ?? null),
-        entry.ZSTEPCOUNT ?? null,
-        sanitize(entry.ZTEMPLATETITLE ?? null),
-        sanitize(entry.ZSOURCESTRING ?? null),
+        col.uuids, col.texts, col.richTexts, col.createdAts, col.modifiedAts, col.timezones,
+        col.isAllDays, col.isPinneds, col.starreds, col.editingTimes, col.durations,
+        col.creationDevices, col.deviceModels, col.deviceTypes, col.osNames, col.osVersions,
+        col.latitudes, col.longitudes, col.cities, col.countries, col.placeNames, col.adminAreas,
+        col.temperatures, col.weatherConditions, col.humidities, col.moonPhases, col.sunrises, col.sunsets,
+        col.userActivities, col.stepCounts, col.templateNames, col.sourceStrings,
       ]
     );
 
-    const entryId = result.rows[0].id as number;
+    // Build uuid → id map
+    const idMap = new Map<string, number>();
+    for (const row of entryResult.rows) {
+      idMap.set(row.uuid as string, row.id as number);
+    }
+    const entryIds = entryResult.rows.map((r) => r.id as number);
 
-    // Clear existing tag associations
-    await client.query("DELETE FROM entry_tags WHERE entry_id = $1", [entryId]);
+    // --- 3. Batch delete old tag associations (1 query) ---
+    await client.query(
+      `DELETE FROM entry_tags WHERE entry_id = ANY($1::int[])`,
+      [entryIds]
+    );
 
-    // Upsert tags
-    const tags = tagsByEntry.get(entry.Z_PK) || [];
-    for (const tag of tags) {
-      await client.query(
-        "INSERT INTO tags (name) VALUES ($1) ON CONFLICT (name) DO NOTHING",
-        [tag]
-      );
-      const tagResult = await client.query(
-        "SELECT id FROM tags WHERE name = $1",
-        [tag]
-      );
-      const tagId = tagResult.rows[0].id as number;
-      await client.query(
-        "INSERT INTO entry_tags (entry_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-        [entryId, tagId]
-      );
+    // --- 4. Batch upsert tags + entry_tags (3 queries) ---
+    const allTagNames = new Set<string>();
+    for (const entry of batch) {
+      const tags = tagsByEntry.get(entry.Z_PK) || [];
+      for (const t of tags) allTagNames.add(t);
     }
 
-    // Clear existing media
-    await client.query("DELETE FROM media WHERE entry_id = $1", [entryId]);
+    if (allTagNames.size > 0) {
+      const tagArr = Array.from(allTagNames);
+      await client.query(
+        `INSERT INTO tags (name) SELECT unnest($1::text[]) ON CONFLICT (name) DO NOTHING`,
+        [tagArr]
+      );
+      const tagResult = await client.query(
+        `SELECT id, name FROM tags WHERE name = ANY($1::text[])`,
+        [tagArr]
+      );
+      const tagIdMap = new Map<string, number>();
+      for (const row of tagResult.rows) {
+        tagIdMap.set(row.name as string, row.id as number);
+      }
 
-    // Insert attachments and upload to R2
-    const attachments = attachmentsByEntry.get(entry.Z_PK) || [];
-    for (const att of attachments) {
-      const mediaType = mapMediaType(att.ZTYPE);
-      if (!mediaType) continue;
-
-      const dimensions =
-        att.ZWIDTH && att.ZHEIGHT
-          ? JSON.stringify({ width: att.ZWIDTH, height: att.ZHEIGHT })
-          : null;
-      const cameraInfo =
-        att.ZCAMERAMAKE || att.ZCAMERAMODEL
-          ? JSON.stringify({ make: att.ZCAMERAMAKE, model: att.ZCAMERAMODEL })
-          : null;
-
-      let storageKey: string | null = null;
-      let url: string | null = null;
-
-      // Upload to R2 if client is available, file has data, and md5 exists
-      if (r2Client && att.ZMD5) {
-        if (!att.ZHASDATA) {
-          stats.noData++;
-        } else {
-          const ext = getFileExtension(att);
-          storageKey = buildStorageKey(mediaType, att.ZMD5, ext);
-
-          const alreadyUploaded = await mediaExists(r2Client, storageKey);
-          if (alreadyUploaded) {
-            url = getPublicUrl(storageKey);
-            stats.skipped++;
-          } else {
-            const dir = dayOneMediaDir(mediaType);
-            const localPath = path.join(dayOneDir, dir, `${att.ZMD5}.${ext}`);
-
-            if (fs.existsSync(localPath)) {
-              url = await uploadMedia(r2Client, localPath, storageKey);
-              stats.uploaded++;
-            } else {
-              console.warn(`  File not found: ${localPath}`);
-              storageKey = null;
-            }
-          }
+      const etEntryIds: number[] = [];
+      const etTagIds: number[] = [];
+      for (const entry of batch) {
+        const entryId = idMap.get(entry.ZUUID)!;
+        const tags = tagsByEntry.get(entry.Z_PK) || [];
+        for (const tag of tags) {
+          etEntryIds.push(entryId);
+          etTagIds.push(tagIdMap.get(tag)!);
         }
       }
 
+      if (etEntryIds.length > 0) {
+        await client.query(
+          `INSERT INTO entry_tags (entry_id, tag_id)
+           SELECT * FROM unnest($1::int[], $2::int[])
+           ON CONFLICT DO NOTHING`,
+          [etEntryIds, etTagIds]
+        );
+      }
+    }
+
+    // --- 5. Batch delete old media (1 query) ---
+    await client.query(
+      `DELETE FROM media WHERE entry_id = ANY($1::int[])`,
+      [entryIds]
+    );
+
+    // --- 6. Collect + batch insert media (1 query) ---
+    const med = {
+      entryIds: [] as number[],
+      types: [] as string[],
+      md5s: [] as (string | null)[],
+      fileSizes: [] as (number | null)[],
+      dimensions: [] as (string | null)[],
+      durations: [] as (number | null)[],
+      cameraInfos: [] as (string | null)[],
+      storageKeys: [] as (string | null)[],
+      urls: [] as (string | null)[],
+    };
+
+    for (const entry of batch) {
+      const entryId = idMap.get(entry.ZUUID)!;
+      const attachments = attachmentsByEntry.get(entry.Z_PK) || [];
+      for (const att of attachments) {
+        const mediaType = mapMediaType(att.ZTYPE);
+        if (!mediaType) continue;
+
+        const dims =
+          att.ZWIDTH && att.ZHEIGHT
+            ? JSON.stringify({ width: att.ZWIDTH, height: att.ZHEIGHT })
+            : null;
+        const camInfo =
+          att.ZCAMERAMAKE || att.ZCAMERAMODEL
+            ? JSON.stringify({ make: att.ZCAMERAMAKE, model: att.ZCAMERAMODEL })
+            : null;
+
+        let storageKey: string | null = null;
+        let url: string | null = null;
+
+        if (r2Client && att.ZMD5) {
+          if (!att.ZHASDATA) {
+            stats.noData++;
+          } else {
+            const ext = getFileExtension(att);
+            storageKey = buildStorageKey(mediaType, att.ZMD5, ext);
+            const alreadyUploaded = await mediaExists(r2Client, storageKey);
+            if (alreadyUploaded) {
+              url = getPublicUrl(storageKey);
+              stats.skipped++;
+            } else {
+              const dir = dayOneMediaDir(mediaType);
+              const localPath = path.join(dayOneDir, dir, `${att.ZMD5}.${ext}`);
+              if (fs.existsSync(localPath)) {
+                url = await uploadMedia(r2Client, localPath, storageKey);
+                stats.uploaded++;
+              } else {
+                console.warn(`  File not found: ${localPath}`);
+                storageKey = null;
+              }
+            }
+          }
+        }
+
+        med.entryIds.push(entryId);
+        med.types.push(mediaType);
+        med.md5s.push(att.ZMD5 ?? null);
+        med.fileSizes.push(att.ZFILESIZE ?? null);
+        med.dimensions.push(dims);
+        med.durations.push(att.ZDURATION ?? null);
+        med.cameraInfos.push(camInfo);
+        med.storageKeys.push(storageKey);
+        med.urls.push(url);
+      }
+    }
+
+    if (med.entryIds.length > 0) {
       await client.query(
         `INSERT INTO media (entry_id, type, md5, file_size, dimensions, duration, camera_info, storage_key, url)
-         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8, $9)`,
-        [
-          entryId,
-          mediaType,
-          att.ZMD5 ?? null,
-          att.ZFILESIZE ?? null,
-          dimensions,
-          att.ZDURATION ?? null,
-          cameraInfo,
-          storageKey,
-          url,
-        ]
+         SELECT me, mt, mm, mf, md::jsonb, mdu, mc::jsonb, ms, mu
+         FROM unnest(
+           $1::int[], $2::text[], $3::text[], $4::int[], $5::text[],
+           $6::float8[], $7::text[], $8::text[], $9::text[]
+         ) AS t(me, mt, mm, mf, md, mdu, mc, ms, mu)`,
+        [med.entryIds, med.types, med.md5s, med.fileSizes, med.dimensions,
+         med.durations, med.cameraInfos, med.storageKeys, med.urls]
       );
     }
 
