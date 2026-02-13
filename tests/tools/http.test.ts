@@ -120,6 +120,132 @@ describe("startHttpServer", () => {
     );
   });
 
+  it("auth middleware skips when no secret or oauthClientId configured", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const authCall = mockApp.use.mock.calls.find(
+      (c: any[]) => c[0] === "/mcp"
+    );
+    const authMiddleware = authCall![1];
+
+    const mockReq = { headers: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+    const mockNext = vi.fn();
+
+    authMiddleware(mockReq, mockRes, mockNext);
+
+    expect(mockNext).toHaveBeenCalled();
+    expect(mockRes.status).not.toHaveBeenCalled();
+  });
+
+  it("auth middleware rejects missing bearer token when secret is set", async () => {
+    const { config } = await import("../../src/config.js");
+    (config as any).server.mcpSecret = "test-secret";
+
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const authCall = mockApp.use.mock.calls.find(
+      (c: any[]) => c[0] === "/mcp"
+    );
+    const authMiddleware = authCall![1];
+
+    const mockReq = { headers: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+    const mockNext = vi.fn();
+
+    authMiddleware(mockReq, mockRes, mockNext);
+
+    expect(mockNext).not.toHaveBeenCalled();
+    expect(mockRes.status).toHaveBeenCalledWith(401);
+
+    (config as any).server.mcpSecret = "";
+  });
+
+  it("auth middleware accepts valid secret token", async () => {
+    const { config } = await import("../../src/config.js");
+    (config as any).server.mcpSecret = "test-secret";
+
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const authCall = mockApp.use.mock.calls.find(
+      (c: any[]) => c[0] === "/mcp"
+    );
+    const authMiddleware = authCall![1];
+
+    const mockReq = { headers: { authorization: "Bearer test-secret" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+    const mockNext = vi.fn();
+
+    authMiddleware(mockReq, mockRes, mockNext);
+
+    expect(mockNext).toHaveBeenCalled();
+
+    (config as any).server.mcpSecret = "";
+  });
+
+  it("auth middleware rejects invalid token", async () => {
+    const { config } = await import("../../src/config.js");
+    (config as any).server.mcpSecret = "test-secret";
+
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const authCall = mockApp.use.mock.calls.find(
+      (c: any[]) => c[0] === "/mcp"
+    );
+    const authMiddleware = authCall![1];
+
+    const mockReq = { headers: { authorization: "Bearer wrong-token" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+    const mockNext = vi.fn();
+
+    authMiddleware(mockReq, mockRes, mockNext);
+
+    expect(mockNext).not.toHaveBeenCalled();
+    expect(mockRes.status).toHaveBeenCalledWith(401);
+
+    (config as any).server.mcpSecret = "";
+  });
+
+  it("MCP endpoint returns 500 on error", async () => {
+    const mockConnect = vi.fn().mockRejectedValue(new Error("connection failed"));
+    const mockFactory = vi.fn(() => ({ connect: mockConnect }));
+    await startHttpServer(mockFactory as any);
+
+    const mcpCall = mockApp.post.mock.calls.find(
+      (c: any[]) => c[0] === "/mcp"
+    );
+    const mcpHandler = mcpCall![1];
+    const mockReq = { body: {} };
+    const mockRes = { headersSent: false, status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await mcpHandler(mockReq, mockRes);
+
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+    expect(mockRes.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jsonrpc: "2.0",
+        error: expect.objectContaining({ code: -32603 }),
+      })
+    );
+  });
+
+  it("MCP endpoint skips response if headers already sent", async () => {
+    const mockConnect = vi.fn().mockRejectedValue(new Error("oops"));
+    const mockFactory = vi.fn(() => ({ connect: mockConnect }));
+    await startHttpServer(mockFactory as any);
+
+    const mcpCall = mockApp.post.mock.calls.find(
+      (c: any[]) => c[0] === "/mcp"
+    );
+    const mcpHandler = mcpCall![1];
+    const mockReq = { body: {} };
+    const mockRes = { headersSent: true, status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await mcpHandler(mockReq, mockRes);
+
+    expect(mockRes.status).not.toHaveBeenCalled();
+  });
+
   it("CORS middleware sets headers for non-OPTIONS requests", async () => {
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
 
