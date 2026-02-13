@@ -1,7 +1,7 @@
 import type pg from "pg";
 import { validateToolInput } from "../../specs/tools.spec.js";
 import { findSimilarEntries } from "../db/queries.js";
-import { formatSimilarResults } from "../formatters/search-results.js";
+import { toSimilarResult } from "../formatters/mappers.js";
 
 export async function handleFindSimilar(
   pool: pg.Pool,
@@ -9,7 +9,11 @@ export async function handleFindSimilar(
 ): Promise<string> {
   const params = validateToolInput("find_similar", input);
 
-  const results = await findSimilarEntries(pool, params.uuid, params.limit);
+  const rows = await findSimilarEntries(pool, params.uuid, params.limit);
 
-  return formatSimilarResults(results);
+  if (rows.length === 0) {
+    return "No similar entries found. The source entry may not have an embedding.";
+  }
+
+  return JSON.stringify(rows.map(toSimilarResult), null, 2);
 }

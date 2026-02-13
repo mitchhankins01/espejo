@@ -3,7 +3,8 @@ import {
   formatSearchResults,
   formatSimilarResults,
 } from "../../src/formatters/search-results.js";
-import type { SearchResultRow, SimilarResultRow } from "../../src/db/queries.js";
+import { toSearchResult, toSimilarResult, toTagCount } from "../../src/formatters/mappers.js";
+import type { SearchResultRow, SimilarResultRow, TagCountRow } from "../../src/db/queries.js";
 
 function makeSearchResult(
   overrides: Partial<SearchResultRow> = {}
@@ -177,5 +178,87 @@ describe("formatSimilarResults", () => {
       makeSimilarResult({ preview: null as unknown as string }),
     ]);
     expect(result).toContain("TEST-UUID");
+  });
+});
+
+// ============================================================================
+// Mapper tests
+// ============================================================================
+
+describe("toSearchResult", () => {
+  it("maps basic fields and converts date to ISO string", () => {
+    const result = toSearchResult(makeSearchResult());
+    expect(result).toMatchObject({
+      uuid: "TEST-UUID",
+      created_at: "2024-03-15T09:30:00.000Z",
+      preview: "This is a preview of the entry content...",
+      starred: false,
+      tags: [],
+      rrf_score: 0.032,
+    });
+  });
+
+  it("maps has_semantic/has_fulltext to match_sources array", () => {
+    const both = toSearchResult(
+      makeSearchResult({ has_semantic: true, has_fulltext: true })
+    );
+    expect(both.match_sources).toEqual(["semantic", "fulltext"]);
+
+    const semanticOnly = toSearchResult(
+      makeSearchResult({ has_semantic: true, has_fulltext: false })
+    );
+    expect(semanticOnly.match_sources).toEqual(["semantic"]);
+
+    const fulltextOnly = toSearchResult(
+      makeSearchResult({ has_semantic: false, has_fulltext: true })
+    );
+    expect(fulltextOnly.match_sources).toEqual(["fulltext"]);
+  });
+
+  it("includes city when present", () => {
+    const result = toSearchResult(makeSearchResult({ city: "Barcelona" }));
+    expect(result.city).toBe("Barcelona");
+  });
+
+  it("omits city when null", () => {
+    const result = toSearchResult(makeSearchResult()) as Record<string, unknown>;
+    expect(result).not.toHaveProperty("city");
+  });
+
+  it("strips DB-only fields (id)", () => {
+    const result = toSearchResult(makeSearchResult()) as Record<string, unknown>;
+    expect(result).not.toHaveProperty("id");
+    expect(result).not.toHaveProperty("has_semantic");
+    expect(result).not.toHaveProperty("has_fulltext");
+  });
+});
+
+describe("toSimilarResult", () => {
+  it("maps basic fields", () => {
+    const result = toSimilarResult(makeSimilarResult());
+    expect(result).toMatchObject({
+      uuid: "TEST-UUID",
+      created_at: "2024-03-15T09:30:00.000Z",
+      preview: "This is a preview...",
+      tags: [],
+      similarity_score: 0.85,
+    });
+  });
+
+  it("includes city when present", () => {
+    const result = toSimilarResult(makeSimilarResult({ city: "Madrid" }));
+    expect(result.city).toBe("Madrid");
+  });
+
+  it("omits city when null", () => {
+    const result = toSimilarResult(makeSimilarResult()) as Record<string, unknown>;
+    expect(result).not.toHaveProperty("city");
+  });
+});
+
+describe("toTagCount", () => {
+  it("maps name and count", () => {
+    const row: TagCountRow = { name: "work", count: 42 };
+    expect(toTagCount(row)).toEqual({ name: "work", count: 42 });
   });
 });

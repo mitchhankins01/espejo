@@ -2,7 +2,7 @@ import type pg from "pg";
 import { validateToolInput } from "../../specs/tools.spec.js";
 import { searchEntries } from "../db/queries.js";
 import { generateEmbedding } from "../db/embeddings.js";
-import { formatSearchResults } from "../formatters/search-results.js";
+import { toSearchResult } from "../formatters/mappers.js";
 
 export async function handleSearchEntries(
   pool: pg.Pool,
@@ -12,7 +12,7 @@ export async function handleSearchEntries(
 
   const embedding = await generateEmbedding(params.query);
 
-  const results = await searchEntries(
+  const rows = await searchEntries(
     pool,
     embedding,
     params.query,
@@ -26,5 +26,9 @@ export async function handleSearchEntries(
     params.limit
   );
 
-  return formatSearchResults(results);
+  if (rows.length === 0) {
+    return "No results found. Try broadening your search query or adjusting filters.";
+  }
+
+  return JSON.stringify(rows.map(toSearchResult), null, 2);
 }

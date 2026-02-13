@@ -1,7 +1,7 @@
 import type pg from "pg";
 import { validateToolInput } from "../../specs/tools.spec.js";
 import { getEntryByUuid } from "../db/queries.js";
-import { formatEntry } from "../formatters/entry.js";
+import { toEntryResult } from "../formatters/mappers.js";
 
 export async function handleGetEntry(
   pool: pg.Pool,
@@ -15,5 +15,5 @@ export async function handleGetEntry(
     return `No entry found with UUID "${params.uuid}". Check that the UUID is correct.`;
   }
 
-  return formatEntry(entry);
+  return JSON.stringify(toEntryResult(entry), null, 2);
 }

@@ -1,7 +1,7 @@
 import type pg from "pg";
 import { validateToolInput } from "../../specs/tools.spec.js";
 import { getEntriesByDateRange } from "../db/queries.js";
-import { formatEntryList } from "../formatters/entry.js";
+import { toEntryResult } from "../formatters/mappers.js";
 
 export async function handleGetEntriesByDate(
   pool: pg.Pool,
@@ -20,5 +20,5 @@ export async function handleGetEntriesByDate(
     return `No entries found between ${params.date_from} and ${params.date_to}.`;
   }
 
-  return formatEntryList(entries);
+  return JSON.stringify(entries.map(toEntryResult), null, 2);
 }

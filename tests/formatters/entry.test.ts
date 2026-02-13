@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { formatEntry, formatEntryList, getWordCount } from "../../src/formatters/entry.js";
-import type { EntryRow } from "../../src/db/queries.js";
+import { toEntryResult, toEntryStats } from "../../src/formatters/mappers.js";
+import type { EntryRow, EntryStatsRow } from "../../src/db/queries.js";
 
 function makeEntry(overrides: Partial<EntryRow> = {}): EntryRow {
   return {
@@ -178,5 +179,139 @@ describe("getWordCount", () => {
 
   it("handles multiple spaces", () => {
     expect(getWordCount("hello   world")).toBe(2);
+  });
+});
+
+// ============================================================================
+// Mapper tests
+// ============================================================================
+
+describe("toEntryResult", () => {
+  it("maps basic fields and computes word_count", () => {
+    const result = toEntryResult(makeEntry());
+    expect(result).toMatchObject({
+      uuid: "TEST-UUID",
+      created_at: "2024-03-15T09:30:00.000Z",
+      text: "This is a test entry with some content.",
+      starred: false,
+      is_pinned: false,
+      tags: [],
+      media_counts: { photos: 0, videos: 0, audios: 0 },
+      word_count: 8,
+    });
+  });
+
+  it("strips DB-only fields (id, modified_at, is_all_day, admin_area)", () => {
+    const result = toEntryResult(makeEntry()) as Record<string, unknown>;
+    expect(result).not.toHaveProperty("id");
+    expect(result).not.toHaveProperty("modified_at");
+    expect(result).not.toHaveProperty("is_all_day");
+    expect(result).not.toHaveProperty("admin_area");
+  });
+
+  it("includes optional location fields when present", () => {
+    const result = toEntryResult(
+      makeEntry({
+        city: "Barcelona",
+        country: "Spain",
+        place_name: "Eixample",
+        latitude: 41.39,
+        longitude: 2.17,
+        timezone: "Europe/Madrid",
+      })
+    );
+    expect(result.city).toBe("Barcelona");
+    expect(result.country).toBe("Spain");
+    expect(result.place_name).toBe("Eixample");
+    expect(result.latitude).toBe(41.39);
+    expect(result.longitude).toBe(2.17);
+    expect(result.timezone).toBe("Europe/Madrid");
+  });
+
+  it("omits optional fields when null", () => {
+    const result = toEntryResult(makeEntry()) as Record<string, unknown>;
+    expect(result).not.toHaveProperty("city");
+    expect(result).not.toHaveProperty("country");
+    expect(result).not.toHaveProperty("weather");
+    expect(result).not.toHaveProperty("activity");
+    expect(result).not.toHaveProperty("template_name");
+    expect(result).not.toHaveProperty("editing_time");
+  });
+
+  it("nests weather object when weather fields are present", () => {
+    const result = toEntryResult(
+      makeEntry({
+        temperature: 18,
+        weather_conditions: "Partly Cloudy",
+        humidity: 65,
+      })
+    );
+    expect(result.weather).toEqual({
+      temperature: 18,
+      conditions: "Partly Cloudy",
+      humidity: 65,
+    });
+  });
+
+  it("nests activity object when activity fields are present", () => {
+    const result = toEntryResult(
+      makeEntry({ user_activity: "Walking", step_count: 5000 })
+    );
+    expect(result.activity).toEqual({
+      name: "Walking",
+      step_count: 5000,
+    });
+  });
+
+  it("maps media counts correctly", () => {
+    const result = toEntryResult(
+      makeEntry({ photo_count: 3, video_count: 1, audio_count: 2 })
+    );
+    expect(result.media_counts).toEqual({
+      photos: 3,
+      videos: 1,
+      audios: 2,
+    });
+  });
+
+  it("includes template_name and editing_time when present", () => {
+    const result = toEntryResult(
+      makeEntry({ template_name: "5 Minute AM", editing_time: 120 })
+    );
+    expect(result.template_name).toBe("5 Minute AM");
+    expect(result.editing_time).toBe(120);
+  });
+});
+
+describe("toEntryStats", () => {
+  it("maps all stats fields", () => {
+    const row: EntryStatsRow = {
+      total_entries: 100,
+      first_entry: new Date("2023-01-01"),
+      last_entry: new Date("2024-12-31"),
+      avg_word_count: 250,
+      total_word_count: 25000,
+      entries_by_dow: { Monday: 20, Tuesday: 15 },
+      entries_by_month: { January: 10, February: 8 },
+      avg_entries_per_week: 3.5,
+      longest_streak_days: 14,
+      current_streak_days: 3,
+    };
+
+    const result = toEntryStats(row);
+    expect(result).toEqual({
+      total_entries: 100,
+      date_range: {
+        first: "2023-01-01T00:00:00.000Z",
+        last: "2024-12-31T00:00:00.000Z",
+      },
+      avg_word_count: 250,
+      total_word_count: 25000,
+      entries_by_day_of_week: { Monday: 20, Tuesday: 15 },
+      entries_by_month: { January: 10, February: 8 },
+      avg_entries_per_week: 3.5,
+      longest_streak_days: 14,
+      current_streak_days: 3,
+    });
   });
 });

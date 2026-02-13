@@ -1,5 +1,6 @@
 import type pg from "pg";
 import { listTags } from "../db/queries.js";
+import { toTagCount } from "../formatters/mappers.js";
 
 export async function handleListTags(
   pool: pg.Pool,
@@ -11,14 +12,5 @@ export async function handleListTags(
     return "No tags found in the journal.";
   }
 
-  const lines: string[] = [];
-  lines.push(`Found ${tags.length} tag${tags.length > 1 ? "s" : ""}:\n`);
-
-  for (const tag of tags) {
-    lines.push(
-      `  \uD83C\uDFF7\uFE0F ${tag.name} (${tag.count} entr${tag.count > 1 ? "ies" : "y"})`
-    );
-  }
-
-  return lines.join("\n");
+  return JSON.stringify(tags.map(toTagCount), null, 2);
 }

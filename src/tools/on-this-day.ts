@@ -1,7 +1,7 @@
 import type pg from "pg";
 import { validateToolInput } from "../../specs/tools.spec.js";
 import { getEntriesOnThisDay } from "../db/queries.js";
-import { formatEntryList } from "../formatters/entry.js";
+import { toEntryResult } from "../formatters/mappers.js";
 
 export async function handleOnThisDay(
   pool: pg.Pool,
@@ -19,10 +19,5 @@ export async function handleOnThisDay(
     return `No entries found for ${params.month_day} across any year.`;
   }
 
-  const years = entries.map((e) =>
-    new Date(e.created_at).getFullYear().toString()
-  );
-  const header = `Found ${entries.length} entr${entries.length > 1 ? "ies" : "y"} on ${params.month_day} across ${[...new Set(years)].length} year${[...new Set(years)].length > 1 ? "s" : ""}:\n\n`;
-
-  return header + formatEntryList(entries);
+  return JSON.stringify(entries.map(toEntryResult), null, 2);
 }

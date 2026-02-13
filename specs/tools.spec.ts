@@ -120,7 +120,8 @@ export const toolSpecs = {
     description:
       "Hybrid semantic + keyword search across journal entries using Reciprocal Rank Fusion (BM25 full-text + vector cosine similarity). " +
       "Finds entries by meaning even when exact words don't match. " +
-      "Supports optional filtering by date range, tags, city, and starred status.",
+      "Supports optional filtering by date range, tags, city, and starred status. " +
+      "Entries often contain somatic check-ins, sleep/readiness scores, and body-state reflections that can be cross-referenced with health and biometric data.",
     params: z.object({
       query: z
         .string()
@@ -172,7 +173,8 @@ export const toolSpecs = {
   get_entry: {
     name: "get_entry" as const,
     description:
-      "Get a single journal entry by its UUID with full text, all metadata, tags, weather, location, and media counts.",
+      "Get a single journal entry by its UUID with full text, all metadata, tags, weather, location, and media counts. " +
+      "Returns structured data including nested weather, activity, and location objects.",
     params: z.object({
       uuid: z.string().min(1).describe("The unique entry identifier"),
     }),
@@ -188,7 +190,8 @@ export const toolSpecs = {
   get_entries_by_date: {
     name: "get_entries_by_date" as const,
     description:
-      "Get all entries within a date range, ordered chronologically. Use for reviewing a specific period.",
+      "Get all entries within a date range, ordered chronologically. Use for reviewing a specific period. " +
+      "Entries include somatic reflections and self-reported health data — consider cross-referencing with biometric sources for a complete picture.",
     params: z.object({
       date_from: dateString.describe("Start of date range, inclusive"),
       date_to: dateString.describe("End of date range, inclusive"),
@@ -214,7 +217,8 @@ export const toolSpecs = {
     name: "on_this_day" as const,
     description:
       "Find entries written on a specific calendar day (MM-DD) across all years. " +
-      "Great for year-over-year reflection and seeing how your thinking has evolved.",
+      "Great for year-over-year reflection and seeing how your thinking has evolved. " +
+      "Returns full entry data including weather, activity, and health reflections.",
     params: z.object({
       month_day: monthDayString.describe(
         "Month and day to search across all years, e.g. '03-15' for March 15th"
