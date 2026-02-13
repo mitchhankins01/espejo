@@ -14,3 +14,4 @@ Journal.json
 *.sqlite-shm
 *.sqlite-wal
 .claude/
+.svelte-kit/
