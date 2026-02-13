@@ -4,15 +4,13 @@ if (process.env.NODE_ENV !== "production") {
   dotenv.config({ path: process.env.NODE_ENV === "test" ? ".env.test" : ".env", override: true });
 }
 import { readFileSync } from "fs";
-import { dirname, resolve } from "path";
-import { fileURLToPath } from "url";
+import { resolve } from "path";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { pool } from "./db/client.js";
 import { createServer } from "./server.js";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(
-  readFileSync(resolve(__dirname, "..", "package.json"), "utf-8")
+  readFileSync(resolve(process.cwd(), "package.json"), "utf-8")
 );
 const VERSION: string = pkg.version;
 
