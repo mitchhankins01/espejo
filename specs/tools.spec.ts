@@ -73,16 +73,10 @@ export interface EntryResult {
   word_count: number;
 }
 
-export interface SearchResult {
-  uuid: string;
-  created_at: string;
-  preview: string;
-  city?: string;
-  starred: boolean;
-  tags: string[];
+export type SearchResult = EntryResult & {
   rrf_score: number;
   match_sources: ("semantic" | "fulltext")[];
-}
+};
 
 export interface TagCount {
   name: string;
@@ -101,14 +95,9 @@ export interface EntryStats {
   current_streak_days: number;
 }
 
-export interface SimilarResult {
-  uuid: string;
-  created_at: string;
-  preview: string;
-  city?: string;
-  tags: string[];
+export type SimilarResult = EntryResult & {
   similarity_score: number;
-}
+};
 
 // ============================================================================
 // Tool definitions

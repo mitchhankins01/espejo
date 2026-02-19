@@ -35,7 +35,7 @@ export function formatSearchResults(results: SearchResultRow[]): string {
       lines.push(`   \uD83C\uDFF7\uFE0F ${r.tags.join(", ")}`);
     }
 
-    const preview = r.preview ? r.preview.replace(/\n/g, " ").trim() : "";
+    const preview = r.text ? r.text.replace(/\n/g, " ").trim() : "";
     if (preview) {
       const truncated = preview.length > 200 ? preview.slice(0, 200) + "..." : preview;
       lines.push(`   ${truncated}`);
@@ -80,7 +80,7 @@ export function formatSimilarResults(results: SimilarResultRow[]): string {
       lines.push(`   \uD83C\uDFF7\uFE0F ${r.tags.join(", ")}`);
     }
 
-    const preview = r.preview ? r.preview.replace(/\n/g, " ").trim() : "";
+    const preview = r.text ? r.text.replace(/\n/g, " ").trim() : "";
     if (preview) {
       const truncated = preview.length > 200 ? preview.slice(0, 200) + "..." : preview;
       lines.push(`   ${truncated}`);

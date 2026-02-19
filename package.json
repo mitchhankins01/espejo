@@ -12,7 +12,7 @@
     "!dist/**/*.test.*"
   ],
   "scripts": {
-    "check": "pnpm typecheck && pnpm lint && pnpm test",
+    "check": "pnpm typecheck && pnpm lint && pnpm test:coverage",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/ --max-warnings 0",
     "test": "vitest run",

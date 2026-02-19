@@ -38,6 +38,7 @@ describe("searchEntries", () => {
 
     for (const r of results) {
       expectRrfScore(r.rrf_score, { query: "feeling overwhelmed work stress" });
+      expect(r.text).toBeTruthy();
     }
   });
 
@@ -272,6 +273,9 @@ describe("findSimilarEntries", () => {
 
     expect(results.length).toBeGreaterThan(0);
     expect(results.every((r) => r.uuid !== "ENTRY-001-WORK-STRESS")).toBe(true);
+    for (const r of results) {
+      expect(r.text).toBeTruthy();
+    }
   });
 
   it("returns similarity scores in valid range", async () => {

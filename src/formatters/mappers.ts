@@ -69,36 +69,21 @@ export function toSearchResult(row: SearchResultRow): SearchResult {
   if (row.has_semantic) match_sources.push("semantic");
   if (row.has_fulltext) match_sources.push("fulltext");
 
-  const result: SearchResult = {
-    uuid: row.uuid,
-    created_at: row.created_at.toISOString(),
-    preview: row.preview,
-    starred: row.starred,
-    tags: row.tags,
+  return {
+    ...toEntryResult(row),
     rrf_score: row.rrf_score,
     match_sources,
   };
-
-  if (row.city) result.city = row.city;
-
-  return result;
 }
 
 /**
  * Map a DB similar result row to a structured SimilarResult.
  */
 export function toSimilarResult(row: SimilarResultRow): SimilarResult {
-  const result: SimilarResult = {
-    uuid: row.uuid,
-    created_at: row.created_at.toISOString(),
-    preview: row.preview,
-    tags: row.tags,
+  return {
+    ...toEntryResult(row),
     similarity_score: row.similarity_score,
   };
-
-  if (row.city) result.city = row.city;
-
-  return result;
 }
 
 /**

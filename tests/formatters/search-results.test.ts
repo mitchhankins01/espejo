@@ -4,19 +4,46 @@ import {
   formatSimilarResults,
 } from "../../src/formatters/search-results.js";
 import { toSearchResult, toSimilarResult, toTagCount } from "../../src/formatters/mappers.js";
-import type { SearchResultRow, SimilarResultRow, TagCountRow } from "../../src/db/queries.js";
+import type { EntryRow, SearchResultRow, SimilarResultRow, TagCountRow } from "../../src/db/queries.js";
+
+function makeEntry(overrides: Partial<EntryRow> = {}): EntryRow {
+  return {
+    id: 1,
+    uuid: "TEST-UUID",
+    text: "This is a preview of the entry content...",
+    created_at: new Date("2024-03-15T09:30:00Z"),
+    modified_at: null,
+    timezone: null,
+    starred: false,
+    is_pinned: false,
+    is_all_day: false,
+    city: null,
+    country: null,
+    place_name: null,
+    admin_area: null,
+    latitude: null,
+    longitude: null,
+    temperature: null,
+    weather_conditions: null,
+    humidity: null,
+    user_activity: null,
+    step_count: null,
+    template_name: null,
+    editing_time: null,
+    tags: [],
+    photo_count: 0,
+    video_count: 0,
+    audio_count: 0,
+    media: [],
+    ...overrides,
+  };
+}
 
 function makeSearchResult(
   overrides: Partial<SearchResultRow> = {}
 ): SearchResultRow {
   return {
-    id: 1,
-    uuid: "TEST-UUID",
-    created_at: new Date("2024-03-15T09:30:00Z"),
-    city: null,
-    starred: false,
-    preview: "This is a preview of the entry content...",
-    tags: [],
+    ...makeEntry(),
     rrf_score: 0.032,
     has_semantic: true,
     has_fulltext: false,
@@ -28,11 +55,7 @@ function makeSimilarResult(
   overrides: Partial<SimilarResultRow> = {}
 ): SimilarResultRow {
   return {
-    uuid: "TEST-UUID",
-    created_at: new Date("2024-03-15T09:30:00Z"),
-    preview: "This is a preview...",
-    city: null,
-    tags: [],
+    ...makeEntry({ text: "This is a preview..." }),
     similarity_score: 0.85,
     ...overrides,
   };
@@ -104,17 +127,17 @@ describe("formatSearchResults", () => {
     expect(result).toContain("\u2B50");
   });
 
-  it("truncates long previews", () => {
+  it("truncates long text in preview", () => {
     const longText = "a".repeat(300);
     const result = formatSearchResults([
-      makeSearchResult({ preview: longText }),
+      makeSearchResult({ text: longText }),
     ]);
     expect(result).toContain("...");
   });
 
-  it("handles null preview", () => {
+  it("handles null text", () => {
     const result = formatSearchResults([
-      makeSearchResult({ preview: null as unknown as string }),
+      makeSearchResult({ text: null as unknown as string }),
     ]);
     expect(result).toContain("TEST-UUID");
   });
@@ -152,10 +175,10 @@ describe("formatSimilarResults", () => {
     expect(result).toContain("Barcelona");
   });
 
-  it("truncates long previews", () => {
+  it("truncates long text in preview", () => {
     const longText = "a".repeat(300);
     const result = formatSimilarResults([
-      makeSimilarResult({ preview: longText }),
+      makeSimilarResult({ text: longText }),
     ]);
     expect(result).toContain("...");
   });
@@ -173,9 +196,9 @@ describe("formatSimilarResults", () => {
     expect(result).toContain("2 similar entries");
   });
 
-  it("handles null preview", () => {
+  it("handles null text", () => {
     const result = formatSimilarResults([
-      makeSimilarResult({ preview: null as unknown as string }),
+      makeSimilarResult({ text: null as unknown as string }),
     ]);
     expect(result).toContain("TEST-UUID");
   });
@@ -191,10 +214,11 @@ describe("toSearchResult", () => {
     expect(result).toMatchObject({
       uuid: "TEST-UUID",
       created_at: "2024-03-15T09:30:00.000Z",
-      preview: "This is a preview of the entry content...",
+      text: "This is a preview of the entry content...",
       starred: false,
       tags: [],
       rrf_score: 0.032,
+      media_counts: { photos: 0, videos: 0, audios: 0 },
     });
   });
 
@@ -239,9 +263,10 @@ describe("toSimilarResult", () => {
     expect(result).toMatchObject({
       uuid: "TEST-UUID",
       created_at: "2024-03-15T09:30:00.000Z",
-      preview: "This is a preview...",
+      text: "This is a preview...",
       tags: [],
       similarity_score: 0.85,
+      media_counts: { photos: 0, videos: 0, audios: 0 },
     });
   });
 

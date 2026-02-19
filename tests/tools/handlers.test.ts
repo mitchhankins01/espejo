@@ -71,13 +71,7 @@ function makeSearchResultRow(
   overrides: Partial<SearchResultRow> = {}
 ): SearchResultRow {
   return {
-    id: 1,
-    uuid: "TEST-UUID",
-    created_at: new Date("2024-03-15T09:30:00Z"),
-    city: null,
-    starred: false,
-    preview: "Test preview",
-    tags: [],
+    ...makeEntry(),
     rrf_score: 0.032,
     has_semantic: true,
     has_fulltext: false,
@@ -89,11 +83,7 @@ function makeSimilarResultRow(
   overrides: Partial<SimilarResultRow> = {}
 ): SimilarResultRow {
   return {
-    uuid: "TEST-UUID",
-    created_at: new Date("2024-03-15T09:30:00Z"),
-    preview: "Test preview",
-    city: null,
-    tags: [],
+    ...makeEntry(),
     similarity_score: 0.85,
     ...overrides,
   };

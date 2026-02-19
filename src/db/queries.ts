@@ -40,32 +40,20 @@ export interface EntryRow {
   media: MediaItem[];
 }
 
-export interface SearchResultRow {
-  id: number;
-  uuid: string;
-  created_at: Date;
-  city: string | null;
-  starred: boolean;
-  preview: string;
-  tags: string[];
+export type SearchResultRow = EntryRow & {
   rrf_score: number;
   has_semantic: boolean;
   has_fulltext: boolean;
-}
+};
 
 export interface TagCountRow {
   name: string;
   count: number;
 }
 
-export interface SimilarResultRow {
-  uuid: string;
-  created_at: Date;
-  preview: string;
-  city: string | null;
-  tags: string[];
+export type SimilarResultRow = EntryRow & {
   similarity_score: number;
-}
+};
 
 export interface EntryStatsRow {
   total_entries: number;
@@ -173,15 +161,21 @@ export async function searchEntries(
       LIMIT 20
     )
     SELECT
-      e.id, e.uuid, e.created_at, e.city, e.starred,
-      LEFT(e.text, 300) AS preview,
+      e.*,
       COALESCE(1.0 / (60 + s.rank_s), 0) + COALESCE(1.0 / (60 + f.rank_f), 0) AS rrf_score,
       s.id IS NOT NULL AS has_semantic,
       f.id IS NOT NULL AS has_fulltext,
       COALESCE(
         (SELECT array_agg(t.name) FROM entry_tags et JOIN tags t ON t.id = et.tag_id WHERE et.entry_id = e.id),
         '{}'::text[]
-      ) AS tags
+      ) AS tags,
+      (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'photo') AS photo_count,
+      (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'video') AS video_count,
+      (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'audio') AS audio_count,
+      (SELECT COALESCE(json_agg(json_build_object(
+        'type', m.type, 'url', m.url, 'dimensions', m.dimensions
+      ) ORDER BY m.id) FILTER (WHERE m.url IS NOT NULL), '[]'::json)
+      FROM media m WHERE m.entry_id = e.id) AS media
     FROM entries e
     LEFT JOIN semantic s ON e.id = s.id
     LEFT JOIN fulltext f ON e.id = f.id
@@ -198,13 +192,7 @@ export async function searchEntries(
   ]);
 
   return result.rows.map((row) => ({
-    id: row.id,
-    uuid: row.uuid,
-    created_at: row.created_at,
-    city: row.city,
-    starred: row.starred,
-    preview: row.preview,
-    tags: /* v8 ignore next -- defensive: SQL coalesces to '{}' */ row.tags || [],
+    ...mapEntryRow(row),
     rrf_score: parseFloat(row.rrf_score),
     has_semantic: row.has_semantic,
     has_fulltext: row.has_fulltext,
@@ -342,15 +330,19 @@ export async function findSimilarEntries(
       SELECT id, embedding FROM entries WHERE uuid = $1
     )
     SELECT
-      e.uuid,
-      e.created_at,
-      LEFT(e.text, 300) AS preview,
-      e.city,
+      e.*,
+      1 - (e.embedding <=> s.embedding) AS similarity_score,
       COALESCE(
         (SELECT array_agg(t.name) FROM entry_tags et JOIN tags t ON t.id = et.tag_id WHERE et.entry_id = e.id),
         '{}'::text[]
       ) AS tags,
-      1 - (e.embedding <=> s.embedding) AS similarity_score
+      (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'photo') AS photo_count,
+      (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'video') AS video_count,
+      (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'audio') AS audio_count,
+      (SELECT COALESCE(json_agg(json_build_object(
+        'type', m.type, 'url', m.url, 'dimensions', m.dimensions
+      ) ORDER BY m.id) FILTER (WHERE m.url IS NOT NULL), '[]'::json)
+      FROM media m WHERE m.entry_id = e.id) AS media
     FROM entries e, source s
     WHERE e.id != s.id
       AND e.embedding IS NOT NULL
@@ -360,11 +352,7 @@ export async function findSimilarEntries(
   );
 
   return result.rows.map((row) => ({
-    uuid: row.uuid,
-    created_at: row.created_at,
-    preview: row.preview,
-    city: row.city,
-    tags: /* v8 ignore next -- defensive: SQL coalesces to '{}' */ row.tags || [],
+    ...mapEntryRow(row),
     similarity_score: parseFloat(row.similarity_score),
   }));
 }
@@ -545,6 +533,6 @@ function mapEntryRow(row: Record<string, unknown>): EntryRow {
     photo_count: row.photo_count as number,
     video_count: row.video_count as number,
     audio_count: row.audio_count as number,
-    media: [],
+    media: (row.media as MediaItem[]) || [],
   };
 }
