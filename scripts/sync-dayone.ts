@@ -169,6 +169,7 @@ const databaseUrl =
   "postgresql://dev:dev@localhost:5434/journal_dev";
 
 const skipMedia = process.argv.includes("--skip-media");
+const newOnly = process.argv.includes("--new-only");
 const SYNC_BATCH_SIZE = 50;
 
 function getSqlitePath(): string {
@@ -237,6 +238,23 @@ async function syncDayOne(): Promise<void> {
     .all() as EntryRow[];
 
   console.log(`Found ${entries.length} entries in DayOne.sqlite [${elapsed(t0)}]`);
+
+  // Filter to new entries only (not yet in PostgreSQL)
+  if (newOnly) {
+    const checkPool = new pg.Pool({ connectionString: databaseUrl });
+    const existing = await checkPool.query(`SELECT uuid FROM entries`);
+    await checkPool.end();
+    const existingUuids = new Set(existing.rows.map((r) => r.uuid as string));
+    const before = entries.length;
+    const filtered = entries.filter((e) => !existingUuids.has(e.ZUUID));
+    entries.length = 0;
+    entries.push(...filtered);
+    console.log(`--new-only: ${before - entries.length} already synced, ${entries.length} new entries to sync`);
+    if (entries.length === 0) {
+      console.log("Nothing to sync.");
+      return;
+    }
+  }
 
   // Read all entry-tag relationships
   const tagRows = sqlite
