@@ -1,6 +1,9 @@
 import dotenv from "dotenv";
-if (process.env.NODE_ENV !== "production") {
-  dotenv.config({ path: process.env.NODE_ENV === "test" ? ".env.test" : ".env", override: true });
+if (process.env.NODE_ENV === "production") {
+  dotenv.config({ path: ".env" });
+  dotenv.config({ path: ".env.production.local", override: true });
+} else if (process.env.NODE_ENV !== "test") {
+  dotenv.config({ path: ".env", override: true });
 }
 import fs from "fs";
 import path from "path";

@@ -28,6 +28,7 @@
     "dev:db:reset": "docker compose down -v && docker compose up -d",
     "dev:db:logs": "docker compose logs -f db",
     "migrate": "tsx scripts/migrate.ts",
+    "migrate:prod": "NODE_ENV=production tsx scripts/migrate.ts",
     "sync": "tsx scripts/sync-dayone.ts",
     "sync:prod": "NODE_ENV=production tsx scripts/sync-dayone.ts --skip-media",
     "embed": "tsx scripts/embed-entries.ts",

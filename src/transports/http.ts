@@ -62,10 +62,15 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
   });
 
   // Metrics ingestion endpoint — accepts daily weight (and later Oura) data
-  const metricsBodySchema = z.object({
+  // Accepts a single object OR an array of objects for batch ingestion
+  const metricItemSchema = z.object({
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD format"),
     weight_kg: z.number().positive(),
   });
+  const metricsBodySchema = z.union([
+    metricItemSchema,
+    z.array(metricItemSchema).min(1),
+  ]);
 
   app.post("/api/metrics", async (req, res) => {
     // Bearer token auth (same MCP_SECRET)
@@ -83,9 +88,13 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
       return;
     }
 
+    const items = Array.isArray(parsed.data) ? parsed.data : [parsed.data];
+
     try {
-      await upsertDailyMetric(pool, parsed.data.date, parsed.data.weight_kg);
-      res.json({ status: "ok", date: parsed.data.date, weight_kg: parsed.data.weight_kg });
+      for (const item of items) {
+        await upsertDailyMetric(pool, item.date, item.weight_kg);
+      }
+      res.json({ status: "ok", count: items.length, items });
     } catch (err) {
       console.error("Metrics upsert error:", err);
       res.status(500).json({ error: String(err) });

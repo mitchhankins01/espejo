@@ -318,8 +318,40 @@ describe("startHttpServer", () => {
     expect(mockUpsertDailyMetric).toHaveBeenCalledWith(mockPool, "2026-02-21", 82.3);
     expect(mockRes.json).toHaveBeenCalledWith({
       status: "ok",
-      date: "2026-02-21",
-      weight_kg: 82.3,
+      count: 1,
+      items: [{ date: "2026-02-21", weight_kg: 82.3 }],
+    });
+  });
+
+  it("/api/metrics accepts an array of weight records", async () => {
+    mockUpsertDailyMetric.mockResolvedValue(undefined);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const metricsCall = mockApp.post.mock.calls.find(
+      (c: any[]) => c[0] === "/api/metrics"
+    );
+    const metricsHandler = metricsCall![1];
+
+    const mockReq = {
+      headers: {},
+      body: [
+        { date: "2026-02-14", weight_kg: 76.6 },
+        { date: "2026-02-15", weight_kg: 76.8 },
+        { date: "2026-02-16", weight_kg: 76.5 },
+      ],
+    };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await metricsHandler(mockReq, mockRes);
+
+    expect(mockUpsertDailyMetric).toHaveBeenCalledTimes(3);
+    expect(mockUpsertDailyMetric).toHaveBeenCalledWith(mockPool, "2026-02-14", 76.6);
+    expect(mockUpsertDailyMetric).toHaveBeenCalledWith(mockPool, "2026-02-15", 76.8);
+    expect(mockUpsertDailyMetric).toHaveBeenCalledWith(mockPool, "2026-02-16", 76.5);
+    expect(mockRes.json).toHaveBeenCalledWith({
+      status: "ok",
+      count: 3,
+      items: mockReq.body,
     });
   });
 
