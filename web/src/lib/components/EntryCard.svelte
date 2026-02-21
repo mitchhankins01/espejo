@@ -25,9 +25,6 @@
         <span class="text-xs text-stone-400">
           {formatRelativeDate(entry.created_at)}
         </span>
-        {#if entry.starred}
-          <span class="text-xs text-amber-500">Starred</span>
-        {/if}
       </div>
 
       {#if entry.city}

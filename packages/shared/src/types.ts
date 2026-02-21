@@ -5,13 +5,9 @@
 export interface JournalEntry {
   uuid: string;
   text: string | null;
-  rich_text: Record<string, unknown> | null;
   created_at: string;
   modified_at: string | null;
   timezone: string | null;
-  starred: boolean;
-  is_pinned: boolean;
-  is_all_day: boolean;
   tags: string[];
 
   // Location
@@ -25,12 +21,7 @@ export interface JournalEntry {
   // Weather
   weather: EntryWeather | null;
 
-  // Activity
-  activity: EntryActivity | null;
-
-  // Metadata
-  template_name: string | null;
-  editing_time: number | null;
+  // Computed
   word_count: number;
   media_counts: MediaCounts;
 }
@@ -39,11 +30,6 @@ export interface EntryWeather {
   temperature: number | null;
   conditions: string | null;
   humidity: number | null;
-}
-
-export interface EntryActivity {
-  name: string | null;
-  step_count: number | null;
 }
 
 export interface MediaCounts {
@@ -61,7 +47,6 @@ export interface SearchResult {
   created_at: string;
   preview: string;
   city: string | null;
-  starred: boolean;
   tags: string[];
   rrf_score: number;
   match_sources: ("semantic" | "fulltext")[];
@@ -99,15 +84,11 @@ export interface EntryStats {
 
 export interface CreateEntryInput {
   text: string;
-  rich_text?: Record<string, unknown>;
   tags?: string[];
-  starred?: boolean;
   timezone?: string;
 }
 
 export interface UpdateEntryInput {
   text?: string;
-  rich_text?: Record<string, unknown>;
   tags?: string[];
-  starred?: boolean;
 }

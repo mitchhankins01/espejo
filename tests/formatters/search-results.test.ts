@@ -14,9 +14,6 @@ function makeEntry(overrides: Partial<EntryRow> = {}): EntryRow {
     created_at: new Date("2024-03-15T09:30:00Z"),
     modified_at: null,
     timezone: null,
-    starred: false,
-    is_pinned: false,
-    is_all_day: false,
     city: null,
     country: null,
     place_name: null,
@@ -26,10 +23,6 @@ function makeEntry(overrides: Partial<EntryRow> = {}): EntryRow {
     temperature: null,
     weather_conditions: null,
     humidity: null,
-    user_activity: null,
-    step_count: null,
-    template_name: null,
-    editing_time: null,
     tags: [],
     photo_count: 0,
     video_count: 0,
@@ -120,13 +113,6 @@ describe("formatSearchResults", () => {
     expect(result).toContain("work, health");
   });
 
-  it("shows starred indicator", () => {
-    const result = formatSearchResults([
-      makeSearchResult({ starred: true }),
-    ]);
-    expect(result).toContain("\u2B50");
-  });
-
   it("truncates long text in preview", () => {
     const longText = "a".repeat(300);
     const result = formatSearchResults([
@@ -215,7 +201,6 @@ describe("toSearchResult", () => {
       uuid: "TEST-UUID",
       created_at: "2024-03-15T09:30:00.000Z",
       text: "This is a preview of the entry content...",
-      starred: false,
       tags: [],
       rrf_score: 0.032,
       media_counts: { photos: 0, videos: 0, audios: 0 },

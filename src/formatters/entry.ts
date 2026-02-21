@@ -25,16 +25,6 @@ export function formatEntry(entry: EntryRow): string {
     lines.push(`\uD83C\uDFF7\uFE0F ${entry.tags.join(", ")}`);
   }
 
-  // Starred
-  if (entry.starred) {
-    lines.push("\u2B50 Starred");
-  }
-
-  // Template
-  if (entry.template_name) {
-    lines.push(`\uD83D\uDCDD Template: ${entry.template_name}`);
-  }
-
   lines.push("");
 
   // Text
@@ -58,14 +48,6 @@ export function formatEntry(entry: EntryRow): string {
   }
   if (footerParts.length > 0) {
     lines.push(footerParts.join(" | "));
-  }
-
-  // Activity
-  if (entry.user_activity || entry.step_count !== null) {
-    const actParts: string[] = [];
-    if (entry.user_activity) actParts.push(entry.user_activity);
-    if (entry.step_count !== null) actParts.push(`${entry.step_count.toLocaleString()} steps`);
-    lines.push(`\uD83C\uDFC3 ${actParts.join(", ")}`);
   }
 
   // Media

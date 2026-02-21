@@ -88,20 +88,6 @@ describe("searchEntries", () => {
     }
   });
 
-  it("filters by starred", async () => {
-    const results = await searchEntries(
-      pool,
-      workStressEntry.embedding,
-      "feeling",
-      { starred: true },
-      10
-    );
-
-    for (const r of results) {
-      expect(r.starred).toBe(true);
-    }
-  });
-
   it("filters by tags", async () => {
     const results = await searchEntries(
       pool,
@@ -156,7 +142,6 @@ describe("getEntryByUuid", () => {
     expectEntryShape(entry as Record<string, unknown>);
     expect(entry!.uuid).toBe("ENTRY-001-WORK-STRESS");
     expect(entry!.city).toBe("Barcelona");
-    expect(entry!.starred).toBe(true);
     expect(entry!.tags).toContain("morning-review");
     expect(entry!.tags).toContain("work");
   });

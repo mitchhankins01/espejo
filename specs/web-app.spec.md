@@ -19,7 +19,6 @@
 - The spec calls for Tiptap rich text editing, but Tiptap v3 + Svelte 5 had issues: the editor mounted but synced markdown content didn't render in edit mode (blank editor on existing entries, worked fine for new entries).
 - Replaced Tiptap with a plain `<textarea>` as a workaround to unblock other Phase 1 work.
 - **Next step:** Reintegrate Tiptap using `@tiptap/extension-markdown` to convert between markdown (stored in DB `text` column) and Tiptap's internal JSON at the editor boundary. No schema change needed — keep markdown as the storage format.
-- The `rich_text` JSON column exists in the schema but is unused. Could optionally store Tiptap JSON there as a cache, but markdown in `text` should be the source of truth since the MCP server and formatters already depend on it.
 
 **Not yet implemented:**
 - E2E tests (Playwright) — specced but not written
@@ -131,13 +130,9 @@ These types are the contract between the MCP server and web frontend. They are d
 export interface JournalEntry {
   uuid: string;
   text: string | null;
-  rich_text: Record<string, unknown> | null;
   created_at: string; // ISO 8601
   modified_at: string | null;
   timezone: string | null;
-  starred: boolean;
-  is_pinned: boolean;
-  is_all_day: boolean;
   tags: string[];
 
   // Location
@@ -151,12 +146,7 @@ export interface JournalEntry {
   // Weather
   weather: EntryWeather | null;
 
-  // Activity
-  activity: EntryActivity | null;
-
-  // Metadata
-  template_name: string | null;
-  editing_time: number | null;
+  // Computed
   word_count: number;
   media_counts: MediaCounts;
 }
@@ -165,11 +155,6 @@ export interface EntryWeather {
   temperature: number | null;
   conditions: string | null;
   humidity: number | null;
-}
-
-export interface EntryActivity {
-  name: string | null;
-  step_count: number | null;
 }
 
 export interface MediaCounts {
@@ -187,7 +172,6 @@ export interface SearchResult {
   created_at: string;
   preview: string;
   city: string | null;
-  starred: boolean;
   tags: string[];
   rrf_score: number;
   match_sources: ("semantic" | "fulltext")[];
@@ -225,17 +209,13 @@ export interface EntryStats {
 
 export interface CreateEntryInput {
   text: string;
-  rich_text?: Record<string, unknown>;
   tags?: string[];
-  starred?: boolean;
   timezone?: string;
 }
 
 export interface UpdateEntryInput {
   text?: string;
-  rich_text?: Record<string, unknown>;
   tags?: string[];
-  starred?: boolean;
 }
 ```
 
@@ -284,7 +264,6 @@ test("creates a new entry with text and tags", async ({ page }) => {
   // Assert entry text and tags are displayed
 });
 
-test("creates entry with starred status", async ({ page }) => { /* ... */ });
 test("validates empty entry cannot be saved", async ({ page }) => { /* ... */ });
 ```
 
@@ -313,7 +292,7 @@ test("edits an existing entry", async ({ page }) => {
   // Assert updated content persists on reload
 });
 
-test("preserves rich text formatting through edit cycle", async ({ page }) => { /* ... */ });
+test("preserves formatting through edit cycle", async ({ page }) => { /* ... */ });
 ```
 
 ### `tests/e2e/entry-delete.spec.ts`
@@ -333,11 +312,10 @@ test("cancel delete keeps entry", async ({ page }) => { /* ... */ });
 ### `tests/e2e/entry-metadata.spec.ts`
 
 ```typescript
-test("displays weather, location, and activity metadata", async ({ page }) => {
+test("displays weather and location metadata", async ({ page }) => {
   await page.goto("/entries/<fixture-uuid-with-metadata>");
   // Assert weather info shown
   // Assert location shown
-  // Assert activity shown
 });
 
 test("handles entry with no metadata gracefully", async ({ page }) => { /* ... */ });
@@ -357,7 +335,7 @@ test("handles entry with no metadata gracefully", async ({ page }) => { /* ... *
 
 | Variant | Description |
 |---------|-------------|
-| Full metadata | Date, preview, tags, city, starred. |
+| Full metadata | Date, preview, tags, city. |
 | Minimal | Date and preview only (no tags, no location). |
 | Long text | Preview truncated at 200 chars with ellipsis. |
 
@@ -436,7 +414,7 @@ describe("autosave debounce", () => {
 
 - Create entries with Tiptap rich text editor
 - View entries with formatted text, metadata, tags
-- Edit entries (text, tags, starred status)
+- Edit entries (text, tags)
 - Delete entries with confirmation
 - List entries paginated (newest first)
 - Tag autocomplete from existing tags

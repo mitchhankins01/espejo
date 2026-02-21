@@ -7,26 +7,11 @@ CREATE TABLE IF NOT EXISTS entries (
 
     -- Content
     text TEXT,
-    rich_text JSONB,
 
     -- Timestamps
     created_at TIMESTAMPTZ NOT NULL,
     modified_at TIMESTAMPTZ,
     timezone TEXT,
-
-    -- Entry metadata
-    is_all_day BOOLEAN DEFAULT FALSE,
-    is_pinned BOOLEAN DEFAULT FALSE,
-    starred BOOLEAN DEFAULT FALSE,
-    editing_time FLOAT,
-    duration INT,
-
-    -- Device info
-    creation_device TEXT,
-    device_model TEXT,
-    device_type TEXT,
-    os_name TEXT,
-    os_version TEXT,
 
     -- Location (flattened from nested object)
     latitude DOUBLE PRECISION,
@@ -43,16 +28,6 @@ CREATE TABLE IF NOT EXISTS entries (
     moon_phase FLOAT,
     sunrise TIMESTAMPTZ,
     sunset TIMESTAMPTZ,
-
-    -- Activity
-    user_activity TEXT,
-    step_count INT,
-
-    -- Template
-    template_name TEXT,
-
-    -- Source
-    source_string TEXT,
 
     -- Vector embedding (1536 dims for text-embedding-3-small)
     embedding vector(1536),
@@ -100,5 +75,4 @@ CREATE INDEX IF NOT EXISTS idx_entries_text_search ON entries USING GIN(text_sea
 CREATE INDEX IF NOT EXISTS idx_entries_embedding ON entries USING ivfflat(embedding vector_cosine_ops) WITH (lists = 50);
 CREATE INDEX IF NOT EXISTS idx_entries_trgm ON entries USING GIN(text gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_entries_city ON entries(city);
-CREATE INDEX IF NOT EXISTS idx_entries_template ON entries(template_name);
 CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name);

@@ -70,9 +70,7 @@ export async function createEntry(
   pool: pg.Pool,
   input: {
     text: string;
-    rich_text?: Record<string, unknown>;
     tags?: string[];
-    starred?: boolean;
     timezone?: string;
   }
 ): Promise<JournalEntry> {
@@ -83,15 +81,13 @@ export async function createEntry(
     await client.query("BEGIN");
 
     const result = await client.query(
-      `INSERT INTO entries (uuid, text, rich_text, created_at, timezone, starred)
-       VALUES ($1, $2, $3, NOW(), $4, $5)
+      `INSERT INTO entries (uuid, text, created_at, timezone)
+       VALUES ($1, $2, NOW(), $3)
        RETURNING *`,
       [
         uuid,
         input.text,
-        input.rich_text ? JSON.stringify(input.rich_text) : null,
         input.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
-        input.starred ?? false,
       ]
     );
 
@@ -120,9 +116,7 @@ export async function updateEntry(
   uuid: string,
   input: {
     text?: string;
-    rich_text?: Record<string, unknown>;
     tags?: string[];
-    starred?: boolean;
   }
 ): Promise<JournalEntry | null> {
   const client = await pool.connect();
@@ -139,16 +133,6 @@ export async function updateEntry(
       idx++;
       setClauses.push(`text = $${idx}`);
       params.push(input.text);
-    }
-    if (input.rich_text !== undefined) {
-      idx++;
-      setClauses.push(`rich_text = $${idx}::jsonb`);
-      params.push(JSON.stringify(input.rich_text));
-    }
-    if (input.starred !== undefined) {
-      idx++;
-      setClauses.push(`starred = $${idx}`);
-      params.push(input.starred);
     }
 
     idx++;
@@ -246,15 +230,11 @@ function mapEntryRow(row: Record<string, unknown>): JournalEntry {
   return {
     uuid: row.uuid as string,
     text,
-    rich_text: row.rich_text as Record<string, unknown> | null,
     created_at: (row.created_at as Date).toISOString(),
     modified_at: row.modified_at
       ? (row.modified_at as Date).toISOString()
       : null,
     timezone: row.timezone as string | null,
-    starred: row.starred as boolean,
-    is_pinned: (row.is_pinned as boolean) ?? false,
-    is_all_day: (row.is_all_day as boolean) ?? false,
     tags: (row.tags as string[]) || [],
     city: row.city as string | null,
     country: row.country as string | null,
@@ -270,15 +250,6 @@ function mapEntryRow(row: Record<string, unknown>): JournalEntry {
             humidity: row.humidity as number | null,
           }
         : null,
-    activity:
-      row.user_activity !== null || row.step_count !== null
-        ? {
-            name: row.user_activity as string | null,
-            step_count: row.step_count as number | null,
-          }
-        : null,
-    template_name: row.template_name as string | null,
-    editing_time: row.editing_time as number | null,
     word_count: text ? text.split(/\s+/).filter((w) => w.length > 0).length : 0,
     media_counts: {
       photos: (row.photo_count as number) ?? 0,

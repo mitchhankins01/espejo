@@ -9,14 +9,12 @@
   let editing = $state(false);
   let text = $state("");
   let selectedTags = $state<string[]>([]);
-  let starred = $state(false);
   let showDeleteConfirm = $state(false);
 
   // Initialize from data (avoids state_referenced_locally warning)
   $effect(() => {
     text = data.entry.text ?? "";
     selectedTags = [...data.entry.tags];
-    starred = data.entry.starred;
   });
 </script>
 
@@ -32,9 +30,6 @@
       <div class="mt-1 flex flex-wrap items-center gap-2 text-sm text-stone-500">
         {#if data.entry.city}
           <span>{data.entry.city}{data.entry.country ? `, ${data.entry.country}` : ""}</span>
-        {/if}
-        {#if data.entry.starred}
-          <span>Starred</span>
         {/if}
       </div>
     </div>
@@ -72,7 +67,6 @@
     <!-- Edit mode -->
     <form method="POST" action="?/update" class="space-y-4">
       <input type="hidden" name="tags" value={selectedTags.join(",")} />
-      <input type="hidden" name="starred" value={String(starred)} />
       <input type="hidden" name="text" value={text} />
 
       <EntryEditor value={text} onInput={(t) => (text = t)} />
@@ -82,13 +76,6 @@
         selected={selectedTags}
         onUpdate={(tags) => (selectedTags = tags)}
       />
-
-      <div class="flex items-center gap-4">
-        <label class="flex items-center gap-2 text-sm">
-          <input type="checkbox" bind:checked={starred} class="rounded border-stone-300" />
-          Starred
-        </label>
-      </div>
 
       <div class="flex gap-3">
         <button

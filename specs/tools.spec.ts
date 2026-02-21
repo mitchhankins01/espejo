@@ -51,25 +51,17 @@ export interface EntryResult {
   latitude?: number;
   longitude?: number;
   timezone?: string;
-  starred: boolean;
-  is_pinned: boolean;
-  template_name?: string;
   tags: string[];
   weather?: {
     temperature?: number;
     conditions?: string;
     humidity?: number;
   };
-  activity?: {
-    name?: string;
-    step_count?: number;
-  };
   media_counts: {
     photos: number;
     videos: number;
     audios: number;
   };
-  editing_time?: number;
   word_count: number;
 }
 
@@ -109,7 +101,7 @@ export const toolSpecs = {
     description:
       "Hybrid semantic + keyword search across journal entries using Reciprocal Rank Fusion (BM25 full-text + vector cosine similarity). " +
       "Finds entries by meaning even when exact words don't match. " +
-      "Supports optional filtering by date range, tags, city, and starred status. " +
+      "Supports optional filtering by date range, tags, and city. " +
       "Entries often contain somatic check-ins, sleep/readiness scores, and body-state reflections that can be cross-referenced with health and biometric data.",
     params: z.object({
       query: z
@@ -129,10 +121,6 @@ export const toolSpecs = {
         .optional()
         .describe("Filter to entries with any of these tags"),
       city: z.string().optional().describe("Filter by city name"),
-      starred: z
-        .boolean()
-        .optional()
-        .describe("Filter to starred entries only"),
       limit: limitParam(10, 50),
     }),
     examples: [
@@ -163,7 +151,7 @@ export const toolSpecs = {
     name: "get_entry" as const,
     description:
       "Get a single journal entry by its UUID with full text, all metadata, tags, weather, location, and media counts. " +
-      "Returns structured data including nested weather, activity, and location objects.",
+      "Returns structured data including nested weather and location objects.",
     params: z.object({
       uuid: z.string().min(1).describe("The unique entry identifier"),
     }),
@@ -171,7 +159,7 @@ export const toolSpecs = {
       {
         input: { uuid: "ABC123-DEF456" },
         behavior:
-          "Returns full entry with text, location, weather, tags, media counts, and editing time",
+          "Returns full entry with text, location, weather, tags, and media counts",
       },
     ],
   },
@@ -207,7 +195,7 @@ export const toolSpecs = {
     description:
       "Find entries written on a specific calendar day (MM-DD) across all years. " +
       "Great for year-over-year reflection and seeing how your thinking has evolved. " +
-      "Returns full entry data including weather, activity, and health reflections.",
+      "Returns full entry data including weather and health reflections.",
     params: z.object({
       month_day: monthDayString.describe(
         "Month and day to search across all years, e.g. '03-15' for March 15th"

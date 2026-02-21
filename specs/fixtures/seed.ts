@@ -11,16 +11,10 @@ export interface FixtureEntry {
   latitude?: number;
   longitude?: number;
   timezone?: string;
-  starred?: boolean;
-  is_pinned?: boolean;
-  template_name?: string;
   tags?: string[];
   temperature?: number;
   weather_conditions?: string;
   humidity?: number;
-  user_activity?: string;
-  step_count?: number;
-  editing_time?: number;
   embedding: number[];
 }
 
@@ -80,15 +74,10 @@ export const fixtureEntries: FixtureEntry[] = [
     latitude: 41.3851,
     longitude: 2.1734,
     timezone: "Europe/Madrid",
-    starred: true,
     tags: ["morning-review", "work"],
     temperature: 18,
     weather_conditions: "Partly Cloudy",
     humidity: 65,
-    user_activity: "Stationary",
-    step_count: 2100,
-    editing_time: 180,
-    template_name: "5 Minute AM",
     embedding: workStressBase,
   },
   {
@@ -102,12 +91,10 @@ export const fixtureEntries: FixtureEntry[] = [
     latitude: 41.4035,
     longitude: 2.1567,
     timezone: "Europe/Madrid",
-    starred: false,
     tags: ["evening-review", "work", "burnout"],
     temperature: 16,
     weather_conditions: "Clear",
     humidity: 55,
-    editing_time: 240,
     embedding: addNoise(workStressBase, 1),
   },
   {
@@ -121,14 +108,10 @@ export const fixtureEntries: FixtureEntry[] = [
     latitude: 32.7465,
     longitude: -117.1297,
     timezone: "America/Los_Angeles",
-    starred: true,
     tags: ["morning-review", "health", "routine"],
     temperature: 22,
     weather_conditions: "Sunny",
     humidity: 70,
-    user_activity: "Walking",
-    step_count: 8432,
-    template_name: "5 Minute AM",
     embedding: morningRoutineBase,
   },
   {
@@ -142,12 +125,10 @@ export const fixtureEntries: FixtureEntry[] = [
     latitude: 32.7488,
     longitude: -117.1617,
     timezone: "America/Los_Angeles",
-    starred: false,
     tags: ["morning-review"],
     temperature: 20,
     weather_conditions: "Sunny",
     humidity: 68,
-    template_name: "5 Minute AM",
     embedding: addNoise(morningRoutineBase, 2),
   },
   {
@@ -161,14 +142,10 @@ export const fixtureEntries: FixtureEntry[] = [
     latitude: 41.3851,
     longitude: 2.1821,
     timezone: "Europe/Madrid",
-    starred: true,
     tags: ["travel", "barcelona"],
     temperature: 21,
     weather_conditions: "Sunny",
     humidity: 58,
-    user_activity: "Walking",
-    step_count: 18234,
-    editing_time: 300,
     embedding: travelBase,
   },
   {
@@ -182,14 +159,10 @@ export const fixtureEntries: FixtureEntry[] = [
     latitude: 41.3888,
     longitude: 2.1700,
     timezone: "Europe/Madrid",
-    starred: false,
     tags: ["morning-review", "nicotine", "health"],
     temperature: 10,
     weather_conditions: "Overcast",
     humidity: 75,
-    user_activity: "Stationary",
-    step_count: 1200,
-    template_name: "5 Minute AM",
     embedding: healthBase,
   },
   {
@@ -203,12 +176,10 @@ export const fixtureEntries: FixtureEntry[] = [
     latitude: 41.3870,
     longitude: 2.1690,
     timezone: "Europe/Madrid",
-    starred: true,
     tags: ["reflection", "year-review"],
     temperature: 12,
     weather_conditions: "Clear",
     humidity: 60,
-    editing_time: 600,
     embedding: reflectionBase,
   },
   {
@@ -222,21 +193,16 @@ export const fixtureEntries: FixtureEntry[] = [
     latitude: 32.7465,
     longitude: -117.1297,
     timezone: "America/Los_Angeles",
-    starred: false,
     tags: ["health", "sleep", "morning-review"],
     temperature: 16,
     weather_conditions: "Foggy",
     humidity: 85,
-    user_activity: "Stationary",
-    step_count: 500,
-    template_name: "5 Minute AM",
     embedding: addNoise(healthBase, 3),
   },
   {
     uuid: "ENTRY-009-NO-METADATA",
     text: "Just a quick thought dump. Sometimes you don't need a prompt or a template. Just get the words out of your head and onto the page.",
     created_at: "2024-08-01T14:00:00Z",
-    starred: false,
     embedding: addNoise(reflectionBase, 4),
   },
   {
@@ -250,14 +216,10 @@ export const fixtureEntries: FixtureEntry[] = [
     latitude: 38.7139,
     longitude: -9.1337,
     timezone: "Europe/Lisbon",
-    starred: false,
     tags: ["travel"],
     temperature: 19,
     weather_conditions: "Sunny",
     humidity: 52,
-    user_activity: "Walking",
-    step_count: 22000,
-    editing_time: 200,
     embedding: addNoise(travelBase, 5),
   },
 ];
@@ -273,12 +235,11 @@ export async function seedFixtures(pool: pg.Pool): Promise<void> {
     const result = await pool.query(
       `INSERT INTO entries (
         uuid, text, created_at, city, country, place_name, admin_area,
-        latitude, longitude, timezone, starred, is_pinned, template_name,
-        temperature, weather_conditions, humidity, user_activity, step_count,
-        editing_time, embedding
+        latitude, longitude, timezone,
+        temperature, weather_conditions, humidity, embedding
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-        $14, $15, $16, $17, $18, $19, $20::vector
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+        $11, $12, $13, $14::vector
       ) RETURNING id`,
       [
         entry.uuid,
@@ -291,15 +252,9 @@ export async function seedFixtures(pool: pg.Pool): Promise<void> {
         entry.latitude ?? null,
         entry.longitude ?? null,
         entry.timezone ?? null,
-        entry.starred ?? false,
-        entry.is_pinned ?? false,
-        entry.template_name ?? null,
         entry.temperature ?? null,
         entry.weather_conditions ?? null,
         entry.humidity ?? null,
-        entry.user_activity ?? null,
-        entry.step_count ?? null,
-        entry.editing_time ?? null,
         embeddingStr,
       ]
     );

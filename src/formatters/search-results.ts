@@ -27,7 +27,6 @@ export function formatSearchResults(results: SearchResultRow[]): string {
 
     const headerParts: string[] = [`${i + 1}.`, `\uD83D\uDCC5 ${dateStr}`];
     if (r.city) headerParts.push(`\uD83D\uDCCD ${r.city}`);
-    if (r.starred) headerParts.push("\u2B50");
 
     lines.push(headerParts.join(" "));
 

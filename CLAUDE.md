@@ -107,7 +107,7 @@ The hybrid search in `search_entries` runs two parallel retrievals and merges wi
 2. **BM25**: Full-text search via tsvector (`@@` operator with `ts_rank`)
 3. **Merge**: RRF with k=60 — `score = 1/(60 + rank_semantic) + 1/(60 + rank_bm25)`
 
-Both retrievals pull top-20 candidates. The merge produces the final ranked list. Optional filters (date range, tags, city, starred) are applied as WHERE clauses in BOTH retrievals to keep results consistent.
+Both retrievals pull top-20 candidates. The merge produces the final ranked list. Optional filters (date range, tags, city) are applied as WHERE clauses in BOTH retrievals to keep results consistent.
 
 The query must embed the search string at runtime using the same model used for indexing (`text-embedding-3-small`).
 
@@ -122,7 +122,6 @@ Tools return raw data from queries. Formatters turn DB rows into human-readable 
 ```
 📅 November 15, 2025 — Barcelona, Spain
 🏷️ morning-review, nicotine
-⭐ Starred
 
 Woke up feeling depleted. The nicotine yesterday definitely crashed
 my dopamine baseline...

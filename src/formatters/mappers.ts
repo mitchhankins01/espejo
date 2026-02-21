@@ -16,15 +16,13 @@ import { getWordCount } from "./entry.js";
 
 /**
  * Map a DB entry row to a structured EntryResult.
- * Strips DB internals (id), nests weather/activity/media, computes word_count.
+ * Strips DB internals (id), nests weather/media, computes word_count.
  */
 export function toEntryResult(row: EntryRow): EntryResult {
   const result: EntryResult = {
     uuid: row.uuid,
     created_at: row.created_at.toISOString(),
     text: row.text,
-    starred: row.starred,
-    is_pinned: row.is_pinned,
     tags: row.tags,
     media_counts: {
       photos: row.photo_count,
@@ -40,8 +38,6 @@ export function toEntryResult(row: EntryRow): EntryResult {
   if (row.latitude !== null) result.latitude = row.latitude;
   if (row.longitude !== null) result.longitude = row.longitude;
   if (row.timezone) result.timezone = row.timezone;
-  if (row.template_name) result.template_name = row.template_name;
-  if (row.editing_time !== null) result.editing_time = row.editing_time;
 
   if (row.temperature !== null || row.weather_conditions || row.humidity !== null) {
     const weather: EntryResult["weather"] = {};
@@ -49,13 +45,6 @@ export function toEntryResult(row: EntryRow): EntryResult {
     if (row.weather_conditions) weather.conditions = row.weather_conditions;
     if (row.humidity !== null) weather.humidity = row.humidity;
     result.weather = weather;
-  }
-
-  if (row.user_activity || row.step_count !== null) {
-    const activity: EntryResult["activity"] = {};
-    if (row.user_activity) activity.name = row.user_activity;
-    if (row.step_count !== null) activity.step_count = row.step_count;
-    result.activity = activity;
   }
 
   return result;

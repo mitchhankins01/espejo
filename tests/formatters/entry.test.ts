@@ -11,9 +11,6 @@ function makeEntry(overrides: Partial<EntryRow> = {}): EntryRow {
     created_at: new Date("2024-03-15T09:30:00Z"),
     modified_at: null,
     timezone: "Europe/Madrid",
-    starred: false,
-    is_pinned: false,
-    is_all_day: false,
     city: null,
     country: null,
     place_name: null,
@@ -23,10 +20,6 @@ function makeEntry(overrides: Partial<EntryRow> = {}): EntryRow {
     temperature: null,
     weather_conditions: null,
     humidity: null,
-    user_activity: null,
-    step_count: null,
-    template_name: null,
-    editing_time: null,
     tags: [],
     photo_count: 0,
     video_count: 0,
@@ -56,16 +49,6 @@ describe("formatEntry", () => {
     expect(result).toContain("morning-review, work");
   });
 
-  it("includes starred indicator", () => {
-    const result = formatEntry(makeEntry({ starred: true }));
-    expect(result).toContain("Starred");
-  });
-
-  it("does not include starred when false", () => {
-    const result = formatEntry(makeEntry({ starred: false }));
-    expect(result).not.toContain("Starred");
-  });
-
   it("includes weather info", () => {
     const result = formatEntry(
       makeEntry({
@@ -92,11 +75,6 @@ describe("formatEntry", () => {
     expect(result).toContain("TEST-UUID");
   });
 
-  it("includes template name when present", () => {
-    const result = formatEntry(makeEntry({ template_name: "5 Minute AM" }));
-    expect(result).toContain("5 Minute AM");
-  });
-
   it("includes media counts when present", () => {
     const result = formatEntry(makeEntry({ photo_count: 3, video_count: 1 }));
     expect(result).toContain("3 photos");
@@ -108,19 +86,6 @@ describe("formatEntry", () => {
     expect(result).toContain("1 photo");
     expect(result).not.toContain("1 photos");
     expect(result).toContain("2 videos");
-  });
-
-  it("includes activity info when present", () => {
-    const result = formatEntry(
-      makeEntry({ user_activity: "Walking", step_count: 5000 })
-    );
-    expect(result).toContain("Walking");
-    expect(result).toContain("steps");
-  });
-
-  it("includes step count only when activity is null", () => {
-    const result = formatEntry(makeEntry({ step_count: 3000 }));
-    expect(result).toContain("steps");
   });
 
   it("includes media URLs when present", () => {
@@ -193,19 +158,16 @@ describe("toEntryResult", () => {
       uuid: "TEST-UUID",
       created_at: "2024-03-15T09:30:00.000Z",
       text: "This is a test entry with some content.",
-      starred: false,
-      is_pinned: false,
       tags: [],
       media_counts: { photos: 0, videos: 0, audios: 0 },
       word_count: 8,
     });
   });
 
-  it("strips DB-only fields (id, modified_at, is_all_day, admin_area)", () => {
+  it("strips DB-only fields (id, modified_at, admin_area)", () => {
     const result = toEntryResult(makeEntry()) as Record<string, unknown>;
     expect(result).not.toHaveProperty("id");
     expect(result).not.toHaveProperty("modified_at");
-    expect(result).not.toHaveProperty("is_all_day");
     expect(result).not.toHaveProperty("admin_area");
   });
 
@@ -233,9 +195,6 @@ describe("toEntryResult", () => {
     expect(result).not.toHaveProperty("city");
     expect(result).not.toHaveProperty("country");
     expect(result).not.toHaveProperty("weather");
-    expect(result).not.toHaveProperty("activity");
-    expect(result).not.toHaveProperty("template_name");
-    expect(result).not.toHaveProperty("editing_time");
   });
 
   it("nests weather object when weather fields are present", () => {
@@ -253,16 +212,6 @@ describe("toEntryResult", () => {
     });
   });
 
-  it("nests activity object when activity fields are present", () => {
-    const result = toEntryResult(
-      makeEntry({ user_activity: "Walking", step_count: 5000 })
-    );
-    expect(result.activity).toEqual({
-      name: "Walking",
-      step_count: 5000,
-    });
-  });
-
   it("maps media counts correctly", () => {
     const result = toEntryResult(
       makeEntry({ photo_count: 3, video_count: 1, audio_count: 2 })
@@ -272,14 +221,6 @@ describe("toEntryResult", () => {
       videos: 1,
       audios: 2,
     });
-  });
-
-  it("includes template_name and editing_time when present", () => {
-    const result = toEntryResult(
-      makeEntry({ template_name: "5 Minute AM", editing_time: 120 })
-    );
-    expect(result.template_name).toBe("5 Minute AM");
-    expect(result.editing_time).toBe(120);
   });
 });
 

@@ -21,7 +21,6 @@ export async function handleSearchEntries(
       date_to: params.date_to,
       tags: params.tags,
       city: params.city,
-      starred: params.starred,
     },
     params.limit
   );

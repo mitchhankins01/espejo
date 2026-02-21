@@ -17,9 +17,6 @@ export interface EntryRow {
   created_at: Date;
   modified_at: Date | null;
   timezone: string | null;
-  starred: boolean;
-  is_pinned: boolean;
-  is_all_day: boolean;
   city: string | null;
   country: string | null;
   place_name: string | null;
@@ -29,10 +26,6 @@ export interface EntryRow {
   temperature: number | null;
   weather_conditions: string | null;
   humidity: number | null;
-  user_activity: string | null;
-  step_count: number | null;
-  template_name: string | null;
-  editing_time: number | null;
   tags: string[];
   photo_count: number;
   video_count: number;
@@ -77,7 +70,6 @@ export interface SearchFilters {
   date_to?: string;
   tags?: string[];
   city?: string;
-  starred?: boolean;
 }
 
 // ============================================================================
@@ -118,11 +110,6 @@ export async function searchEntries(
     paramIdx++;
     filterClauses.push(`e.city ILIKE $${paramIdx}`);
     filterParams.push(filters.city);
-  }
-  if (filters.starred !== undefined) {
-    paramIdx++;
-    filterClauses.push(`e.starred = $${paramIdx}`);
-    filterParams.push(filters.starred);
   }
   if (filters.tags && filters.tags.length > 0) {
     paramIdx++;
@@ -235,9 +222,6 @@ export async function getEntryByUuid(
     created_at: row.created_at,
     modified_at: row.modified_at,
     timezone: row.timezone,
-    starred: row.starred,
-    is_pinned: row.is_pinned,
-    is_all_day: row.is_all_day,
     city: row.city,
     country: row.country,
     place_name: row.place_name,
@@ -247,10 +231,6 @@ export async function getEntryByUuid(
     temperature: row.temperature,
     weather_conditions: row.weather_conditions,
     humidity: row.humidity,
-    user_activity: row.user_activity,
-    step_count: row.step_count,
-    template_name: row.template_name,
-    editing_time: row.editing_time,
     tags: /* v8 ignore next -- defensive: SQL coalesces to '{}' */ row.tags || [],
     photo_count: row.photo_count,
     video_count: row.video_count,
@@ -513,9 +493,6 @@ function mapEntryRow(row: Record<string, unknown>): EntryRow {
     created_at: row.created_at as Date,
     modified_at: row.modified_at as Date | null,
     timezone: row.timezone as string | null,
-    starred: row.starred as boolean,
-    is_pinned: row.is_pinned as boolean,
-    is_all_day: row.is_all_day as boolean,
     city: row.city as string | null,
     country: row.country as string | null,
     place_name: row.place_name as string | null,
@@ -525,10 +502,6 @@ function mapEntryRow(row: Record<string, unknown>): EntryRow {
     temperature: row.temperature as number | null,
     weather_conditions: row.weather_conditions as string | null,
     humidity: row.humidity as number | null,
-    user_activity: row.user_activity as string | null,
-    step_count: row.step_count as number | null,
-    template_name: row.template_name as string | null,
-    editing_time: row.editing_time as number | null,
     tags: (row.tags as string[]) || [] /* v8 ignore next -- defensive: SQL coalesces to '{}' */,
     photo_count: row.photo_count as number,
     video_count: row.video_count as number,

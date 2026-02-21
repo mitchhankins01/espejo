@@ -6,7 +6,6 @@
 
   let text = $state("");
   let selectedTags = $state<string[]>([]);
-  let starred = $state(false);
 </script>
 
 <svelte:head>
@@ -26,7 +25,6 @@
 
   <form method="POST" class="space-y-4">
     <input type="hidden" name="tags" value={selectedTags.join(",")} />
-    <input type="hidden" name="starred" value={String(starred)} />
     <input type="hidden" name="text" value={text} />
 
     <EntryEditor value={text} onInput={(t) => (text = t)} />
@@ -36,17 +34,6 @@
       selected={selectedTags}
       onUpdate={(tags) => (selectedTags = tags)}
     />
-
-    <div class="flex items-center gap-4">
-      <label class="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          bind:checked={starred}
-          class="rounded border-stone-300"
-        />
-        Starred
-      </label>
-    </div>
 
     <div class="flex gap-3">
       <button

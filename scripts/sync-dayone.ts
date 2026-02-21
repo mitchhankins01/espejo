@@ -111,19 +111,7 @@ interface EntryRow {
   ZCREATIONDATE: number | null;
   ZMODIFIEDDATE: number | null;
   ZMARKDOWNTEXT: string | null;
-  ZRICHTEXTJSON: string | null;
   ZTIMEZONE: Buffer | string | null;
-  ZISALLDAY: number;
-  ZISPINNED: number;
-  ZSTARRED: number;
-  ZEDITINGTIME: number | null;
-  ZDURATION: number | null;
-  ZCREATIONDEVICE: string | null;
-  ZCREATIONDEVICEMODEL: string | null;
-  ZCREATIONDEVICETYPE: string | null;
-  ZCREATIONOSNAME: string | null;
-  ZCREATIONOSVERSION: string | null;
-  ZSOURCESTRING: string | null;
   // Joined fields
   ZLOCALITYNAME: string | null;
   ZCOUNTRY: string | null;
@@ -137,9 +125,6 @@ interface EntryRow {
   ZMOONPHASE: number | null;
   ZSUNRISEDATE: number | null;
   ZSUNSETDATE: number | null;
-  ZACTIVITYNAME: string | null;
-  ZSTEPCOUNT: number | null;
-  ZTEMPLATETITLE: string | null;
 }
 
 interface TagRow {
@@ -216,22 +201,14 @@ async function syncDayOne(): Promise<void> {
     .prepare(
       `SELECT
       e.Z_PK, e.ZUUID, e.ZCREATIONDATE, e.ZMODIFIEDDATE,
-      e.ZMARKDOWNTEXT, e.ZRICHTEXTJSON, e.ZTIMEZONE,
-      e.ZISALLDAY, e.ZISPINNED, e.ZSTARRED,
-      e.ZEDITINGTIME, e.ZDURATION,
-      e.ZCREATIONDEVICE, e.ZCREATIONDEVICEMODEL, e.ZCREATIONDEVICETYPE,
-      e.ZCREATIONOSNAME, e.ZCREATIONOSVERSION, e.ZSOURCESTRING,
+      e.ZMARKDOWNTEXT, e.ZTIMEZONE,
       l.ZLOCALITYNAME, l.ZCOUNTRY, l.ZPLACENAME, l.ZADMINISTRATIVEAREA,
       l.ZLATITUDE, l.ZLONGITUDE,
       w.ZTEMPERATURECELSIUS, w.ZCONDITIONSDESCRIPTION, w.ZRELATIVEHUMIDITY,
-      w.ZMOONPHASE, w.ZSUNRISEDATE, w.ZSUNSETDATE,
-      ua.ZACTIVITYNAME, ua.ZSTEPCOUNT,
-      t.ZTITLE AS ZTEMPLATETITLE
+      w.ZMOONPHASE, w.ZSUNRISEDATE, w.ZSUNSETDATE
     FROM ZENTRY e
     LEFT JOIN ZLOCATION l ON e.ZLOCATION = l.Z_PK
     LEFT JOIN ZWEATHER w ON e.ZWEATHER = w.Z_PK
-    LEFT JOIN ZUSERACTIVITY ua ON e.ZUSERACTIVITY = ua.Z_PK
-    LEFT JOIN ZTEMPLATE t ON e.ZTEMPLATE = t.Z_PK
     WHERE e.ZUUID IS NOT NULL
     ORDER BY e.ZCREATIONDATE ASC`
     )
@@ -385,20 +362,9 @@ async function syncBatch(
     const col = {
       uuids: [] as string[],
       texts: [] as (string | null)[],
-      richTexts: [] as (string | null)[],
       createdAts: [] as (string | null)[],
       modifiedAts: [] as (string | null)[],
       timezones: [] as (string | null)[],
-      isAllDays: [] as boolean[],
-      isPinneds: [] as boolean[],
-      starreds: [] as boolean[],
-      editingTimes: [] as (number | null)[],
-      durations: [] as (number | null)[],
-      creationDevices: [] as (string | null)[],
-      deviceModels: [] as (string | null)[],
-      deviceTypes: [] as (string | null)[],
-      osNames: [] as (string | null)[],
-      osVersions: [] as (string | null)[],
       latitudes: [] as (number | null)[],
       longitudes: [] as (number | null)[],
       cities: [] as (string | null)[],
@@ -411,10 +377,6 @@ async function syncBatch(
       moonPhases: [] as (number | null)[],
       sunrises: [] as (string | null)[],
       sunsets: [] as (string | null)[],
-      userActivities: [] as (string | null)[],
-      stepCounts: [] as (number | null)[],
-      templateNames: [] as (string | null)[],
-      sourceStrings: [] as (string | null)[],
     };
 
     for (const entry of batch) {
@@ -431,20 +393,9 @@ async function syncBatch(
 
       col.uuids.push(entry.ZUUID);
       col.texts.push(entry.ZMARKDOWNTEXT ? normalizeText(entry.ZMARKDOWNTEXT) : null);
-      col.richTexts.push(sanitize(entry.ZRICHTEXTJSON ?? null));
       col.createdAts.push(coreDataToIso(entry.ZCREATIONDATE));
       col.modifiedAts.push(coreDataToIso(entry.ZMODIFIEDDATE));
       col.timezones.push(timezone);
-      col.isAllDays.push(entry.ZISALLDAY === 1);
-      col.isPinneds.push(entry.ZISPINNED === 1);
-      col.starreds.push(entry.ZSTARRED === 1);
-      col.editingTimes.push(entry.ZEDITINGTIME ?? null);
-      col.durations.push(entry.ZDURATION ?? null);
-      col.creationDevices.push(sanitize(entry.ZCREATIONDEVICE ?? null));
-      col.deviceModels.push(sanitize(entry.ZCREATIONDEVICEMODEL ?? null));
-      col.deviceTypes.push(sanitize(entry.ZCREATIONDEVICETYPE ?? null));
-      col.osNames.push(sanitize(entry.ZCREATIONOSNAME ?? null));
-      col.osVersions.push(sanitize(entry.ZCREATIONOSVERSION ?? null));
       col.latitudes.push(entry.ZLATITUDE ?? null);
       col.longitudes.push(entry.ZLONGITUDE ?? null);
       col.cities.push(sanitize(entry.ZLOCALITYNAME ?? null));
@@ -457,59 +408,32 @@ async function syncBatch(
       col.moonPhases.push(entry.ZMOONPHASE ?? null);
       col.sunrises.push(coreDataToIso(entry.ZSUNRISEDATE));
       col.sunsets.push(coreDataToIso(entry.ZSUNSETDATE));
-      col.userActivities.push(sanitize(entry.ZACTIVITYNAME ?? null));
-      col.stepCounts.push(entry.ZSTEPCOUNT ?? null);
-      col.templateNames.push(sanitize(entry.ZTEMPLATETITLE ?? null));
-      col.sourceStrings.push(sanitize(entry.ZSOURCESTRING ?? null));
     }
 
     // --- 2. Batch upsert entries (1 query for all 50) ---
     const entryResult = await client.query(
       `INSERT INTO entries (
-        uuid, text, rich_text, created_at, modified_at, timezone,
-        is_all_day, is_pinned, starred, editing_time, duration,
-        creation_device, device_model, device_type, os_name, os_version,
+        uuid, text, created_at, modified_at, timezone,
         latitude, longitude, city, country, place_name, admin_area,
-        temperature, weather_conditions, humidity, moon_phase, sunrise, sunset,
-        user_activity, step_count, template_name, source_string
+        temperature, weather_conditions, humidity, moon_phase, sunrise, sunset
       )
       SELECT
-        d_uuid, d_text, d_rich::jsonb, d_created, d_modified, d_tz,
-        d_allday, d_pinned, d_starred, d_edittime, d_dur,
-        d_cdev, d_dmodel, d_dtype, d_os, d_osver,
+        d_uuid, d_text, d_created, d_modified, d_tz,
         d_lat, d_lon, d_city, d_country, d_place, d_admin,
-        d_temp, d_weather, d_humid, d_moon, d_sunrise, d_sunset,
-        d_activity, d_steps, d_template, d_source
+        d_temp, d_weather, d_humid, d_moon, d_sunrise, d_sunset
       FROM unnest(
-        $1::text[], $2::text[], $3::text[], $4::timestamptz[], $5::timestamptz[], $6::text[],
-        $7::boolean[], $8::boolean[], $9::boolean[], $10::float8[], $11::int[],
-        $12::text[], $13::text[], $14::text[], $15::text[], $16::text[],
-        $17::float8[], $18::float8[], $19::text[], $20::text[], $21::text[], $22::text[],
-        $23::float8[], $24::text[], $25::float8[], $26::float8[], $27::timestamptz[], $28::timestamptz[],
-        $29::text[], $30::int[], $31::text[], $32::text[]
+        $1::text[], $2::text[], $3::timestamptz[], $4::timestamptz[], $5::text[],
+        $6::float8[], $7::float8[], $8::text[], $9::text[], $10::text[], $11::text[],
+        $12::float8[], $13::text[], $14::float8[], $15::float8[], $16::timestamptz[], $17::timestamptz[]
       ) AS d(
-        d_uuid, d_text, d_rich, d_created, d_modified, d_tz,
-        d_allday, d_pinned, d_starred, d_edittime, d_dur,
-        d_cdev, d_dmodel, d_dtype, d_os, d_osver,
+        d_uuid, d_text, d_created, d_modified, d_tz,
         d_lat, d_lon, d_city, d_country, d_place, d_admin,
-        d_temp, d_weather, d_humid, d_moon, d_sunrise, d_sunset,
-        d_activity, d_steps, d_template, d_source
+        d_temp, d_weather, d_humid, d_moon, d_sunrise, d_sunset
       )
       ON CONFLICT (uuid) DO UPDATE SET
         text = EXCLUDED.text,
-        rich_text = EXCLUDED.rich_text,
         modified_at = EXCLUDED.modified_at,
         timezone = EXCLUDED.timezone,
-        is_all_day = EXCLUDED.is_all_day,
-        is_pinned = EXCLUDED.is_pinned,
-        starred = EXCLUDED.starred,
-        editing_time = EXCLUDED.editing_time,
-        duration = EXCLUDED.duration,
-        creation_device = EXCLUDED.creation_device,
-        device_model = EXCLUDED.device_model,
-        device_type = EXCLUDED.device_type,
-        os_name = EXCLUDED.os_name,
-        os_version = EXCLUDED.os_version,
         latitude = EXCLUDED.latitude,
         longitude = EXCLUDED.longitude,
         city = EXCLUDED.city,
@@ -521,19 +445,12 @@ async function syncBatch(
         humidity = EXCLUDED.humidity,
         moon_phase = EXCLUDED.moon_phase,
         sunrise = EXCLUDED.sunrise,
-        sunset = EXCLUDED.sunset,
-        user_activity = EXCLUDED.user_activity,
-        step_count = EXCLUDED.step_count,
-        template_name = EXCLUDED.template_name,
-        source_string = EXCLUDED.source_string
+        sunset = EXCLUDED.sunset
       RETURNING id, uuid`,
       [
-        col.uuids, col.texts, col.richTexts, col.createdAts, col.modifiedAts, col.timezones,
-        col.isAllDays, col.isPinneds, col.starreds, col.editingTimes, col.durations,
-        col.creationDevices, col.deviceModels, col.deviceTypes, col.osNames, col.osVersions,
+        col.uuids, col.texts, col.createdAts, col.modifiedAts, col.timezones,
         col.latitudes, col.longitudes, col.cities, col.countries, col.placeNames, col.adminAreas,
         col.temperatures, col.weatherConditions, col.humidities, col.moonPhases, col.sunrises, col.sunsets,
-        col.userActivities, col.stepCounts, col.templateNames, col.sourceStrings,
       ]
     );
 
