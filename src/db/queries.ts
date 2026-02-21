@@ -334,7 +334,8 @@ export async function findSimilarEntries(
       ) ORDER BY m.id) FILTER (WHERE m.url IS NOT NULL), '[]'::json)
       FROM media m WHERE m.entry_id = e.id) AS media,
       dm.weight_kg
-    FROM entries e, source s
+    FROM entries e
+    CROSS JOIN source s
     LEFT JOIN daily_metrics dm ON dm.date = e.created_at::date
     WHERE e.id != s.id
       AND e.embedding IS NOT NULL
