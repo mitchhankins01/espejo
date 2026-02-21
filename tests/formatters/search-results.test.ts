@@ -28,6 +28,7 @@ function makeEntry(overrides: Partial<EntryRow> = {}): EntryRow {
     video_count: 0,
     audio_count: 0,
     media: [],
+    weight_kg: null,
     ...overrides,
   };
 }

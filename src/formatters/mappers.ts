@@ -39,6 +39,8 @@ export function toEntryResult(row: EntryRow): EntryResult {
   if (row.longitude !== null) result.longitude = row.longitude;
   if (row.timezone) result.timezone = row.timezone;
 
+  if (row.weight_kg !== null) result.weight_kg = row.weight_kg;
+
   if (row.temperature !== null || row.weather_conditions || row.humidity !== null) {
     const weather: EntryResult["weather"] = {};
     if (row.temperature !== null) weather.temperature = row.temperature;

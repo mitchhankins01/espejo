@@ -15,6 +15,7 @@ import {
   findSimilarEntries,
   listTags,
   getEntryStats,
+  upsertDailyMetric,
 } from "../../src/db/queries.js";
 
 // Use the work-stress embedding as a stand-in for query embedding in search tests
@@ -345,5 +346,106 @@ describe("getEntryStats", () => {
   it("returns zero streaks when no data in range", async () => {
     const stats = await getEntryStats(pool, "2020-01-01", "2020-01-02");
     expect(stats.total_entries).toBe(0);
+  });
+});
+
+describe("daily_metrics enrichment", () => {
+  it("includes weight_kg in entry when daily_metrics has data", async () => {
+    // ENTRY-001-WORK-STRESS is 2024-03-15, fixture seeds weight 82.3 for that date
+    const entry = await getEntryByUuid(pool, "ENTRY-001-WORK-STRESS");
+
+    expect(entry).not.toBeNull();
+    expect(entry!.weight_kg).toBe(82.3);
+  });
+
+  it("returns null weight_kg when no daily_metrics for that date", async () => {
+    // ENTRY-009-NO-METADATA is 2024-08-01, no weight fixture for that date
+    const entry = await getEntryByUuid(pool, "ENTRY-009-NO-METADATA");
+
+    expect(entry).not.toBeNull();
+    expect(entry!.weight_kg).toBeNull();
+  });
+
+  it("includes weight_kg in date range results", async () => {
+    const entries = await getEntriesByDateRange(
+      pool,
+      "2024-03-01",
+      "2024-03-31",
+      20
+    );
+
+    expect(entries.length).toBeGreaterThan(0);
+    // At least one entry should have weight data
+    const withWeight = entries.filter((e) => e.weight_kg !== null);
+    expect(withWeight.length).toBeGreaterThan(0);
+  });
+
+  it("includes weight_kg in search results", async () => {
+    const results = await searchEntries(
+      pool,
+      workStressEntry.embedding,
+      "overwhelmed work",
+      {},
+      10
+    );
+
+    expect(results.length).toBeGreaterThan(0);
+    // ENTRY-001 (2024-03-15) should have weight from fixtures
+    const entry001 = results.find((r) => r.uuid === "ENTRY-001-WORK-STRESS");
+    if (entry001) {
+      expect(entry001.weight_kg).toBe(82.3);
+    }
+  });
+
+  it("includes weight_kg in on_this_day results", async () => {
+    // June 15 has entries and weight fixture data
+    const entries = await getEntriesOnThisDay(pool, 6, 15);
+
+    expect(entries.length).toBe(2);
+    // 2024-06-15 has weight data, 2023-06-15 does not
+    const entry2024 = entries.find(
+      (e) => new Date(e.created_at).getFullYear() === 2024
+    );
+    const entry2023 = entries.find(
+      (e) => new Date(e.created_at).getFullYear() === 2023
+    );
+    expect(entry2024?.weight_kg).toBe(81.5);
+    expect(entry2023?.weight_kg).toBeNull();
+  });
+
+  it("includes weight_kg in find_similar results", async () => {
+    const results = await findSimilarEntries(
+      pool,
+      "ENTRY-001-WORK-STRESS",
+      10
+    );
+
+    expect(results.length).toBeGreaterThan(0);
+    // Each result should have weight_kg (either a number or null)
+    for (const r of results) {
+      expect(r.weight_kg === null || typeof r.weight_kg === "number").toBe(true);
+    }
+  });
+});
+
+describe("upsertDailyMetric", () => {
+  it("inserts a new weight measurement", async () => {
+    await upsertDailyMetric(pool, "2024-01-01", 83.0);
+
+    const result = await pool.query(
+      "SELECT weight_kg FROM daily_metrics WHERE date = $1",
+      ["2024-01-01"]
+    );
+    expect(result.rows[0].weight_kg).toBe(83.0);
+  });
+
+  it("updates existing measurement on conflict", async () => {
+    await upsertDailyMetric(pool, "2024-03-15", 99.9);
+
+    const result = await pool.query(
+      "SELECT weight_kg FROM daily_metrics WHERE date = $1",
+      ["2024-03-15"]
+    );
+    expect(result.rows[0].weight_kg).toBe(99.9);
   });
 });

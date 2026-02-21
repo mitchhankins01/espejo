@@ -63,6 +63,13 @@ CREATE TABLE IF NOT EXISTS media (
     url TEXT
 );
 
+CREATE TABLE IF NOT EXISTS daily_metrics (
+    id SERIAL PRIMARY KEY,
+    date DATE UNIQUE NOT NULL,
+    weight_kg DOUBLE PRECISION,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS _migrations (
     id SERIAL PRIMARY KEY,
     name TEXT UNIQUE NOT NULL,
@@ -76,3 +83,4 @@ CREATE INDEX IF NOT EXISTS idx_entries_embedding ON entries USING ivfflat(embedd
 CREATE INDEX IF NOT EXISTS idx_entries_trgm ON entries USING GIN(text gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_entries_city ON entries(city);
 CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name);
+CREATE INDEX IF NOT EXISTS idx_daily_metrics_date ON daily_metrics(date);

@@ -56,6 +56,7 @@ function makeEntry(overrides: Partial<EntryRow> = {}): EntryRow {
     video_count: 0,
     audio_count: 0,
     media: [],
+    weight_kg: null,
     ...overrides,
   };
 }
@@ -130,6 +131,26 @@ describe("handleGetEntry", () => {
       tags: [],
       media_counts: { photos: 0, videos: 0, audios: 0 },
     });
+  });
+
+  it("includes weight_kg when present", async () => {
+    mockQueries.getEntryByUuid.mockResolvedValue(
+      makeEntry({ weight_kg: 82.3 })
+    );
+
+    const result = await handleGetEntry(mockPool, { uuid: "TEST-UUID" });
+    const parsed = JSON.parse(result);
+
+    expect(parsed.weight_kg).toBe(82.3);
+  });
+
+  it("omits weight_kg when null", async () => {
+    mockQueries.getEntryByUuid.mockResolvedValue(makeEntry());
+
+    const result = await handleGetEntry(mockPool, { uuid: "TEST-UUID" });
+    const parsed = JSON.parse(result);
+
+    expect(parsed.weight_kg).toBeUndefined();
   });
 
   it("returns not found message when entry is null", async () => {

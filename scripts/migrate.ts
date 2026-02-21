@@ -15,6 +15,34 @@ const databaseUrl =
     ? "postgresql://test:test@localhost:5433/journal_test"
     : "postgresql://dev:dev@localhost:5434/journal_dev");
 
+interface Migration {
+  name: string;
+  getSql: () => string;
+}
+
+const migrations: Migration[] = [
+  {
+    name: "001-initial-schema",
+    getSql: () =>
+      fs.readFileSync(
+        path.resolve(__dirname, "..", "specs", "schema.sql"),
+        "utf-8"
+      ),
+  },
+  {
+    name: "002-daily-metrics",
+    getSql: () => `
+      CREATE TABLE IF NOT EXISTS daily_metrics (
+          id SERIAL PRIMARY KEY,
+          date DATE UNIQUE NOT NULL,
+          weight_kg DOUBLE PRECISION,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_daily_metrics_date ON daily_metrics(date);
+    `,
+  },
+];
+
 async function migrate(): Promise<void> {
   const pool = new pg.Pool({ connectionString: databaseUrl });
 
@@ -28,46 +56,42 @@ async function migrate(): Promise<void> {
       )
     `);
 
-    const schemaPath = path.resolve(__dirname, "..", "specs", "schema.sql");
-    const migrationName = "001-initial-schema";
+    for (const migration of migrations) {
+      // Check if already applied
+      const existing = await pool.query(
+        "SELECT id FROM _migrations WHERE name = $1",
+        [migration.name]
+      );
 
-    // Check if already applied
-    const existing = await pool.query(
-      "SELECT id FROM _migrations WHERE name = $1",
-      [migrationName]
-    );
-
-    if (existing.rows.length > 0) {
-      console.log(`Migration "${migrationName}" already applied, skipping.`);
-      return;
-    }
-
-    // Read and apply schema
-    const sql = fs.readFileSync(schemaPath, "utf-8");
-
-    // Split on semicolons but handle the GENERATED ALWAYS AS clause and other complex statements
-    // Execute the whole file as a single transaction
-    await pool.query("BEGIN");
-    try {
-      // Execute statements one by one, splitting carefully
-      const statements = splitSqlStatements(sql);
-      for (const stmt of statements) {
-        const trimmed = stmt.trim();
-        if (trimmed && !trimmed.startsWith("--")) {
-          await pool.query(trimmed);
-        }
+      if (existing.rows.length > 0) {
+        console.log(`Migration "${migration.name}" already applied, skipping.`);
+        continue;
       }
 
-      // Record migration
-      await pool.query("INSERT INTO _migrations (name) VALUES ($1)", [
-        migrationName,
-      ]);
+      // Read and apply schema
+      const sql = migration.getSql();
 
-      await pool.query("COMMIT");
-      console.log(`Applied migration: ${migrationName}`);
-    } catch (err) {
-      await pool.query("ROLLBACK");
-      throw err;
+      await pool.query("BEGIN");
+      try {
+        const statements = splitSqlStatements(sql);
+        for (const stmt of statements) {
+          const trimmed = stmt.trim();
+          if (trimmed && !trimmed.startsWith("--")) {
+            await pool.query(trimmed);
+          }
+        }
+
+        // Record migration
+        await pool.query("INSERT INTO _migrations (name) VALUES ($1)", [
+          migration.name,
+        ]);
+
+        await pool.query("COMMIT");
+        console.log(`Applied migration: ${migration.name}`);
+      } catch (err) {
+        await pool.query("ROLLBACK");
+        throw err;
+      }
     }
   } finally {
     await pool.end();

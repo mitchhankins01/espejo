@@ -31,6 +31,7 @@ export interface EntryRow {
   video_count: number;
   audio_count: number;
   media: MediaItem[];
+  weight_kg: number | null;
 }
 
 export type SearchResultRow = EntryRow & {
@@ -162,10 +163,12 @@ export async function searchEntries(
       (SELECT COALESCE(json_agg(json_build_object(
         'type', m.type, 'url', m.url, 'dimensions', m.dimensions
       ) ORDER BY m.id) FILTER (WHERE m.url IS NOT NULL), '[]'::json)
-      FROM media m WHERE m.entry_id = e.id) AS media
+      FROM media m WHERE m.entry_id = e.id) AS media,
+      dm.weight_kg
     FROM entries e
     LEFT JOIN semantic s ON e.id = s.id
     LEFT JOIN fulltext f ON e.id = f.id
+    LEFT JOIN daily_metrics dm ON dm.date = e.created_at::date
     WHERE s.id IS NOT NULL OR f.id IS NOT NULL
     ORDER BY rrf_score DESC
     LIMIT $3
@@ -206,8 +209,10 @@ export async function getEntryByUuid(
       (SELECT COALESCE(json_agg(json_build_object(
         'type', m.type, 'url', m.url, 'dimensions', m.dimensions
       ) ORDER BY m.id) FILTER (WHERE m.url IS NOT NULL), '[]'::json)
-      FROM media m WHERE m.entry_id = e.id) AS media
+      FROM media m WHERE m.entry_id = e.id) AS media,
+      dm.weight_kg
     FROM entries e
+    LEFT JOIN daily_metrics dm ON dm.date = e.created_at::date
     WHERE e.uuid = $1`,
     [uuid]
   );
@@ -236,6 +241,7 @@ export async function getEntryByUuid(
     video_count: row.video_count,
     audio_count: row.audio_count,
     media: /* v8 ignore next -- defensive: SQL coalesces to '[]' */ row.media || [],
+    weight_kg: row.weight_kg != null ? parseFloat(row.weight_kg) : null,
   };
 }
 
@@ -257,8 +263,10 @@ export async function getEntriesByDateRange(
       ) AS tags,
       (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'photo') AS photo_count,
       (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'video') AS video_count,
-      (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'audio') AS audio_count
+      (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'audio') AS audio_count,
+      dm.weight_kg
     FROM entries e
+    LEFT JOIN daily_metrics dm ON dm.date = e.created_at::date
     WHERE e.created_at >= $1::timestamptz
       AND e.created_at < ($2::date + interval '1 day')
     ORDER BY e.created_at ASC
@@ -286,8 +294,10 @@ export async function getEntriesOnThisDay(
       ) AS tags,
       (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'photo') AS photo_count,
       (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'video') AS video_count,
-      (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'audio') AS audio_count
+      (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'audio') AS audio_count,
+      dm.weight_kg
     FROM entries e
+    LEFT JOIN daily_metrics dm ON dm.date = e.created_at::date
     WHERE EXTRACT(MONTH FROM e.created_at) = $1
       AND EXTRACT(DAY FROM e.created_at) = $2
     ORDER BY e.created_at ASC`,
@@ -322,8 +332,10 @@ export async function findSimilarEntries(
       (SELECT COALESCE(json_agg(json_build_object(
         'type', m.type, 'url', m.url, 'dimensions', m.dimensions
       ) ORDER BY m.id) FILTER (WHERE m.url IS NOT NULL), '[]'::json)
-      FROM media m WHERE m.entry_id = e.id) AS media
+      FROM media m WHERE m.entry_id = e.id) AS media,
+      dm.weight_kg
     FROM entries e, source s
+    LEFT JOIN daily_metrics dm ON dm.date = e.created_at::date
     WHERE e.id != s.id
       AND e.embedding IS NOT NULL
     ORDER BY e.embedding <=> s.embedding
@@ -481,6 +493,22 @@ export async function getEntryStats(
   };
 }
 
+/**
+ * Upsert a daily metric (weight). Used by the HTTP /api/metrics endpoint.
+ */
+export async function upsertDailyMetric(
+  pool: pg.Pool,
+  date: string,
+  weightKg: number
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO daily_metrics (date, weight_kg)
+     VALUES ($1::date, $2)
+     ON CONFLICT (date) DO UPDATE SET weight_kg = EXCLUDED.weight_kg`,
+    [date, weightKg]
+  );
+}
+
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -507,5 +535,6 @@ function mapEntryRow(row: Record<string, unknown>): EntryRow {
     video_count: row.video_count as number,
     audio_count: row.audio_count as number,
     media: (row.media as MediaItem[]) || [],
+    weight_kg: row.weight_kg != null ? parseFloat(row.weight_kg as string) : null,
   };
 }

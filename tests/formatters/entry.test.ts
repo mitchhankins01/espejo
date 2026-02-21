@@ -25,6 +25,7 @@ function makeEntry(overrides: Partial<EntryRow> = {}): EntryRow {
     video_count: 0,
     audio_count: 0,
     media: [],
+    weight_kg: null,
     ...overrides,
   };
 }
@@ -221,6 +222,16 @@ describe("toEntryResult", () => {
       videos: 1,
       audios: 2,
     });
+  });
+
+  it("includes weight_kg when present", () => {
+    const result = toEntryResult(makeEntry({ weight_kg: 82.3 }));
+    expect(result.weight_kg).toBe(82.3);
+  });
+
+  it("omits weight_kg when null", () => {
+    const result = toEntryResult(makeEntry()) as Record<string, unknown>;
+    expect(result).not.toHaveProperty("weight_kg");
   });
 });
 

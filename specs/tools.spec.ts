@@ -63,6 +63,7 @@ export interface EntryResult {
     audios: number;
   };
   word_count: number;
+  weight_kg?: number;
 }
 
 export type SearchResult = EntryResult & {

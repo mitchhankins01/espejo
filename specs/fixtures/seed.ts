@@ -281,4 +281,20 @@ export async function seedFixtures(pool: pg.Pool): Promise<void> {
       }
     }
   }
+
+  // Seed daily_metrics (weight data for some entry dates — not all)
+  const weightFixtures = [
+    { date: "2024-03-15", weight_kg: 82.3 },
+    { date: "2024-03-20", weight_kg: 82.1 },
+    { date: "2024-06-15", weight_kg: 81.5 },
+    { date: "2025-01-10", weight_kg: 80.5 },
+    { date: "2025-03-15", weight_kg: 79.8 },
+  ];
+
+  for (const w of weightFixtures) {
+    await pool.query(
+      `INSERT INTO daily_metrics (date, weight_kg) VALUES ($1, $2)`,
+      [w.date, w.weight_kg]
+    );
+  }
 }

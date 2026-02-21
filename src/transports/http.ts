@@ -1,7 +1,10 @@
 import express from "express";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { z } from "zod";
 import { config } from "../config.js";
+import { pool } from "../db/client.js";
+import { upsertDailyMetric } from "../db/queries.js";
 import { registerOAuthRoutes, isValidOAuthToken } from "./oauth.js";
 
 type ServerFactory = () => McpServer;
@@ -56,6 +59,37 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
       error: { code: -32600, message: "Unauthorized" },
       id: null,
     });
+  });
+
+  // Metrics ingestion endpoint — accepts daily weight (and later Oura) data
+  const metricsBodySchema = z.object({
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD format"),
+    weight_kg: z.number().positive(),
+  });
+
+  app.post("/api/metrics", async (req, res) => {
+    // Bearer token auth (same MCP_SECRET)
+    if (secret) {
+      const auth = req.headers.authorization;
+      if (!auth || !auth.startsWith("Bearer ") || auth.slice(7) !== secret) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+    }
+
+    const parsed = metricsBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues });
+      return;
+    }
+
+    try {
+      await upsertDailyMetric(pool, parsed.data.date, parsed.data.weight_kg);
+      res.json({ status: "ok", date: parsed.data.date, weight_kg: parsed.data.weight_kg });
+    } catch (err) {
+      console.error("Metrics upsert error:", err);
+      res.status(500).json({ error: String(err) });
+    }
   });
 
   // MCP endpoint — fresh server + transport per request (SDK requirement)
