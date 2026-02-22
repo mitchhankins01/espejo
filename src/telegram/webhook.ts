@@ -147,6 +147,11 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
       return;
     }
 
+    // Handle /compose command
+    if (command?.name === "compose") {
+      text = "Write the entry now.";
+    }
+
     // Handle /evening command
     if (command?.name === "evening") {
       const firstArg = command.argText.split(/\s+/)[0].toLowerCase();

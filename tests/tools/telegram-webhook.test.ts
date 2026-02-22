@@ -824,6 +824,15 @@ describe("error handling", () => {
     expect(mockRunAgent).not.toHaveBeenCalled();
   });
 
+  it("handles /compose command by injecting compose instruction into runAgent", async () => {
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/compose", messageId: 1, date: 1000 });
+
+    expect(mockRunAgent).toHaveBeenCalledTimes(1);
+    const call = mockRunAgent.mock.calls[0][0];
+    expect(call.message).toBe("Write the entry now.");
+  });
+
   it("activates evening review mode with /evening", async () => {
     const handler = getHandler();
     await handler({ chatId: 100, text: "/evening", messageId: 1, date: 1000 });
