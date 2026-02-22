@@ -15,7 +15,10 @@ import {
   insertPatternAlias,
   insertPatternObservation,
   findSimilarPatterns,
+  getLastCostNotificationTime,
+  getTotalApiCostSince,
   linkPatternToEntry,
+  insertCostNotification,
   logApiUsage,
   logMemoryRetrieval,
   markMessagesCompacted,
@@ -77,6 +80,7 @@ const MIN_MESSAGES_FOR_TIME_COMPACT = 10;
 const MIN_MESSAGES_FOR_FORCE_COMPACT = 4;
 const MAX_NEW_PATTERNS_PER_COMPACTION = 7;
 const RECENT_MESSAGES_LIMIT = 50;
+const COST_NOTIFICATION_INTERVAL_HOURS = 12;
 
 // ---------------------------------------------------------------------------
 // System prompt
@@ -315,6 +319,34 @@ function computeCost(
   /* v8 ignore next -- defensive: all known models have rates */
   if (!rates) return 0;
   return (inputTokens / 1_000_000) * rates.input + (outputTokens / 1_000_000) * rates.output;
+}
+
+function formatUsd(value: number): string {
+  if (value >= 0.1) return value.toFixed(2);
+  return value.toFixed(3);
+}
+
+async function maybeBuildCostActivityNote(chatId: string): Promise<string | null> {
+  const now = new Date();
+  const lastNotifiedAt = await getLastCostNotificationTime(pool, chatId);
+  const intervalMs = COST_NOTIFICATION_INTERVAL_HOURS * 60 * 60 * 1000;
+
+  if (lastNotifiedAt && now.getTime() - lastNotifiedAt.getTime() < intervalMs) {
+    return null;
+  }
+
+  const windowStart = lastNotifiedAt ?? new Date(now.getTime() - intervalMs);
+  const totalCost = await getTotalApiCostSince(pool, windowStart, now);
+  if (totalCost <= 0) return null;
+
+  await insertCostNotification(pool, {
+    chatId,
+    windowStart,
+    windowEnd: now,
+    costUsd: totalCost,
+  });
+
+  return `cost ~$${formatUsd(totalCost)} since ${lastNotifiedAt ? "last note" : "last 12h"}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1188,6 +1220,8 @@ export async function runAgent(params: {
     const topKinds = [...new Set(patterns.map((p) => p.kind))].slice(0, 3).join(", ");
     activityParts.push(`used ${patterns.length} memories${topKinds ? ` (${topKinds})` : ""}`);
   }
+  const costNote = await maybeBuildCostActivityNote(chatId);
+  if (costNote) activityParts.push(costNote);
   if (degraded) activityParts.push("memory degraded");
   if (toolCallCount > 0) activityParts.push(`${toolCallCount} tools (${toolNames.join(", ")})`);
   const activity = activityParts.join(" | ");

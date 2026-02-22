@@ -556,6 +556,15 @@ export interface ApiUsageSummaryRow {
   total_cost_usd: number;
 }
 
+export interface CostNotificationRow {
+  id: number;
+  chat_id: string;
+  window_start: Date;
+  window_end: Date;
+  cost_usd: number;
+  created_at: Date;
+}
+
 /**
  * Insert a chat message. Returns false if duplicate (via external_message_id UNIQUE).
  */
@@ -1011,6 +1020,61 @@ export async function getUsageSummary(
     [since]
   );
   return result.rows;
+}
+
+export async function getTotalApiCostSince(
+  pool: pg.Pool,
+  since: Date,
+  until: Date
+): Promise<number> {
+  const result = await pool.query(
+    `SELECT COALESCE(SUM(cost_usd), 0)::float AS total_cost
+     FROM api_usage
+     WHERE created_at >= $1 AND created_at <= $2`,
+    [since, until]
+  );
+  return result.rows[0]?.total_cost ?? 0;
+}
+
+export async function getLastCostNotificationTime(
+  pool: pg.Pool,
+  chatId: string
+): Promise<Date | null> {
+  const result = await pool.query(
+    `SELECT created_at
+     FROM cost_notifications
+     WHERE chat_id = $1
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [chatId]
+  );
+  return result.rows[0]?.created_at ?? null;
+}
+
+export async function insertCostNotification(
+  pool: pg.Pool,
+  params: {
+    chatId: string;
+    windowStart: Date;
+    windowEnd: Date;
+    costUsd: number;
+  }
+): Promise<CostNotificationRow> {
+  const result = await pool.query(
+    `INSERT INTO cost_notifications (chat_id, window_start, window_end, cost_usd)
+     VALUES ($1, $2, $3, $4)
+     RETURNING *`,
+    [params.chatId, params.windowStart, params.windowEnd, params.costUsd]
+  );
+  const row = result.rows[0];
+  return {
+    id: row.id as number,
+    chat_id: String(row.chat_id),
+    window_start: row.window_start as Date,
+    window_end: row.window_end as Date,
+    cost_usd: parseFloat(row.cost_usd as string),
+    created_at: row.created_at as Date,
+  };
 }
 
 export async function logMemoryRetrieval(
