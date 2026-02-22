@@ -148,8 +148,10 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
     }
 
     // Handle /compose command
+    let prefill: string | undefined;
     if (command?.name === "compose") {
       text = "Write the entry now.";
+      prefill = "# ";
     }
 
     // Handle /evening command
@@ -171,6 +173,7 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
       externalMessageId: String(msg.messageId),
       messageDate: msg.date,
       mode: getChatMode(chatId),
+      prefill,
       /* v8 ignore next 3 -- async callback tested via agent compaction tests */
       onCompacted: async (summary) => {
         await sendTelegramMessage(chatId, `<i>Memory note: ${summary}</i>`);

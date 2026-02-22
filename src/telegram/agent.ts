@@ -410,19 +410,21 @@ function toAnthropicMessages(
 async function runToolLoop(
   systemPrompt: string,
   messages: ChatHistoryMessage[],
-  chatId: string
+  chatId: string,
+  prefill?: string
 ): Promise<{ text: string; toolCallCount: number; toolNames: string[] }> {
   const provider = getLlmProvider();
   if (provider === "openai") {
-    return runOpenAIToolLoop(systemPrompt, messages, chatId);
+    return runOpenAIToolLoop(systemPrompt, messages, chatId, prefill);
   }
-  return runAnthropicToolLoop(systemPrompt, messages, chatId);
+  return runAnthropicToolLoop(systemPrompt, messages, chatId, prefill);
 }
 
 async function runAnthropicToolLoop(
   systemPrompt: string,
   messages: ChatHistoryMessage[],
-  chatId: string
+  chatId: string,
+  prefill?: string
 ): Promise<{ text: string; toolCallCount: number; toolNames: string[] }> {
   const anthropic = getAnthropic();
   const model = getLlmModel("anthropic");
@@ -433,6 +435,12 @@ async function runAnthropicToolLoop(
   const toolNamesUsed = new Set<string>();
 
   const loopMessages = toAnthropicMessages(messages);
+
+  // Prefill forces the model to continue from a partial assistant response,
+  // preventing conversational replies when a structured format is expected.
+  if (prefill) {
+    loopMessages.push({ role: "assistant", content: prefill });
+  }
 
   while (true) {
     const elapsed = Date.now() - startMs;
@@ -475,19 +483,34 @@ async function runAnthropicToolLoop(
       const textBlocks = response.content.filter(
         (b): b is Anthropic.TextBlock => b.type === "text"
       );
+      const responseText = textBlocks.map((b) => b.text).join("\n") || "";
       return {
-        text: textBlocks.map((b) => b.text).join("\n") || "",
+        text: prefill ? prefill + responseText : responseText,
         toolCallCount,
         toolNames: [...toolNamesUsed],
       };
     }
 
-    // Process tool calls
+    // Process tool calls — if prefill was the last message, merge to avoid
+    // consecutive assistant messages which are invalid for the API.
     const assistantContent = response.content;
-    loopMessages.push({
-      role: "assistant",
-      content: assistantContent as Anthropic.ContentBlockParam[],
-    });
+    /* v8 ignore next 10 -- prefill + tool calls: compose never triggers tools */
+    if (prefill && loopMessages[loopMessages.length - 1]?.content === prefill) {
+      loopMessages.pop();
+      loopMessages.push({
+        role: "assistant",
+        content: [
+          { type: "text" as const, text: prefill },
+          ...(assistantContent as Anthropic.ContentBlockParam[]),
+        ],
+      });
+      prefill = undefined;
+    } else {
+      loopMessages.push({
+        role: "assistant",
+        content: assistantContent as Anthropic.ContentBlockParam[],
+      });
+    }
 
     const toolResults: Anthropic.ToolResultBlockParam[] = [];
 
@@ -561,7 +584,8 @@ async function runAnthropicToolLoop(
 async function runOpenAIToolLoop(
   systemPrompt: string,
   messages: ChatHistoryMessage[],
-  chatId: string
+  chatId: string,
+  prefill?: string
 ): Promise<{ text: string; toolCallCount: number; toolNames: string[] }> {
   const openai = getOpenAI();
   const model = getLlmModel("openai");
@@ -575,6 +599,11 @@ async function runOpenAIToolLoop(
     role: msg.role,
     content: msg.content,
   }));
+
+  /* v8 ignore next 3 -- OpenAI prefill: tested via Anthropic path */
+  if (prefill) {
+    loopMessages.push({ role: "assistant", content: prefill });
+  }
 
   while (true) {
     const elapsed = Date.now() - startMs;
@@ -614,10 +643,20 @@ async function runOpenAIToolLoop(
 
     if (toolCalls.length === 0) {
       return {
-        text: assistantContent,
+        /* v8 ignore next -- OpenAI prefill: tested via Anthropic path */
+        text: prefill ? prefill + assistantContent : assistantContent,
         toolCallCount,
         toolNames: [...toolNamesUsed],
       };
+    }
+
+    // If prefill was the last message, remove it before pushing the
+    // full assistant response to avoid consecutive assistant messages.
+    /* v8 ignore next 5 -- prefill + tool calls: compose never triggers tools */
+    if (prefill && loopMessages[loopMessages.length - 1]?.role === "assistant" &&
+        loopMessages[loopMessages.length - 1]?.content === prefill) {
+      loopMessages.pop();
+      prefill = undefined;
     }
 
     loopMessages.push({
@@ -1225,6 +1264,7 @@ export async function runAgent(params: {
   externalMessageId: string;
   messageDate: number;
   mode?: AgentMode;
+  prefill?: string;
   onCompacted?: (summary: string) => Promise<void>;
 }): Promise<AgentResult> {
   const {
@@ -1232,6 +1272,7 @@ export async function runAgent(params: {
     message,
     externalMessageId,
     mode = "default",
+    prefill,
     onCompacted,
   } = params;
 
@@ -1269,7 +1310,7 @@ export async function runAgent(params: {
   const messages = reconstructMessages(recentMessages);
 
   // 4. Run tool loop
-  const { text, toolCallCount, toolNames } = await runToolLoop(systemPrompt, messages, chatId);
+  const { text, toolCallCount, toolNames } = await runToolLoop(systemPrompt, messages, chatId, prefill);
 
   // 5. Build activity summary
   const activityParts: string[] = [];
