@@ -357,6 +357,41 @@ Deployed to Railway. Mirrors the deployment pattern from [oura-ring-mcp](https:/
 
 The Dockerfile is multi-stage: TypeScript build → slim Node.js runtime. The production image does not include dev dependencies, test fixtures, or Docker Compose files.
 
+### Telegram Bot Deployment
+
+The Telegram chatbot is opt-in. If `TELEGRAM_BOT_TOKEN` is set in production, these vars are also required (startup will fail otherwise):
+
+| Variable | Purpose |
+|----------|---------|
+| `TELEGRAM_BOT_TOKEN` | Bot API token from @BotFather |
+| `TELEGRAM_SECRET_TOKEN` | Webhook verification (you generate this — any random string) |
+| `TELEGRAM_ALLOWED_CHAT_ID` | Your personal chat ID (single-user access control) |
+| `ANTHROPIC_API_KEY` | Claude agent for conversation |
+| `OPENAI_API_KEY` | Embeddings (pattern search) + Whisper (voice transcription) |
+
+**Setting up the webhook:**
+
+```bash
+# Generate a secret token
+openssl rand -hex 32
+
+# Set the webhook (reads TELEGRAM_BOT_TOKEN and TELEGRAM_SECRET_TOKEN from env)
+pnpm telegram:setup https://your-app.railway.app/api/telegram
+
+# Check webhook status
+pnpm telegram:setup --info
+
+# Remove webhook (for debugging)
+pnpm telegram:setup --delete
+```
+
+**Finding your chat ID:**
+
+1. Message your bot on Telegram
+2. Visit `https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates`
+3. Look for `"chat":{"id": 123456789}` in the response
+4. Set `TELEGRAM_ALLOWED_CHAT_ID=123456789` in Railway
+
 ## Code Style
 
 - TypeScript strict mode — no `any` unless absolutely necessary (and add a comment explaining why)

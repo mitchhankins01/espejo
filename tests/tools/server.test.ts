@@ -10,6 +10,7 @@ const { mockRegisterTool, mockHandlers } = vi.hoisted(() => ({
     handleFindSimilar: vi.fn(),
     handleListTags: vi.fn(),
     handleEntryStats: vi.fn(),
+    handleLogWeight: vi.fn(),
   },
 }));
 
@@ -40,8 +41,12 @@ vi.mock("../../src/tools/list-tags.js", () => ({
 vi.mock("../../src/tools/entry-stats.js", () => ({
   handleEntryStats: mockHandlers.handleEntryStats,
 }));
+vi.mock("../../src/tools/log-weight.js", () => ({
+  handleLogWeight: mockHandlers.handleLogWeight,
+}));
 
-import { createServer } from "../../src/server.js";
+import { createServer, toolHandlers } from "../../src/server.js";
+import type { ToolHandler } from "../../src/server.js";
 import { toolSpecs } from "../../specs/tools.spec.js";
 
 describe("createServer", () => {
@@ -108,5 +113,16 @@ describe("createServer", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("Unknown error");
+  });
+
+  it("exports toolHandlers map with all spec keys", () => {
+    for (const name of Object.keys(toolSpecs)) {
+      expect(toolHandlers).toHaveProperty(name);
+    }
+  });
+
+  it("exports ToolHandler type (compile-time check)", () => {
+    const handler: ToolHandler = toolHandlers.search_entries;
+    expect(typeof handler).toBe("function");
   });
 });

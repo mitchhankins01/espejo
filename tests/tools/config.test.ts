@@ -136,4 +136,121 @@ describe("config", () => {
       "postgresql://custom:custom@mydb/journal"
     );
   });
+
+  it("reads telegram config from env vars", async () => {
+    process.env.NODE_ENV = "development";
+    process.env.TELEGRAM_BOT_TOKEN = "123:ABC";
+    process.env.TELEGRAM_SECRET_TOKEN = "secret123";
+    process.env.TELEGRAM_ALLOWED_CHAT_ID = "456789";
+
+    const { config } = await import("../../src/config.js");
+    expect(config.telegram.botToken).toBe("123:ABC");
+    expect(config.telegram.secretToken).toBe("secret123");
+    expect(config.telegram.allowedChatId).toBe("456789");
+  });
+
+  it("uses telegram defaults when env vars are missing", async () => {
+    process.env.NODE_ENV = "development";
+    delete process.env.TELEGRAM_BOT_TOKEN;
+    delete process.env.TELEGRAM_SECRET_TOKEN;
+    delete process.env.TELEGRAM_ALLOWED_CHAT_ID;
+
+    const { config } = await import("../../src/config.js");
+    expect(config.telegram.botToken).toBe("");
+    expect(config.telegram.secretToken).toBe("");
+    expect(config.telegram.allowedChatId).toBe("");
+  });
+
+  it("reads anthropic config from env vars", async () => {
+    process.env.NODE_ENV = "development";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    process.env.ANTHROPIC_MODEL = "claude-opus-4-20250514";
+
+    const { config } = await import("../../src/config.js");
+    expect(config.anthropic.apiKey).toBe("sk-ant-test");
+    expect(config.anthropic.model).toBe("claude-opus-4-20250514");
+  });
+
+  it("uses anthropic defaults when env vars are missing", async () => {
+    process.env.NODE_ENV = "development";
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_MODEL;
+
+    const { config } = await import("../../src/config.js");
+    expect(config.anthropic.apiKey).toBe("");
+    expect(config.anthropic.model).toBe("claude-sonnet-4-5-20250514");
+  });
+
+  it("reads TIMEZONE from env", async () => {
+    process.env.NODE_ENV = "development";
+    process.env.TIMEZONE = "America/Los_Angeles";
+
+    const { config } = await import("../../src/config.js");
+    expect(config.timezone).toBe("America/Los_Angeles");
+  });
+
+  it("defaults TIMEZONE to Europe/Madrid", async () => {
+    process.env.NODE_ENV = "development";
+    delete process.env.TIMEZONE;
+
+    const { config } = await import("../../src/config.js");
+    expect(config.timezone).toBe("Europe/Madrid");
+  });
+
+  it("throws in production when TELEGRAM_BOT_TOKEN is set but dependencies are missing", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.DATABASE_URL = "postgresql://prod:prod@db/journal";
+    process.env.R2_PUBLIC_URL = "https://media.example.com";
+    process.env.TELEGRAM_BOT_TOKEN = "123:ABC";
+    delete process.env.TELEGRAM_SECRET_TOKEN;
+    delete process.env.TELEGRAM_ALLOWED_CHAT_ID;
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+
+    await expect(() => import("../../src/config.js")).rejects.toThrow(
+      "TELEGRAM_BOT_TOKEN is set but required vars are missing"
+    );
+  });
+
+  it("succeeds in production when TELEGRAM_BOT_TOKEN is set with all dependencies", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.DATABASE_URL = "postgresql://prod:prod@db/journal";
+    process.env.R2_PUBLIC_URL = "https://media.example.com";
+    process.env.TELEGRAM_BOT_TOKEN = "123:ABC";
+    process.env.TELEGRAM_SECRET_TOKEN = "secret123";
+    process.env.TELEGRAM_ALLOWED_CHAT_ID = "456789";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    process.env.OPENAI_API_KEY = "sk-openai-test";
+
+    const { config } = await import("../../src/config.js");
+    expect(config.telegram.botToken).toBe("123:ABC");
+  });
+
+  it("succeeds in production without Telegram when bot token is not set", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.DATABASE_URL = "postgresql://prod:prod@db/journal";
+    process.env.R2_PUBLIC_URL = "https://media.example.com";
+    delete process.env.TELEGRAM_BOT_TOKEN;
+
+    const { config } = await import("../../src/config.js");
+    expect(config.telegram.botToken).toBe("");
+  });
+
+  it("has apiRates with expected models", async () => {
+    process.env.NODE_ENV = "development";
+
+    const { config } = await import("../../src/config.js");
+    expect(config.apiRates["claude-sonnet-4-5-20250514"]).toEqual({
+      input: 3.0,
+      output: 15.0,
+    });
+    expect(config.apiRates["text-embedding-3-small"]).toEqual({
+      input: 0.02,
+      output: 0,
+    });
+    expect(config.apiRates["whisper-1"]).toEqual({
+      input: 0.006,
+      output: 0,
+    });
+  });
 });

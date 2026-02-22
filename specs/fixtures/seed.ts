@@ -57,6 +57,8 @@ const morningRoutineBase = generateBaseEmbedding(100);
 const travelBase = generateBaseEmbedding(200);
 const healthBase = generateBaseEmbedding(300);
 const reflectionBase = generateBaseEmbedding(400);
+const patternNicotineBase = generateBaseEmbedding(500);
+const patternSleepBase = generateBaseEmbedding(600);
 
 // ---------------------------------------------------------------------------
 // Fixture entries
@@ -225,6 +227,61 @@ export const fixtureEntries: FixtureEntry[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Pattern fixtures for testing pattern memory
+// ---------------------------------------------------------------------------
+
+export interface FixturePattern {
+  content: string;
+  kind: string;
+  confidence: number;
+  strength: number;
+  times_seen: number;
+  status: string;
+  embedding: number[];
+  first_seen: string;
+  last_seen: string;
+}
+
+export const fixturePatterns: FixturePattern[] = [
+  {
+    content:
+      "User's dopamine baseline crashes after nicotine use, causing next-day depletion and low readiness scores.",
+    kind: "causal",
+    confidence: 0.85,
+    strength: 3.5,
+    times_seen: 4,
+    status: "active",
+    embedding: patternNicotineBase,
+    first_seen: "2024-06-01T10:00:00Z",
+    last_seen: "2025-01-10T08:00:00Z",
+  },
+  {
+    content:
+      "User experiences poor sleep when consuming caffeine after 2pm or using screens after 9pm.",
+    kind: "behavior",
+    confidence: 0.75,
+    strength: 2.0,
+    times_seen: 3,
+    status: "active",
+    embedding: patternSleepBase,
+    first_seen: "2024-09-15T07:00:00Z",
+    last_seen: "2025-03-15T07:30:00Z",
+  },
+  {
+    content:
+      "User feels grounded and present after completing morning routine (cold plunge, breathwork, journaling).",
+    kind: "behavior",
+    confidence: 0.9,
+    strength: 5.0,
+    times_seen: 8,
+    status: "active",
+    embedding: addNoise(patternNicotineBase, 10),
+    first_seen: "2024-03-01T06:00:00Z",
+    last_seen: "2025-02-01T07:00:00Z",
+  },
+];
+
+// ---------------------------------------------------------------------------
 // Seed function for test setup
 // ---------------------------------------------------------------------------
 
@@ -295,6 +352,28 @@ export async function seedFixtures(pool: pg.Pool): Promise<void> {
     await pool.query(
       `INSERT INTO daily_metrics (date, weight_kg) VALUES ($1, $2)`,
       [w.date, w.weight_kg]
+    );
+  }
+
+  // Seed patterns
+  for (const pattern of fixturePatterns) {
+    const embeddingStr = `[${pattern.embedding.join(",")}]`;
+    await pool.query(
+      `INSERT INTO patterns (
+        content, kind, confidence, embedding, strength, times_seen, status,
+        first_seen, last_seen
+      ) VALUES ($1, $2, $3, $4::vector, $5, $6, $7, $8, $9)`,
+      [
+        pattern.content,
+        pattern.kind,
+        pattern.confidence,
+        embeddingStr,
+        pattern.strength,
+        pattern.times_seen,
+        pattern.status,
+        pattern.first_seen,
+        pattern.last_seen,
+      ]
     );
   }
 }

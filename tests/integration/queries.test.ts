@@ -16,7 +16,25 @@ import {
   listTags,
   getEntryStats,
   upsertDailyMetric,
+  insertChatMessage,
+  getRecentMessages,
+  markMessagesCompacted,
+  purgeCompactedMessages,
+  insertPattern,
+  reinforcePattern,
+  deprecatePattern,
+  updatePatternStatus,
+  findSimilarPatterns,
+  searchPatterns,
+  getTopPatterns,
+  insertPatternObservation,
+  insertPatternRelation,
+  insertPatternAlias,
+  linkPatternToEntry,
+  logApiUsage,
+  getUsageSummary,
 } from "../../src/db/queries.js";
+import { fixturePatterns } from "../../specs/fixtures/seed.js";
 
 // Use the work-stress embedding as a stand-in for query embedding in search tests
 const workStressEntry = fixtureEntries.find(
@@ -447,5 +465,451 @@ describe("upsertDailyMetric", () => {
       ["2024-03-15"]
     );
     expect(result.rows[0].weight_kg).toBe(99.9);
+  });
+});
+
+// ============================================================================
+// Chat message queries
+// ============================================================================
+
+describe("insertChatMessage", () => {
+  it("inserts a new message and returns id", async () => {
+    const result = await insertChatMessage(pool, {
+      chatId: "12345",
+      externalMessageId: "update:100",
+      role: "user",
+      content: "Hello bot",
+    });
+    expect(result.inserted).toBe(true);
+    expect(result.id).toBeGreaterThan(0);
+  });
+
+  it("deduplicates on external_message_id", async () => {
+    await insertChatMessage(pool, {
+      chatId: "12345",
+      externalMessageId: "update:200",
+      role: "user",
+      content: "First",
+    });
+    const dup = await insertChatMessage(pool, {
+      chatId: "12345",
+      externalMessageId: "update:200",
+      role: "user",
+      content: "Duplicate",
+    });
+    expect(dup.inserted).toBe(false);
+    expect(dup.id).toBeNull();
+  });
+
+  it("allows null external_message_id for assistant messages", async () => {
+    const r1 = await insertChatMessage(pool, {
+      chatId: "12345",
+      externalMessageId: null,
+      role: "assistant",
+      content: "Reply 1",
+    });
+    const r2 = await insertChatMessage(pool, {
+      chatId: "12345",
+      externalMessageId: null,
+      role: "assistant",
+      content: "Reply 2",
+    });
+    expect(r1.inserted).toBe(true);
+    expect(r2.inserted).toBe(true);
+  });
+
+  it("stores tool_call_id when provided", async () => {
+    const result = await insertChatMessage(pool, {
+      chatId: "12345",
+      externalMessageId: null,
+      role: "tool_result",
+      content: "result data",
+      toolCallId: "toolu_abc123",
+    });
+    expect(result.inserted).toBe(true);
+
+    const row = await pool.query(
+      "SELECT tool_call_id FROM chat_messages WHERE id = $1",
+      [result.id]
+    );
+    expect(row.rows[0].tool_call_id).toBe("toolu_abc123");
+  });
+});
+
+describe("getRecentMessages", () => {
+  it("returns uncompacted messages in chronological order", async () => {
+    await insertChatMessage(pool, {
+      chatId: "12345",
+      externalMessageId: "update:301",
+      role: "user",
+      content: "Message 1",
+    });
+    await insertChatMessage(pool, {
+      chatId: "12345",
+      externalMessageId: null,
+      role: "assistant",
+      content: "Reply 1",
+    });
+    await insertChatMessage(pool, {
+      chatId: "12345",
+      externalMessageId: "update:302",
+      role: "user",
+      content: "Message 2",
+    });
+
+    const messages = await getRecentMessages(pool, "12345", 100);
+    expect(messages).toHaveLength(3);
+    expect(messages[0].content).toBe("Message 1");
+    expect(messages[1].content).toBe("Reply 1");
+    expect(messages[2].content).toBe("Message 2");
+  });
+
+  it("respects limit", async () => {
+    for (let i = 0; i < 5; i++) {
+      await insertChatMessage(pool, {
+        chatId: "12345",
+        externalMessageId: `update:4${i}`,
+        role: "user",
+        content: `Message ${i}`,
+      });
+    }
+    const messages = await getRecentMessages(pool, "12345", 2);
+    expect(messages).toHaveLength(2);
+  });
+});
+
+describe("markMessagesCompacted", () => {
+  it("soft-deletes messages by setting compacted_at", async () => {
+    const r1 = await insertChatMessage(pool, {
+      chatId: "12345",
+      externalMessageId: "update:500",
+      role: "user",
+      content: "Old message",
+    });
+
+    await markMessagesCompacted(pool, [r1.id!]);
+
+    const messages = await getRecentMessages(pool, "12345", 100);
+    expect(messages).toHaveLength(0);
+  });
+});
+
+describe("purgeCompactedMessages", () => {
+  it("hard-deletes compacted messages older than threshold", async () => {
+    const r1 = await insertChatMessage(pool, {
+      chatId: "12345",
+      externalMessageId: "update:600",
+      role: "user",
+      content: "Old message",
+    });
+    await markMessagesCompacted(pool, [r1.id!]);
+
+    // Set compacted_at to the past
+    await pool.query(
+      "UPDATE chat_messages SET compacted_at = NOW() - INTERVAL '8 days' WHERE id = $1",
+      [r1.id]
+    );
+
+    const deleted = await purgeCompactedMessages(pool, new Date());
+    expect(deleted).toBe(1);
+  });
+});
+
+// ============================================================================
+// Pattern queries
+// ============================================================================
+
+describe("insertPattern", () => {
+  it("inserts a pattern and returns the row", async () => {
+    const pattern = await insertPattern(pool, {
+      content: "User prefers morning workouts",
+      kind: "preference",
+      confidence: 0.8,
+      embedding: fixturePatterns[0].embedding,
+      temporal: { time_of_day: "morning" },
+      canonicalHash: "abc123",
+      timestamp: new Date(),
+    });
+
+    expect(pattern.id).toBeGreaterThan(0);
+    expect(pattern.content).toBe("User prefers morning workouts");
+    expect(pattern.kind).toBe("preference");
+    expect(pattern.confidence).toBe(0.8);
+    expect(pattern.strength).toBe(1.0);
+    expect(pattern.times_seen).toBe(1);
+    expect(pattern.status).toBe("active");
+  });
+
+  it("inserts a pattern without embedding", async () => {
+    const pattern = await insertPattern(pool, {
+      content: "User dislikes mornings",
+      kind: "preference",
+      confidence: 0.6,
+      embedding: null,
+      temporal: null,
+      canonicalHash: "noembedding123",
+      timestamp: new Date(),
+    });
+
+    expect(pattern.id).toBeGreaterThan(0);
+    expect(pattern.content).toBe("User dislikes mornings");
+    expect(pattern.temporal).toBeNull();
+  });
+});
+
+describe("reinforcePattern", () => {
+  it("increments times_seen and updates strength", async () => {
+    // Get first seeded pattern
+    const before = await pool.query(
+      "SELECT * FROM patterns WHERE id = 1"
+    );
+    const beforeRow = before.rows[0];
+
+    // Set last_seen to 14 days ago for meaningful spacing boost
+    await pool.query(
+      "UPDATE patterns SET last_seen = NOW() - INTERVAL '14 days' WHERE id = 1"
+    );
+
+    const reinforced = await reinforcePattern(pool, 1, 0.9);
+
+    expect(reinforced.times_seen).toBe(beforeRow.times_seen + 1);
+    expect(reinforced.confidence).toBe(0.9);
+    expect(parseFloat(reinforced.strength as unknown as string)).toBeGreaterThan(
+      parseFloat(beforeRow.strength)
+    );
+  });
+});
+
+describe("deprecatePattern", () => {
+  it("sets status to deprecated", async () => {
+    await deprecatePattern(pool, 1);
+
+    const result = await pool.query(
+      "SELECT status FROM patterns WHERE id = 1"
+    );
+    expect(result.rows[0].status).toBe("deprecated");
+  });
+});
+
+describe("updatePatternStatus", () => {
+  it("updates to arbitrary status", async () => {
+    await updatePatternStatus(pool, 2, "superseded");
+
+    const result = await pool.query(
+      "SELECT status FROM patterns WHERE id = 2"
+    );
+    expect(result.rows[0].status).toBe("superseded");
+  });
+});
+
+describe("findSimilarPatterns", () => {
+  it("finds patterns by cosine similarity", async () => {
+    const results = await findSimilarPatterns(
+      pool,
+      fixturePatterns[0].embedding,
+      5,
+      0.5
+    );
+
+    expect(results.length).toBeGreaterThan(0);
+    for (const r of results) {
+      expect(r.similarity).toBeGreaterThanOrEqual(0.5);
+      expect(r.status).toBe("active");
+    }
+  });
+});
+
+describe("searchPatterns", () => {
+  it("returns patterns ranked by typed-decay score", async () => {
+    const results = await searchPatterns(
+      pool,
+      fixturePatterns[0].embedding,
+      5,
+      0.3
+    );
+
+    expect(results.length).toBeGreaterThan(0);
+    // Scores should be in descending order
+    for (let i = 1; i < results.length; i++) {
+      expect(results[i].score).toBeLessThanOrEqual(results[i - 1].score);
+    }
+  });
+
+  it("excludes deprecated/superseded patterns", async () => {
+    await deprecatePattern(pool, 1);
+
+    const results = await searchPatterns(
+      pool,
+      fixturePatterns[0].embedding,
+      10,
+      0.0
+    );
+
+    expect(results.every((r) => r.id !== 1)).toBe(true);
+  });
+});
+
+describe("getTopPatterns", () => {
+  it("returns active patterns ordered by strength", async () => {
+    const results = await getTopPatterns(pool, 10);
+
+    expect(results.length).toBeGreaterThan(0);
+    for (let i = 1; i < results.length; i++) {
+      expect(results[i].strength).toBeLessThanOrEqual(
+        results[i - 1].strength
+      );
+    }
+  });
+});
+
+// ============================================================================
+// Pattern supporting queries
+// ============================================================================
+
+describe("insertPatternObservation", () => {
+  it("creates an observation linked to a pattern", async () => {
+    const obsId = await insertPatternObservation(pool, {
+      patternId: 1,
+      chatMessageIds: [1, 2],
+      evidence: "User said they always feel tired after nicotine",
+      evidenceRoles: ["user", "tool_result"],
+      confidence: 0.8,
+    });
+    expect(obsId).toBeGreaterThan(0);
+  });
+});
+
+describe("insertPatternRelation", () => {
+  it("creates a relation between patterns", async () => {
+    await insertPatternRelation(pool, 1, 2, "supports");
+
+    const result = await pool.query(
+      "SELECT * FROM pattern_relations WHERE from_pattern_id = 1 AND to_pattern_id = 2"
+    );
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].relation).toBe("supports");
+  });
+
+  it("ignores duplicate relations", async () => {
+    await insertPatternRelation(pool, 1, 2, "contradicts");
+    await insertPatternRelation(pool, 1, 2, "contradicts");
+
+    const result = await pool.query(
+      "SELECT * FROM pattern_relations WHERE from_pattern_id = 1 AND to_pattern_id = 2 AND relation = 'contradicts'"
+    );
+    expect(result.rows).toHaveLength(1);
+  });
+});
+
+describe("insertPatternAlias", () => {
+  it("creates an alias for a pattern without embedding", async () => {
+    await insertPatternAlias(pool, 1, "Nicotine crashes dopamine", null);
+
+    const result = await pool.query(
+      "SELECT * FROM pattern_aliases WHERE pattern_id = 1"
+    );
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].content).toBe("Nicotine crashes dopamine");
+  });
+
+  it("creates an alias with embedding", async () => {
+    await insertPatternAlias(
+      pool,
+      2,
+      "Sleep suffers from caffeine",
+      fixturePatterns[1].embedding
+    );
+
+    const result = await pool.query(
+      "SELECT content, embedding IS NOT NULL AS has_embedding FROM pattern_aliases WHERE pattern_id = 2"
+    );
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].has_embedding).toBe(true);
+  });
+});
+
+describe("linkPatternToEntry", () => {
+  it("links a pattern to a journal entry", async () => {
+    await linkPatternToEntry(pool, 1, "ENTRY-001-WORK-STRESS", "compaction", 0.8);
+
+    const result = await pool.query(
+      "SELECT * FROM pattern_entries WHERE pattern_id = 1 AND entry_uuid = $1",
+      ["ENTRY-001-WORK-STRESS"]
+    );
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].source).toBe("compaction");
+    expect(parseFloat(result.rows[0].confidence)).toBe(0.8);
+  });
+
+  it("increments times_linked on repeated linking", async () => {
+    await linkPatternToEntry(pool, 1, "ENTRY-002-WORK-BURNOUT", "compaction", 0.7);
+    await linkPatternToEntry(pool, 1, "ENTRY-002-WORK-BURNOUT", "tool_loop", 0.9);
+
+    const result = await pool.query(
+      "SELECT times_linked FROM pattern_entries WHERE pattern_id = 1 AND entry_uuid = $1",
+      ["ENTRY-002-WORK-BURNOUT"]
+    );
+    expect(result.rows[0].times_linked).toBe(2);
+  });
+});
+
+// ============================================================================
+// API usage tracking
+// ============================================================================
+
+describe("logApiUsage", () => {
+  it("inserts a usage record", async () => {
+    await logApiUsage(pool, {
+      provider: "anthropic",
+      model: "claude-sonnet-4-5-20250514",
+      purpose: "agent",
+      inputTokens: 1000,
+      outputTokens: 500,
+      costUsd: 0.0105,
+      latencyMs: 1200,
+    });
+
+    const result = await pool.query("SELECT * FROM api_usage LIMIT 1");
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].provider).toBe("anthropic");
+    expect(result.rows[0].purpose).toBe("agent");
+  });
+});
+
+describe("getUsageSummary", () => {
+  it("aggregates usage by purpose", async () => {
+    await logApiUsage(pool, {
+      provider: "anthropic",
+      model: "claude-sonnet-4-5-20250514",
+      purpose: "agent",
+      inputTokens: 1000,
+      outputTokens: 500,
+      costUsd: 0.01,
+    });
+    await logApiUsage(pool, {
+      provider: "anthropic",
+      model: "claude-sonnet-4-5-20250514",
+      purpose: "agent",
+      inputTokens: 2000,
+      outputTokens: 800,
+      costUsd: 0.02,
+    });
+    await logApiUsage(pool, {
+      provider: "openai",
+      model: "text-embedding-3-small",
+      purpose: "embedding",
+      inputTokens: 500,
+      outputTokens: 0,
+      costUsd: 0.001,
+    });
+
+    const summary = await getUsageSummary(pool, new Date(0));
+    expect(summary.length).toBe(2);
+
+    const agentSummary = summary.find((s) => s.purpose === "agent");
+    expect(agentSummary).toBeDefined();
+    expect(agentSummary!.total_calls).toBe(2);
+    expect(agentSummary!.total_input_tokens).toBe(3000);
+    expect(agentSummary!.total_output_tokens).toBe(1300);
   });
 });

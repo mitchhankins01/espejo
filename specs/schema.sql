@@ -84,3 +84,112 @@ CREATE INDEX IF NOT EXISTS idx_entries_trgm ON entries USING GIN(text gin_trgm_o
 CREATE INDEX IF NOT EXISTS idx_entries_city ON entries(city);
 CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name);
 CREATE INDEX IF NOT EXISTS idx_daily_metrics_date ON daily_metrics(date);
+
+-- ============================================================================
+-- Chat & Pattern Memory (Telegram chatbot)
+-- ============================================================================
+
+-- Short-term: raw conversation messages (pruned on compaction)
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id SERIAL PRIMARY KEY,
+    chat_id BIGINT NOT NULL,
+    external_message_id TEXT UNIQUE,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    tool_call_id TEXT,
+    compacted_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_messages_created ON chat_messages(created_at);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_active ON chat_messages(chat_id, created_at) WHERE compacted_at IS NULL;
+
+-- Long-term: extracted patterns (the actual memory units)
+CREATE TABLE IF NOT EXISTS patterns (
+    id SERIAL PRIMARY KEY,
+    content TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'behavior',
+    confidence DOUBLE PRECISION NOT NULL DEFAULT 0.5,
+    embedding vector(1536),
+    embedding_model TEXT NOT NULL DEFAULT 'text-embedding-3-small',
+    strength DOUBLE PRECISION DEFAULT 1.0,
+    times_seen INT DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'active',
+    temporal JSONB,
+    canonical_hash TEXT,
+    first_seen TIMESTAMPTZ NOT NULL,
+    last_seen TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    text_search tsvector GENERATED ALWAYS AS (
+        to_tsvector('english', COALESCE(content, ''))
+    ) STORED
+);
+
+CREATE INDEX IF NOT EXISTS idx_patterns_embedding
+    ON patterns USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+CREATE INDEX IF NOT EXISTS idx_patterns_text_search ON patterns USING GIN(text_search);
+CREATE INDEX IF NOT EXISTS idx_patterns_status ON patterns(status) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_patterns_canonical_hash ON patterns(canonical_hash);
+
+-- Provenance: evidence trail for each pattern observation
+CREATE TABLE IF NOT EXISTS pattern_observations (
+    id SERIAL PRIMARY KEY,
+    pattern_id INT REFERENCES patterns(id) ON DELETE CASCADE,
+    chat_message_ids INT[],
+    evidence TEXT NOT NULL,
+    evidence_roles TEXT[] NOT NULL DEFAULT '{}',
+    confidence DOUBLE PRECISION NOT NULL DEFAULT 0.5,
+    extractor_version TEXT NOT NULL DEFAULT 'v1',
+    observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_pattern_observations_pattern
+    ON pattern_observations(pattern_id);
+
+-- Relationships between patterns
+CREATE TABLE IF NOT EXISTS pattern_relations (
+    id SERIAL PRIMARY KEY,
+    from_pattern_id INT REFERENCES patterns(id) ON DELETE CASCADE,
+    to_pattern_id INT REFERENCES patterns(id) ON DELETE CASCADE,
+    relation TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (from_pattern_id, to_pattern_id, relation)
+);
+
+-- Alternate phrasings of the same pattern
+CREATE TABLE IF NOT EXISTS pattern_aliases (
+    id SERIAL PRIMARY KEY,
+    pattern_id INT REFERENCES patterns(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    embedding vector(1536),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Links patterns to journal entries
+CREATE TABLE IF NOT EXISTS pattern_entries (
+    pattern_id INT REFERENCES patterns(id) ON DELETE CASCADE,
+    entry_uuid TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'compaction',
+    confidence DOUBLE PRECISION NOT NULL DEFAULT 0.5,
+    times_linked INT NOT NULL DEFAULT 1,
+    last_linked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (pattern_id, entry_uuid)
+);
+
+-- API usage tracking for cost monitoring
+CREATE TABLE IF NOT EXISTS api_usage (
+    id SERIAL PRIMARY KEY,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    purpose TEXT NOT NULL,
+    input_tokens INT NOT NULL DEFAULT 0,
+    output_tokens INT NOT NULL DEFAULT 0,
+    duration_seconds DOUBLE PRECISION,
+    cost_usd DOUBLE PRECISION NOT NULL,
+    latency_ms INT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_usage_created ON api_usage(created_at);
+CREATE INDEX IF NOT EXISTS idx_api_usage_purpose ON api_usage(purpose);

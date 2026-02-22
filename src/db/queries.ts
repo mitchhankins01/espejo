@@ -511,8 +511,457 @@ export async function upsertDailyMetric(
 }
 
 // ============================================================================
+// Chat message types and queries
+// ============================================================================
+
+export interface ChatMessageRow {
+  id: number;
+  chat_id: string;
+  external_message_id: string | null;
+  role: string;
+  content: string;
+  tool_call_id: string | null;
+  compacted_at: Date | null;
+  created_at: Date;
+}
+
+export interface PatternRow {
+  id: number;
+  content: string;
+  kind: string;
+  confidence: number;
+  strength: number;
+  times_seen: number;
+  status: string;
+  temporal: Record<string, unknown> | null;
+  canonical_hash: string | null;
+  first_seen: Date;
+  last_seen: Date;
+  created_at: Date;
+}
+
+export interface PatternSearchRow extends PatternRow {
+  score: number;
+  similarity: number;
+}
+
+export interface ApiUsageSummaryRow {
+  purpose: string;
+  total_calls: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_cost_usd: number;
+}
+
+/**
+ * Insert a chat message. Returns false if duplicate (via external_message_id UNIQUE).
+ */
+export async function insertChatMessage(
+  pool: pg.Pool,
+  params: {
+    chatId: string;
+    externalMessageId: string | null;
+    role: string;
+    content: string;
+    toolCallId?: string | null;
+  }
+): Promise<{ inserted: boolean; id: number | null }> {
+  const result = await pool.query(
+    `INSERT INTO chat_messages (chat_id, external_message_id, role, content, tool_call_id)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (external_message_id) DO NOTHING
+     RETURNING id`,
+    [
+      params.chatId,
+      params.externalMessageId,
+      params.role,
+      params.content,
+      params.toolCallId ?? null,
+    ]
+  );
+  return {
+    inserted: result.rowCount !== null && result.rowCount > 0,
+    id: result.rows[0]?.id ?? null,
+  };
+}
+
+/**
+ * Get recent uncompacted messages, ordered oldest first.
+ */
+export async function getRecentMessages(
+  pool: pg.Pool,
+  chatId: string,
+  limit: number
+): Promise<ChatMessageRow[]> {
+  const result = await pool.query(
+    `SELECT * FROM chat_messages
+     WHERE chat_id = $1 AND compacted_at IS NULL
+     ORDER BY created_at ASC
+     LIMIT $2`,
+    [chatId, limit]
+  );
+  return result.rows;
+}
+
+/**
+ * Soft-delete messages by marking them as compacted.
+ */
+export async function markMessagesCompacted(
+  pool: pg.Pool,
+  ids: number[]
+): Promise<void> {
+  await pool.query(
+    `UPDATE chat_messages SET compacted_at = NOW() WHERE id = ANY($1::int[])`,
+    [ids]
+  );
+}
+
+/**
+ * Hard-delete compacted messages older than the given timestamp.
+ */
+export async function purgeCompactedMessages(
+  pool: pg.Pool,
+  olderThan: Date
+): Promise<number> {
+  const result = await pool.query(
+    `DELETE FROM chat_messages WHERE compacted_at IS NOT NULL AND compacted_at < $1`,
+    [olderThan]
+  );
+  return /* v8 ignore next -- defensive: rowCount is always set for DELETE */ result.rowCount ?? 0;
+}
+
+// ============================================================================
+// Pattern queries
+// ============================================================================
+
+/**
+ * Insert a new pattern with embedding and canonical hash.
+ */
+export async function insertPattern(
+  pool: pg.Pool,
+  params: {
+    content: string;
+    kind: string;
+    confidence: number;
+    embedding: number[] | null;
+    temporal: Record<string, unknown> | null;
+    canonicalHash: string;
+    timestamp: Date;
+  }
+): Promise<PatternRow> {
+  const embeddingStr = params.embedding
+    ? `[${params.embedding.join(",")}]`
+    : null;
+  const result = await pool.query(
+    `INSERT INTO patterns (content, kind, confidence, embedding, temporal, canonical_hash, first_seen, last_seen)
+     VALUES ($1, $2, $3, $4::vector, $5, $6, $7, $7)
+     RETURNING *`,
+    [
+      params.content,
+      params.kind,
+      params.confidence,
+      embeddingStr,
+      params.temporal ? JSON.stringify(params.temporal) : null,
+      params.canonicalHash,
+      params.timestamp,
+    ]
+  );
+  return mapPatternRow(result.rows[0]);
+}
+
+/**
+ * Reinforce an existing pattern with spacing-sensitive boost.
+ * boost = boost_max * (1 - e^(-days_since_last_seen / kappa))
+ */
+export async function reinforcePattern(
+  pool: pg.Pool,
+  id: number,
+  confidence: number
+): Promise<PatternRow> {
+  const result = await pool.query(
+    `UPDATE patterns SET
+       times_seen = times_seen + 1,
+       strength = LEAST(
+         strength + 1.0 * (1.0 - EXP(-EXTRACT(EPOCH FROM (NOW() - last_seen)) / 86400.0 / 7.0)),
+         20.0
+       ),
+       confidence = $2,
+       last_seen = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [id, confidence]
+  );
+  return mapPatternRow(result.rows[0]);
+}
+
+/**
+ * Deprecate a pattern (set status to 'deprecated').
+ */
+export async function deprecatePattern(
+  pool: pg.Pool,
+  id: number
+): Promise<void> {
+  await pool.query(
+    `UPDATE patterns SET status = 'deprecated' WHERE id = $1`,
+    [id]
+  );
+}
+
+/**
+ * Update a pattern's status (e.g. 'superseded', 'disputed').
+ */
+export async function updatePatternStatus(
+  pool: pg.Pool,
+  id: number,
+  status: string
+): Promise<void> {
+  await pool.query(`UPDATE patterns SET status = $2 WHERE id = $1`, [
+    id,
+    status,
+  ]);
+}
+
+/**
+ * Find similar patterns by cosine similarity (for dedup).
+ * Returns patterns with similarity >= minSimilarity.
+ */
+export async function findSimilarPatterns(
+  pool: pg.Pool,
+  embedding: number[],
+  limit: number,
+  minSimilarity: number
+): Promise<(PatternRow & { similarity: number })[]> {
+  const embeddingStr = `[${embedding.join(",")}]`;
+  const result = await pool.query(
+    `SELECT *, 1 - (embedding <=> $1::vector) AS similarity
+     FROM patterns
+     WHERE status = 'active' AND embedding IS NOT NULL
+       AND 1 - (embedding <=> $1::vector) >= $3
+     ORDER BY embedding <=> $1::vector
+     LIMIT $2`,
+    [embeddingStr, limit, minSimilarity]
+  );
+  return result.rows.map((row) => ({
+    ...mapPatternRow(row),
+    similarity: parseFloat(row.similarity),
+  }));
+}
+
+/**
+ * Search patterns with typed-decay ranking.
+ * score = similarity * recency * memory * confidence * validity
+ */
+export async function searchPatterns(
+  pool: pg.Pool,
+  queryEmbedding: number[],
+  limit: number,
+  minSimilarity: number = 0.4
+): Promise<PatternSearchRow[]> {
+  const embeddingStr = `[${queryEmbedding.join(",")}]`;
+  const result = await pool.query(
+    `WITH scored AS (
+      SELECT *,
+        1 - (embedding <=> $1::vector) AS sim,
+        CASE kind
+          WHEN 'behavior' THEN 90 WHEN 'belief' THEN 90 WHEN 'goal' THEN 60
+          WHEN 'preference' THEN 90 WHEN 'emotion' THEN 14
+          WHEN 'temporal' THEN 365 WHEN 'causal' THEN 90 ELSE 90
+        END AS half_life,
+        CASE kind
+          WHEN 'behavior' THEN 0.45 WHEN 'belief' THEN 0.45 WHEN 'goal' THEN 0.35
+          WHEN 'preference' THEN 0.45 WHEN 'emotion' THEN 0.15
+          WHEN 'temporal' THEN 0.60 WHEN 'causal' THEN 0.45 ELSE 0.45
+        END AS floor_val,
+        CASE status
+          WHEN 'active' THEN 1.0 WHEN 'disputed' THEN 0.5 ELSE 0.0
+        END AS validity
+      FROM patterns
+      WHERE embedding IS NOT NULL AND status IN ('active', 'disputed')
+        AND 1 - (embedding <=> $1::vector) >= $3
+    )
+    SELECT *,
+      sim
+      * (floor_val + (1.0 - floor_val) * EXP(-LN(2) * EXTRACT(EPOCH FROM (NOW() - last_seen)) / 86400.0 / half_life))
+      * (1.0 + 0.25 * LEAST(LN(1.0 + strength), 2.0))
+      * confidence
+      * validity
+      AS score
+    FROM scored
+    ORDER BY score DESC
+    LIMIT $2`,
+    [embeddingStr, limit, minSimilarity]
+  );
+  return result.rows.map((row) => ({
+    ...mapPatternRow(row),
+    score: parseFloat(row.score),
+    similarity: parseFloat(row.sim),
+  }));
+}
+
+/**
+ * Get top patterns by strength (for compaction context, no embedding needed).
+ */
+export async function getTopPatterns(
+  pool: pg.Pool,
+  limit: number
+): Promise<PatternRow[]> {
+  const result = await pool.query(
+    `SELECT * FROM patterns
+     WHERE status = 'active'
+     ORDER BY strength DESC
+     LIMIT $1`,
+    [limit]
+  );
+  return result.rows.map(mapPatternRow);
+}
+
+// ============================================================================
+// Pattern supporting queries
+// ============================================================================
+
+export async function insertPatternObservation(
+  pool: pg.Pool,
+  params: {
+    patternId: number;
+    chatMessageIds: number[];
+    evidence: string;
+    evidenceRoles: string[];
+    confidence: number;
+  }
+): Promise<number> {
+  const result = await pool.query(
+    `INSERT INTO pattern_observations (pattern_id, chat_message_ids, evidence, evidence_roles, confidence)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id`,
+    [
+      params.patternId,
+      params.chatMessageIds,
+      params.evidence,
+      params.evidenceRoles,
+      params.confidence,
+    ]
+  );
+  return result.rows[0].id as number;
+}
+
+export async function insertPatternRelation(
+  pool: pg.Pool,
+  fromId: number,
+  toId: number,
+  relation: string
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO pattern_relations (from_pattern_id, to_pattern_id, relation)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (from_pattern_id, to_pattern_id, relation) DO NOTHING`,
+    [fromId, toId, relation]
+  );
+}
+
+export async function insertPatternAlias(
+  pool: pg.Pool,
+  patternId: number,
+  content: string,
+  embedding: number[] | null
+): Promise<void> {
+  const embeddingStr = embedding ? `[${embedding.join(",")}]` : null;
+  await pool.query(
+    `INSERT INTO pattern_aliases (pattern_id, content, embedding)
+     VALUES ($1, $2, $3::vector)`,
+    [patternId, content, embeddingStr]
+  );
+}
+
+export async function linkPatternToEntry(
+  pool: pg.Pool,
+  patternId: number,
+  entryUuid: string,
+  source: string,
+  confidence: number
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO pattern_entries (pattern_id, entry_uuid, source, confidence)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (pattern_id, entry_uuid) DO UPDATE SET
+       times_linked = pattern_entries.times_linked + 1,
+       last_linked_at = NOW()`,
+    [patternId, entryUuid, source, confidence]
+  );
+}
+
+// ============================================================================
+// API usage tracking
+// ============================================================================
+
+export async function logApiUsage(
+  pool: pg.Pool,
+  params: {
+    provider: string;
+    model: string;
+    purpose: string;
+    inputTokens: number;
+    outputTokens: number;
+    durationSeconds?: number;
+    costUsd: number;
+    latencyMs?: number;
+  }
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO api_usage (provider, model, purpose, input_tokens, output_tokens, duration_seconds, cost_usd, latency_ms)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [
+      params.provider,
+      params.model,
+      params.purpose,
+      params.inputTokens,
+      params.outputTokens,
+      params.durationSeconds ?? null,
+      params.costUsd,
+      params.latencyMs ?? null,
+    ]
+  );
+}
+
+export async function getUsageSummary(
+  pool: pg.Pool,
+  since: Date
+): Promise<ApiUsageSummaryRow[]> {
+  const result = await pool.query(
+    `SELECT
+       purpose,
+       COUNT(*)::int AS total_calls,
+       SUM(input_tokens)::int AS total_input_tokens,
+       SUM(output_tokens)::int AS total_output_tokens,
+       SUM(cost_usd)::float AS total_cost_usd
+     FROM api_usage
+     WHERE created_at >= $1
+     GROUP BY purpose
+     ORDER BY total_cost_usd DESC`,
+    [since]
+  );
+  return result.rows;
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
+
+function mapPatternRow(row: Record<string, unknown>): PatternRow {
+  return {
+    id: row.id as number,
+    content: row.content as string,
+    kind: row.kind as string,
+    confidence: parseFloat(row.confidence as string),
+    strength: parseFloat(row.strength as string),
+    times_seen: row.times_seen as number,
+    status: row.status as string,
+    temporal: row.temporal as Record<string, unknown> | null,
+    canonical_hash: row.canonical_hash as string | null,
+    first_seen: row.first_seen as Date,
+    last_seen: row.last_seen as Date,
+    created_at: row.created_at as Date,
+  };
+}
 
 function mapEntryRow(row: Record<string, unknown>): EntryRow {
   return {

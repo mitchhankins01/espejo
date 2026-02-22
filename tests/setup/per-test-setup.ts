@@ -4,7 +4,7 @@ import { beforeEach, afterAll } from "vitest";
 
 beforeEach(async () => {
   await pool.query(
-    "TRUNCATE entry_tags, media, tags, entries, daily_metrics RESTART IDENTITY CASCADE"
+    "TRUNCATE entry_tags, media, tags, entries, daily_metrics, pattern_observations, pattern_relations, pattern_aliases, pattern_entries, chat_messages, patterns, api_usage RESTART IDENTITY CASCADE"
   );
   await seedFixtures(pool);
 });

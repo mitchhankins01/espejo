@@ -15,14 +15,20 @@ const mockQueries = vi.hoisted(() => ({
   findSimilarEntries: vi.fn(),
   listTags: vi.fn(),
   getEntryStats: vi.fn(),
+  upsertDailyMetric: vi.fn(),
 }));
 
 const mockEmbeddings = vi.hoisted(() => ({
   generateEmbedding: vi.fn(),
 }));
 
+const mockConfig = vi.hoisted(() => ({
+  config: { timezone: "Europe/Madrid" },
+}));
+
 vi.mock("../../src/db/queries.js", () => mockQueries);
 vi.mock("../../src/db/embeddings.js", () => mockEmbeddings);
+vi.mock("../../src/config.js", () => mockConfig);
 
 import { handleSearchEntries } from "../../src/tools/search.js";
 import { handleGetEntry } from "../../src/tools/get-entry.js";
@@ -31,6 +37,7 @@ import { handleOnThisDay } from "../../src/tools/on-this-day.js";
 import { handleFindSimilar } from "../../src/tools/find-similar.js";
 import { handleListTags } from "../../src/tools/list-tags.js";
 import { handleEntryStats } from "../../src/tools/entry-stats.js";
+import { handleLogWeight } from "../../src/tools/log-weight.js";
 
 const mockPool = {} as any;
 
@@ -310,5 +317,22 @@ describe("handleEntryStats", () => {
 
     const result = await handleEntryStats(mockPool, {});
     expect(result).toContain("No entries found");
+  });
+});
+
+describe("handleLogWeight", () => {
+  it("logs weight with explicit date and returns confirmation", async () => {
+    const result = await handleLogWeight(mockPool, {
+      weight_kg: 76.5,
+      date: "2025-03-15",
+    });
+
+    expect(mockQueries.upsertDailyMetric).toHaveBeenCalledWith(
+      mockPool,
+      "2025-03-15",
+      76.5
+    );
+    expect(result).toContain("76.5");
+    expect(result).toContain("2025-03-15");
   });
 });

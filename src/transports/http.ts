@@ -101,6 +101,13 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
     }
   });
 
+  // Telegram webhook (conditional — only when bot token is configured)
+  /* v8 ignore next 4 -- dynamic import tested in telegram-webhook.test.ts */
+  if (config.telegram.botToken) {
+    const { registerTelegramRoutes } = await import("../telegram/webhook.js");
+    registerTelegramRoutes(app);
+  }
+
   // MCP endpoint — fresh server + transport per request (SDK requirement)
   app.post("/mcp", async (req, res) => {
     try {

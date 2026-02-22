@@ -8,10 +8,11 @@ import { handleOnThisDay } from "./tools/on-this-day.js";
 import { handleFindSimilar } from "./tools/find-similar.js";
 import { handleListTags } from "./tools/list-tags.js";
 import { handleEntryStats } from "./tools/entry-stats.js";
+import { handleLogWeight } from "./tools/log-weight.js";
 
-type ToolHandler = (pool: pg.Pool, input: unknown) => Promise<string>;
+export type ToolHandler = (pool: pg.Pool, input: unknown) => Promise<string>;
 
-const toolHandlers: Record<string, ToolHandler> = {
+export const toolHandlers: Record<string, ToolHandler> = {
   search_entries: handleSearchEntries,
   get_entry: handleGetEntry,
   get_entries_by_date: handleGetEntriesByDate,
@@ -19,6 +20,7 @@ const toolHandlers: Record<string, ToolHandler> = {
   find_similar: handleFindSimilar,
   list_tags: handleListTags,
   entry_stats: handleEntryStats,
+  log_weight: handleLogWeight,
 };
 
 export function createServer(pool: pg.Pool, version: string): McpServer {

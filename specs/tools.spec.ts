@@ -282,6 +282,35 @@ export const toolSpecs = {
       },
     ],
   },
+  log_weight: {
+    name: "log_weight" as const,
+    description:
+      "Log a daily weight measurement. Use when the user mentions their weight. " +
+      "Upserts the value — if a weight already exists for the date, it is overwritten.",
+    params: z.object({
+      weight_kg: z
+        .number()
+        .positive()
+        .describe("Weight in kilograms"),
+      date: dateString
+        .optional()
+        .describe(
+          "Date in YYYY-MM-DD format. Defaults to today in the configured timezone."
+        ),
+    }),
+    examples: [
+      {
+        input: { weight_kg: 76.5 },
+        behavior:
+          "Logs weight for today using configured timezone",
+      },
+      {
+        input: { weight_kg: 80.0, date: "2025-03-15" },
+        behavior:
+          "Logs weight for a specific date",
+      },
+    ],
+  },
 } as const;
 
 // ============================================================================
@@ -309,6 +338,23 @@ export function toMcpToolDefinition(name: ToolName) {
     name: spec.name,
     description: spec.description,
     inputSchema: zodToJsonSchema(spec.params),
+  };
+}
+
+/**
+ * Convert a tool spec to the Anthropic SDK's tool definition format.
+ * Used by the agent module to register tools with Claude.
+ */
+export function toAnthropicToolDefinition(name: ToolName): {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+} {
+  const spec = toolSpecs[name];
+  return {
+    name: spec.name,
+    description: spec.description,
+    input_schema: zodToJsonSchema(spec.params),
   };
 }
 

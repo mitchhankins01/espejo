@@ -31,6 +31,24 @@ if (env === "production" && !process.env.R2_PUBLIC_URL) {
   );
 }
 
+if (env === "production" && process.env.TELEGRAM_BOT_TOKEN) {
+  const required: Record<string, string | undefined> = {
+    TELEGRAM_SECRET_TOKEN: process.env.TELEGRAM_SECRET_TOKEN,
+    TELEGRAM_ALLOWED_CHAT_ID: process.env.TELEGRAM_ALLOWED_CHAT_ID,
+    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+  };
+  const missing = Object.entries(required)
+    .filter(([, v]) => !v)
+    .map(([k]) => k);
+  if (missing.length > 0) {
+    throw new Error(
+      `TELEGRAM_BOT_TOKEN is set but required vars are missing: ${missing.join(", ")}. ` +
+        `Set all Telegram-related vars or remove TELEGRAM_BOT_TOKEN.`
+    );
+  }
+}
+
 export const config = {
   env,
   database: {
@@ -57,4 +75,19 @@ export const config = {
     oauthClientId: process.env.OAUTH_CLIENT_ID || "",
     oauthClientSecret: process.env.OAUTH_CLIENT_SECRET || "",
   },
+  telegram: {
+    botToken: process.env.TELEGRAM_BOT_TOKEN || "",
+    secretToken: process.env.TELEGRAM_SECRET_TOKEN || "",
+    allowedChatId: process.env.TELEGRAM_ALLOWED_CHAT_ID || "",
+  },
+  anthropic: {
+    apiKey: process.env.ANTHROPIC_API_KEY || "",
+    model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5-20250514",
+  },
+  timezone: process.env.TIMEZONE || "Europe/Madrid",
+  apiRates: {
+    "claude-sonnet-4-5-20250514": { input: 3.0, output: 15.0 },
+    "text-embedding-3-small": { input: 0.02, output: 0 },
+    "whisper-1": { input: 0.006, output: 0 },
+  } as Record<string, { input: number; output: number }>,
 } as const;
