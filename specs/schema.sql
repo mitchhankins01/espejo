@@ -233,7 +233,10 @@ CREATE TABLE IF NOT EXISTS memory_retrieval_logs (
     pattern_ids INT[] NOT NULL DEFAULT '{}',
     pattern_kinds TEXT[] NOT NULL DEFAULT '{}',
     top_score DOUBLE PRECISION,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT memory_retrieval_logs_pattern_arrays_match CHECK (
+        cardinality(pattern_ids) = cardinality(pattern_kinds)
+    )
 );
 
 CREATE INDEX IF NOT EXISTS idx_memory_retrieval_logs_chat_created ON memory_retrieval_logs(chat_id, created_at DESC);

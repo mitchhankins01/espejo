@@ -1061,6 +1061,25 @@ describe("logMemoryRetrieval", () => {
     expect(result.rows[0].chat_id).toBe("12345");
     expect(result.rows[0].pattern_kinds).toEqual(["fact", "event"]);
   });
+
+  it("pads missing pattern kinds as unknown to preserve positional alignment", async () => {
+    await logMemoryRetrieval(pool, {
+      chatId: "12345",
+      queryText: "quick retrieval",
+      queryHash: "hash-aligned",
+      degraded: false,
+      patternIds: [1, 2],
+      patternKinds: ["fact"],
+      topScore: 0.44,
+    });
+
+    const result = await pool.query(
+      "SELECT pattern_kinds FROM memory_retrieval_logs WHERE query_hash = $1 LIMIT 1",
+      ["hash-aligned"]
+    );
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].pattern_kinds).toEqual(["fact", "unknown"]);
+  });
 });
 
 // ============================================================================

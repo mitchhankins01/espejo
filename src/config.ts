@@ -179,6 +179,7 @@ export const config = {
   timezone: process.env.TIMEZONE || "Europe/Madrid",
   apiRates: {
     "claude-sonnet-4-6": { input: 3.0, output: 15.0 },
+    "gpt-4.1": { input: 2.0, output: 8.0 },
     "text-embedding-3-small": { input: 0.02, output: 0 },
     "whisper-1": { input: 0.006, output: 0 },
   } as Record<string, { input: number; output: number }>,

@@ -5,7 +5,7 @@ import type pg from "pg";
 import { z } from "zod";
 import { config } from "../config.js";
 import { pool } from "../db/client.js";
-import { generateEmbedding } from "../db/embeddings.js";
+import { generateEmbeddingWithUsage } from "../db/embeddings.js";
 import {
   getLastCompactionTime,
   getRecentMessages,
@@ -101,6 +101,13 @@ const MAX_NEW_PATTERNS_PER_COMPACTION = 7;
 const RECENT_MESSAGES_LIMIT = 50;
 const MIN_RETRIEVAL_CHARS = 30;
 const COST_NOTIFICATION_INTERVAL_HOURS = 12;
+const RETRIEVAL_BASE_MIN_SIMILARITY = 0.45;
+const RETRIEVAL_SHORT_QUERY_MIN_SIMILARITY = 0.52;
+const RETRIEVAL_SCORE_FLOOR_DEFAULT = 0.35;
+const RETRIEVAL_SCORE_FLOOR_SHORT_QUERY = 0.5;
+const MAX_OBSERVATION_EVIDENCE_ITEMS = 8;
+const MAX_OBSERVATION_EVIDENCE_CHARS_PER_ITEM = 280;
+const WEIGHT_CHANGE_EPSILON_KG = 0.25;
 
 // ---------------------------------------------------------------------------
 // System prompt
@@ -280,6 +287,75 @@ function budgetCapPatterns(
   return result;
 }
 
+function wordCount(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function isLikelyDirectiveWithoutMemoryNeed(message: string): boolean {
+  const normalized = normalizeContent(message);
+  const words = wordCount(normalized);
+  const mentionsMemoryIntent =
+    /\b(memory|memories|remember|pattern|patterns|recall)\b/.test(normalized);
+
+  if (/^\/\w+/.test(normalized)) return true;
+  if (/^(today i weigh|i weighed|log my weight|record my weight)\b/.test(normalized)) {
+    return true;
+  }
+  if (
+    /^(give me (the )?full journal entry|write (the )?entry( now)?|compose (the )?entry|write it up|close (it )?out)\b/.test(
+      normalized
+    )
+  ) {
+    return true;
+  }
+  if (
+    !mentionsMemoryIntent &&
+    words <= 8 &&
+    /^(write|compose|give|show|send|log|track|save|record)\b/.test(normalized)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function shouldRetrievePatterns(message: string): boolean {
+  if (message.length < MIN_RETRIEVAL_CHARS) return false;
+  if (isLikelyDirectiveWithoutMemoryNeed(message)) return false;
+  return true;
+}
+
+function minSimilarityForQuery(queryText: string): number {
+  return wordCount(queryText) <= 6
+    ? RETRIEVAL_SHORT_QUERY_MIN_SIMILARITY
+    : RETRIEVAL_BASE_MIN_SIMILARITY;
+}
+
+function scoreFloorForQuery(queryText: string): number {
+  return wordCount(queryText) <= 6
+    ? RETRIEVAL_SCORE_FLOOR_SHORT_QUERY
+    : RETRIEVAL_SCORE_FLOOR_DEFAULT;
+}
+
+async function logEmbeddingUsage(
+  inputTokens: number,
+  latencyMs: number
+): Promise<void> {
+  try {
+    await logApiUsage(pool, {
+      provider: "openai",
+      model: config.openai.embeddingModel,
+      purpose: "embedding",
+      inputTokens,
+      outputTokens: 0,
+      costUsd: computeCost(config.openai.embeddingModel, inputTokens, 0),
+      latencyMs,
+    });
+  } catch (err) {
+    console.error("Telegram embedding usage logging failed:", err);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Pattern retrieval
 // ---------------------------------------------------------------------------
@@ -288,10 +364,23 @@ async function retrievePatterns(
   queryText: string
 ): Promise<{ patterns: PatternSearchRow[]; degraded: boolean }> {
   try {
-    const embedding = await generateEmbedding(queryText);
-    const raw = await searchPatterns(pool, embedding, 20, 0.4);
+    const embeddingStartMs = Date.now();
+    const embeddingResult = await generateEmbeddingWithUsage(queryText);
+    await logEmbeddingUsage(
+      embeddingResult.inputTokens,
+      Date.now() - embeddingStartMs
+    );
+
+    const raw = await searchPatterns(
+      pool,
+      embeddingResult.embedding,
+      20,
+      minSimilarityForQuery(queryText)
+    );
     const reranked = mmrRerank(raw);
-    const capped = budgetCapPatterns(reranked, PATTERN_TOKEN_BUDGET);
+    const scoreFloor = scoreFloorForQuery(queryText);
+    const relevant = reranked.filter((p) => p.score >= scoreFloor);
+    const capped = budgetCapPatterns(relevant, PATTERN_TOKEN_BUDGET);
     return { patterns: capped, degraded: false };
   } catch (err) {
     console.error("Telegram pattern retrieval error:", err);
@@ -840,20 +929,61 @@ async function releaseLock(p: pg.Pool): Promise<void> {
 function filterEvidenceRoles(
   messageIds: number[],
   allMessages: ChatMessageRow[]
-): { filteredIds: number[]; roles: string[] } {
+): { filteredIds: number[]; roles: string[]; messages: ChatMessageRow[] } {
   const msgMap = new Map(allMessages.map((m) => [m.id, m]));
   const filteredIds: number[] = [];
   const roles: string[] = [];
+  const messages: ChatMessageRow[] = [];
 
   for (const id of messageIds) {
     const msg = msgMap.get(id);
     if (msg && (msg.role === "user" || msg.role === "tool_result")) {
       filteredIds.push(id);
       if (!roles.includes(msg.role)) roles.push(msg.role);
+      messages.push(msg);
     }
   }
 
-  return { filteredIds, roles };
+  return { filteredIds, roles, messages };
+}
+
+function buildEvidenceSourceId(chatId: string, messageIds: number[]): string {
+  const idList = [...new Set(messageIds)]
+    .sort((a, b) => a - b)
+    .join(",")
+    .slice(0, 150);
+  return `chat:${chatId}:msg:${idList}`;
+}
+
+function buildObservationEvidence(messages: ChatMessageRow[]): string {
+  const payload = messages.slice(0, MAX_OBSERVATION_EVIDENCE_ITEMS).map((m) => ({
+    message_id: m.id,
+    role: m.role,
+    excerpt: m.content.slice(0, MAX_OBSERVATION_EVIDENCE_CHARS_PER_ITEM),
+  }));
+  return JSON.stringify(payload);
+}
+
+function extractWeightKg(content: string): number | null {
+  const normalized = content.toLowerCase();
+  if (!/\b(weigh|weight|kg|kilogram|lbs?|pounds?)\b/.test(normalized)) {
+    return null;
+  }
+
+  const match = normalized.match(
+    /(\d{2,3}(?:\.\d{1,2})?)\s*(kg|kgs|kilogram|kilograms|lb|lbs|pound|pounds)\b/
+  );
+  if (!match) return null;
+
+  const value = Number.parseFloat(match[1]);
+  /* v8 ignore next -- regex capture is constrained to finite decimal tokens */
+  if (!Number.isFinite(value)) return null;
+
+  const unit = match[2];
+  if (unit.startsWith("lb") || unit.startsWith("pound")) {
+    return value * 0.45359237;
+  }
+  return value;
 }
 
 function normalizeContent(content: string): string {
@@ -992,6 +1122,16 @@ async function deduplicateAndInsertPattern(
   temporal: Record<string, unknown>,
   allMessages: ChatMessageRow[]
 ): Promise<void> {
+  const { filteredIds, roles, messages: evidenceMessages } = filterEvidenceRoles(
+    evidenceMessageIds,
+    allMessages
+  );
+  if (filteredIds.length === 0) return;
+
+  const sourceId = buildEvidenceSourceId(chatId, filteredIds);
+  const evidenceText = buildObservationEvidence(evidenceMessages);
+  const observationConfidence = signal === "explicit" ? confidence : confidence * 0.5;
+  const incomingWeightKg = kind === "fact" ? extractWeightKg(content) : null;
   const hash = computeCanonicalHash(content);
 
   // Tier 1: Hash check
@@ -1005,7 +1145,13 @@ async function deduplicateAndInsertPattern(
   // Generate embedding
   let embedding: number[] | null = null;
   try {
-    embedding = await generateEmbedding(content);
+    const embeddingStartMs = Date.now();
+    const embeddingResult = await generateEmbeddingWithUsage(content);
+    embedding = embeddingResult.embedding;
+    await logEmbeddingUsage(
+      embeddingResult.inputTokens,
+      Date.now() - embeddingStartMs
+    );
   } catch {
     // Continue without embedding
   }
@@ -1016,18 +1162,35 @@ async function deduplicateAndInsertPattern(
 
     if (similar.length > 0) {
       const best = similar[0];
+      const existingWeightKg = extractWeightKg(best.content);
+      const hasWeightConflict =
+        incomingWeightKg !== null &&
+        existingWeightKg !== null &&
+        Math.abs(incomingWeightKg - existingWeightKg) >= WEIGHT_CHANGE_EPSILON_KG;
 
-      if (best.similarity >= 0.9) {
-        // Auto-reinforce
+      if (hasWeightConflict) {
+        await updatePatternStatus(p, best.id, "superseded");
+      } else {
         await reinforcePattern(p, best.id, confidence);
         await insertPatternAlias(p, best.id, content, embedding);
+
+        await insertPatternObservation(p, {
+          patternId: best.id,
+          chatMessageIds: filteredIds,
+          evidence: evidenceText,
+          evidenceRoles: roles,
+          confidence: observationConfidence,
+          sourceType: "chat_compaction",
+          sourceId,
+        });
+
+        for (const uuid of entryUuids) {
+          await linkPatternToEntry(p, best.id, uuid, "compaction", confidence);
+        }
         return;
       }
 
-      // 0.82-0.90: skip LLM adjudication in v1 — auto-reinforce to keep it simple
-      await reinforcePattern(p, best.id, confidence);
-      await insertPatternAlias(p, best.id, content, embedding);
-      return;
+      // Continue and insert a new fact pattern after superseding stale value.
     }
   }
 
@@ -1037,10 +1200,6 @@ async function deduplicateAndInsertPattern(
     kind === "event"
       ? new Date(now.getTime() + 540 * 24 * 60 * 60 * 1000)
       : null;
-  const sourceId =
-    evidenceMessageIds.length > 0
-      ? `chat:${chatId}:msg:${[...new Set(evidenceMessageIds)].sort((a, b) => a - b).join(",").slice(0, 150)}`
-      : `chat:${chatId}`;
   const pattern = await insertPattern(p, {
     content,
     kind,
@@ -1056,25 +1215,15 @@ async function deduplicateAndInsertPattern(
   });
 
   // Create observation
-  const { filteredIds, roles } = filterEvidenceRoles(evidenceMessageIds, allMessages);
-  if (filteredIds.length > 0) {
-    const evidenceText = allMessages
-      .filter((m) => filteredIds.includes(m.id))
-      .map((m) => m.content)
-      .join(" | ")
-      .slice(0, 500);
-
-    await insertPatternObservation(p, {
-      patternId: pattern.id,
-      chatMessageIds: filteredIds,
-      evidence: evidenceText,
-      evidenceRoles: roles,
-      /* v8 ignore next -- implicit signal half-weight */
-      confidence: signal === "explicit" ? confidence : confidence * 0.5,
-      sourceType: "chat_compaction",
-      sourceId,
-    });
-  }
+  await insertPatternObservation(p, {
+    patternId: pattern.id,
+    chatMessageIds: filteredIds,
+    evidence: evidenceText,
+    evidenceRoles: roles,
+    confidence: observationConfidence,
+    sourceType: "chat_compaction",
+    sourceId,
+  });
 
   // Link to entries
   for (const uuid of entryUuids) {
@@ -1135,25 +1284,24 @@ async function runCompaction(
 
   // Process reinforcements
   for (const r of extraction.reinforcements) {
+    const { filteredIds, roles, messages: evidenceMessages } = filterEvidenceRoles(
+      r.evidence_message_ids,
+      toCompact
+    );
+    if (filteredIds.length === 0) continue;
+
     await reinforcePattern(pool, r.pattern_id, r.confidence);
-    const { filteredIds, roles } = filterEvidenceRoles(r.evidence_message_ids, toCompact);
-    if (filteredIds.length > 0) {
-      const evidenceText = toCompact
-        .filter((m) => filteredIds.includes(m.id))
-        .map((m) => m.content)
-        .join(" | ")
-        .slice(0, 500);
-      await insertPatternObservation(pool, {
-        patternId: r.pattern_id,
-        chatMessageIds: filteredIds,
-        evidence: evidenceText,
-        evidenceRoles: roles,
-        /* v8 ignore next -- implicit signal half-weight */
-        confidence: r.signal === "explicit" ? r.confidence : r.confidence * 0.5,
-        sourceType: "chat_compaction",
-        sourceId: `chat:${chatId}:reinforcement:${r.pattern_id}`,
-      });
-    }
+    await insertPatternObservation(pool, {
+      patternId: r.pattern_id,
+      chatMessageIds: filteredIds,
+      evidence: buildObservationEvidence(evidenceMessages),
+      evidenceRoles: roles,
+      /* v8 ignore next -- implicit signal half-weight */
+      confidence: r.signal === "explicit" ? r.confidence : r.confidence * 0.5,
+      sourceType: "chat_compaction",
+      sourceId: buildEvidenceSourceId(chatId, filteredIds),
+    });
+
     /* v8 ignore next -- entry_uuids always present from Zod default */
     for (const uuid of r.entry_uuids ?? []) {
       await linkPatternToEntry(pool, r.pattern_id, uuid, "compaction", r.confidence);
@@ -1390,7 +1538,7 @@ export async function runAgent(params: {
   // 2. Retrieve patterns (skip for trivial messages)
   let patterns: PatternSearchRow[] = [];
   let degraded = false;
-  if (message.length >= MIN_RETRIEVAL_CHARS) {
+  if (shouldRetrievePatterns(message)) {
     ({ patterns, degraded } = await retrievePatterns(message));
     await logMemoryRetrieval(pool, {
       chatId,
@@ -1398,7 +1546,7 @@ export async function runAgent(params: {
       queryHash: crypto.createHash("sha256").update(normalizeContent(message)).digest("hex"),
       degraded,
       patternIds: patterns.map((p) => p.id),
-      patternKinds: [...new Set(patterns.map((p) => p.kind))],
+      patternKinds: patterns.map((p) => p.kind),
       topScore: patterns[0]?.score ?? null,
     });
   }

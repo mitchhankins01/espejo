@@ -103,7 +103,10 @@ const {
     relational_commitments: [], tone_signature: [], growth_notes: [],
     change_reason: "", created_at: new Date(),
   }),
-  mockGenerateEmbedding: vi.fn().mockResolvedValue(new Array(1536).fill(0)),
+  mockGenerateEmbedding: vi.fn().mockResolvedValue({
+    embedding: new Array(1536).fill(0),
+    inputTokens: 100,
+  }),
   mockAnthropicCreate: vi.fn(),
   mockOpenAIChatCreate: vi.fn(),
   mockToolHandler: vi.fn().mockResolvedValue("tool result text"),
@@ -190,7 +193,11 @@ vi.mock("../../src/db/queries.js", () => ({
 }));
 
 vi.mock("../../src/db/embeddings.js", () => ({
-  generateEmbedding: mockGenerateEmbedding,
+  generateEmbedding: vi.fn(async (...args: unknown[]) => {
+    const result = await mockGenerateEmbedding(...args);
+    return result.embedding;
+  }),
+  generateEmbeddingWithUsage: mockGenerateEmbedding,
 }));
 
 vi.mock("../../src/server.js", () => ({
@@ -298,7 +305,10 @@ beforeEach(() => {
     relational_commitments: [], tone_signature: [], growth_notes: [],
     change_reason: "", created_at: new Date(),
   });
-  mockGenerateEmbedding.mockReset().mockResolvedValue(new Array(1536).fill(0));
+  mockGenerateEmbedding.mockReset().mockResolvedValue({
+    embedding: new Array(1536).fill(0),
+    inputTokens: 100,
+  });
   mockAnthropicCreate.mockReset();
   mockOpenAIChatCreate.mockReset();
   mockToolHandler.mockReset().mockResolvedValue("tool result text");
@@ -1062,6 +1072,137 @@ describe("runAgent", () => {
     expect(mockLogMemoryRetrieval).not.toHaveBeenCalled();
   });
 
+  it("skips pattern retrieval for directive-only journal composition prompts", async () => {
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Entry drafted." }],
+      usage: { input_tokens: 70, output_tokens: 10 },
+    });
+
+    await runAgent({
+      chatId: "100",
+      message: "Give me the full journal entry",
+      externalMessageId: "update:directive-no-retrieval",
+      messageDate: 1000,
+    });
+
+    expect(mockGenerateEmbedding).not.toHaveBeenCalled();
+    expect(mockLogMemoryRetrieval).not.toHaveBeenCalled();
+  });
+
+  it("skips pattern retrieval for slash-command style long messages", async () => {
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Handled command-like input." }],
+      usage: { input_tokens: 60, output_tokens: 8 },
+    });
+
+    await runAgent({
+      chatId: "100",
+      message: "/compose this should be handled without memory retrieval",
+      externalMessageId: "update:slash-no-retrieval",
+      messageDate: 1000,
+    });
+
+    expect(mockGenerateEmbedding).not.toHaveBeenCalled();
+    expect(mockLogMemoryRetrieval).not.toHaveBeenCalled();
+  });
+
+  it("skips pattern retrieval for long weight logging directives", async () => {
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Weight noted." }],
+      usage: { input_tokens: 60, output_tokens: 8 },
+    });
+
+    await runAgent({
+      chatId: "100",
+      message: "Today I weigh 85kg and want this logged for today only",
+      externalMessageId: "update:weight-no-retrieval",
+      messageDate: 1000,
+    });
+
+    expect(mockGenerateEmbedding).not.toHaveBeenCalled();
+    expect(mockLogMemoryRetrieval).not.toHaveBeenCalled();
+  });
+
+  it("skips pattern retrieval for generic short imperative directives", async () => {
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Done." }],
+      usage: { input_tokens: 60, output_tokens: 8 },
+    });
+
+    await runAgent({
+      chatId: "100",
+      message: "show me the latest journal draft now",
+      externalMessageId: "update:imperative-no-retrieval",
+      messageDate: 1000,
+    });
+
+    expect(mockGenerateEmbedding).not.toHaveBeenCalled();
+    expect(mockLogMemoryRetrieval).not.toHaveBeenCalled();
+  });
+
+  it("uses stricter retrieval thresholds for short memory-focused queries", async () => {
+    mockSearchPatterns.mockResolvedValueOnce([
+      {
+        id: 12,
+        content: "Low confidence pattern",
+        kind: "behavior",
+        confidence: 0.8,
+        strength: 1,
+        times_seen: 1,
+        status: "active",
+        temporal: null,
+        canonical_hash: "short-threshold",
+        first_seen: new Date(),
+        last_seen: new Date(),
+        created_at: new Date(),
+        score: 0.49,
+        similarity: 0.9,
+      },
+    ]);
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "No memory attached." }],
+      usage: { input_tokens: 90, output_tokens: 12 },
+    });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "memory recall around nicotine relapse lately",
+      externalMessageId: "update:short-threshold",
+      messageDate: 1000,
+    });
+
+    expect(mockSearchPatterns).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Array),
+      20,
+      0.52
+    );
+    expect(result.activity).not.toContain("used 1 memories");
+  });
+
+  it("continues when embedding usage logging fails", async () => {
+    mockLogApiUsage
+      .mockRejectedValueOnce(new Error("usage logger offline"))
+      .mockResolvedValue(undefined);
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Still responding." }],
+      usage: { input_tokens: 80, output_tokens: 10 },
+    });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "Tell me what patterns from this month matter most to me",
+      externalMessageId: "update:embedding-log-fail",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("Still responding.");
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Telegram embedding usage logging failed:",
+      expect.any(Error)
+    );
+  });
+
   it("omits memory kind suffix in activity when retrieved kind is blank", async () => {
     mockSearchPatterns.mockResolvedValueOnce([
       {
@@ -1533,15 +1674,15 @@ describe("compactIfNeeded — additional coverage", () => {
       content: [{
         type: "text",
         text: JSON.stringify({
-          new_patterns: [{
-            content: "Somewhat similar pattern",
-            kind: "behavior",
-            confidence: 0.75,
-            signal: "explicit",
-            evidence_message_ids: [1],
-            entry_uuids: [],
-            temporal: {},
-          }],
+            new_patterns: [{
+              content: "Somewhat similar pattern",
+              kind: "behavior",
+              confidence: 0.75,
+              signal: "explicit",
+              evidence_message_ids: [1],
+              entry_uuids: ["ENTRY-ANN-1"],
+              temporal: {},
+            }],
           reinforcements: [],
           contradictions: [],
           supersedes: [],
@@ -1555,6 +1696,17 @@ describe("compactIfNeeded — additional coverage", () => {
     // Should auto-reinforce (v1 skips LLM adjudication)
     expect(mockReinforcePattern).toHaveBeenCalledWith(expect.anything(), 20, 0.75);
     expect(mockInsertPatternAlias).toHaveBeenCalled();
+    expect(mockInsertPatternObservation).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ patternId: 20 })
+    );
+    expect(mockLinkPatternToEntry).toHaveBeenCalledWith(
+      expect.anything(),
+      20,
+      "ENTRY-ANN-1",
+      "compaction",
+      0.75
+    );
     expect(mockInsertPattern).not.toHaveBeenCalled();
   });
 
@@ -1946,7 +2098,186 @@ describe("compactIfNeeded", () => {
     // Should reinforce existing rather than insert new
     expect(mockReinforcePattern).toHaveBeenCalledWith(expect.anything(), 10, 0.8);
     expect(mockInsertPatternAlias).toHaveBeenCalled();
+    expect(mockInsertPatternObservation).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ patternId: 10 })
+    );
     // Should NOT insert new pattern
+    expect(mockInsertPattern).not.toHaveBeenCalled();
+  });
+
+  it("supersedes stale weight facts instead of reinforcing conflicting values", async () => {
+    const longContent = "x".repeat(10_000);
+    const messages = Array.from({ length: 20 }, (_, i) => ({
+      id: i + 1,
+      role: "user",
+      content: longContent,
+      chat_id: "100",
+      external_message_id: null,
+      tool_call_id: null,
+      compacted_at: null,
+      created_at: new Date(),
+    }));
+
+    mockGetRecentMessages
+      .mockResolvedValueOnce(messages)
+      .mockResolvedValueOnce(messages);
+
+    mockFindSimilarPatterns.mockResolvedValueOnce([
+      {
+        id: 10,
+        content: "The user weighs approximately 172 lb.",
+        kind: "fact",
+        confidence: 0.85,
+        strength: 2,
+        times_seen: 3,
+        status: "active",
+        similarity: 0.93,
+      },
+    ]);
+
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            new_patterns: [{
+              content: "The user weighs 180 lb today.",
+              kind: "fact",
+              confidence: 0.92,
+              signal: "explicit",
+              evidence_message_ids: [1],
+              entry_uuids: [],
+              temporal: {},
+            }],
+            reinforcements: [],
+            contradictions: [],
+            supersedes: [],
+          }),
+        },
+      ],
+      usage: { input_tokens: 500, output_tokens: 100 },
+    });
+
+    await compactIfNeeded("100");
+
+    expect(mockUpdatePatternStatus).toHaveBeenCalledWith(
+      expect.anything(),
+      10,
+      "superseded"
+    );
+    expect(mockReinforcePattern).not.toHaveBeenCalledWith(expect.anything(), 10, expect.anything());
+    expect(mockInsertPattern).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ kind: "fact" })
+    );
+  });
+
+  it("inserts fact patterns with weight language but no numeric unit", async () => {
+    const longContent = "x".repeat(10_000);
+    const messages = Array.from({ length: 20 }, (_, i) => ({
+      id: i + 1,
+      role: "user",
+      content: longContent,
+      chat_id: "100",
+      external_message_id: null,
+      tool_call_id: null,
+      compacted_at: null,
+      created_at: new Date(),
+    }));
+
+    mockGetRecentMessages
+      .mockResolvedValueOnce(messages)
+      .mockResolvedValueOnce(messages);
+
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            new_patterns: [{
+              content: "The user is tracking weight trends more intentionally.",
+              kind: "fact",
+              confidence: 0.75,
+              signal: "explicit",
+              evidence_message_ids: [1],
+              entry_uuids: [],
+              temporal: {},
+            }],
+            reinforcements: [],
+            contradictions: [],
+            supersedes: [],
+          }),
+        },
+      ],
+      usage: { input_tokens: 500, output_tokens: 100 },
+    });
+
+    await compactIfNeeded("100");
+
+    expect(mockInsertPattern).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ kind: "fact" })
+    );
+  });
+
+  it("reinforces near-identical kg weight facts instead of superseding", async () => {
+    const longContent = "x".repeat(10_000);
+    const messages = Array.from({ length: 20 }, (_, i) => ({
+      id: i + 1,
+      role: "user",
+      content: longContent,
+      chat_id: "100",
+      external_message_id: null,
+      tool_call_id: null,
+      compacted_at: null,
+      created_at: new Date(),
+    }));
+
+    mockGetRecentMessages
+      .mockResolvedValueOnce(messages)
+      .mockResolvedValueOnce(messages);
+
+    mockFindSimilarPatterns.mockResolvedValueOnce([
+      {
+        id: 11,
+        content: "The user weighs approximately 78.1 kg.",
+        kind: "fact",
+        confidence: 0.82,
+        strength: 2,
+        times_seen: 2,
+        status: "active",
+        similarity: 0.92,
+      },
+    ]);
+
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            new_patterns: [{
+              content: "The user weighs 78.3 kg today.",
+              kind: "fact",
+              confidence: 0.9,
+              signal: "explicit",
+              evidence_message_ids: [1],
+              entry_uuids: [],
+              temporal: {},
+            }],
+            reinforcements: [],
+            contradictions: [],
+            supersedes: [],
+          }),
+        },
+      ],
+      usage: { input_tokens: 500, output_tokens: 100 },
+    });
+
+    await compactIfNeeded("100");
+
+    expect(mockReinforcePattern).toHaveBeenCalledWith(expect.anything(), 11, 0.9);
+    expect(mockUpdatePatternStatus).not.toHaveBeenCalledWith(expect.anything(), 11, "superseded");
     expect(mockInsertPattern).not.toHaveBeenCalled();
   });
 
@@ -2005,7 +2336,111 @@ describe("compactIfNeeded", () => {
     }
   });
 
-  it("uses chat-level sourceId when extracted pattern has no evidence ids", async () => {
+  it("halves observation confidence for implicit extracted patterns", async () => {
+    const longContent = "x".repeat(10_000);
+    const messages = Array.from({ length: 20 }, (_, i) => ({
+      id: i + 1,
+      role: "user",
+      content: longContent,
+      chat_id: "100",
+      external_message_id: null,
+      tool_call_id: null,
+      compacted_at: null,
+      created_at: new Date(),
+    }));
+
+    mockGetRecentMessages
+      .mockResolvedValueOnce(messages)
+      .mockResolvedValueOnce(messages);
+
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            new_patterns: [{
+              content: "Implicit pattern about pacing and rest.",
+              kind: "behavior",
+              confidence: 0.8,
+              signal: "implicit",
+              evidence_message_ids: [1],
+              entry_uuids: [],
+              temporal: {},
+            }],
+            reinforcements: [],
+            contradictions: [],
+            supersedes: [],
+          }),
+        },
+      ],
+      usage: { input_tokens: 500, output_tokens: 100 },
+    });
+
+    await compactIfNeeded("100");
+
+    expect(mockInsertPatternObservation).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        confidence: 0.4,
+      })
+    );
+  });
+
+  it("skips reinforcement updates when evidence only points to assistant messages", async () => {
+    const longContent = "x".repeat(10_000);
+    const messages = Array.from({ length: 20 }, (_, i) => ({
+      id: i + 1,
+      role: i === 1 ? "assistant" : "user",
+      content: longContent,
+      chat_id: "100",
+      external_message_id: null,
+      tool_call_id: null,
+      compacted_at: null,
+      created_at: new Date(),
+    }));
+
+    mockGetRecentMessages
+      .mockResolvedValueOnce(messages)
+      .mockResolvedValueOnce(messages);
+
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            new_patterns: [],
+            reinforcements: [{
+              pattern_id: 7,
+              confidence: 0.9,
+              signal: "explicit",
+              evidence_message_ids: [2], // assistant-only evidence gets filtered out
+              entry_uuids: ["ENTRY-001"],
+            }],
+            contradictions: [],
+            supersedes: [],
+          }),
+        },
+      ],
+      usage: { input_tokens: 500, output_tokens: 100 },
+    });
+
+    await compactIfNeeded("100");
+
+    expect(mockReinforcePattern).not.toHaveBeenCalledWith(expect.anything(), 7, expect.anything());
+    expect(mockInsertPatternObservation).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ patternId: 7 })
+    );
+    expect(mockLinkPatternToEntry).not.toHaveBeenCalledWith(
+      expect.anything(),
+      7,
+      "ENTRY-001",
+      "compaction",
+      0.9
+    );
+  });
+
+  it("skips extracted patterns when no valid evidence ids are provided", async () => {
     const longContent = "x".repeat(10_000);
     const messages = Array.from({ length: 20 }, (_, i) => ({
       id: i + 1,
@@ -2047,10 +2482,8 @@ describe("compactIfNeeded", () => {
 
     await compactIfNeeded("100");
 
-    expect(mockInsertPattern).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ sourceId: "chat:100" })
-    );
+    expect(mockInsertPattern).not.toHaveBeenCalled();
+    expect(mockInsertPatternObservation).not.toHaveBeenCalled();
   });
 
   it("skips compaction when lock is not acquired", async () => {
