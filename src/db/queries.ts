@@ -576,6 +576,26 @@ export interface CostNotificationRow {
   created_at: Date;
 }
 
+export interface SoulQualitySignalRow {
+  id: number;
+  chat_id: string;
+  assistant_message_id: number | null;
+  signal_type: string;
+  soul_version: number;
+  pattern_count: number;
+  metadata: Record<string, unknown>;
+  created_at: Date;
+}
+
+export interface SoulQualityStats {
+  felt_personal: number;
+  felt_generic: number;
+  correction: number;
+  positive_reaction: number;
+  total: number;
+  personal_ratio: number;
+}
+
 /**
  * Insert a chat message. Returns false if duplicate (via external_message_id UNIQUE).
  */
@@ -1180,6 +1200,91 @@ export async function logMemoryRetrieval(
 }
 
 // ============================================================================
+// Soul quality signals
+// ============================================================================
+
+/**
+ * Insert a soul quality feedback signal.
+ */
+export async function insertSoulQualitySignal(
+  pool: pg.Pool,
+  params: {
+    chatId: string;
+    assistantMessageId: number | null;
+    signalType: string;
+    soulVersion: number;
+    patternCount: number;
+    metadata: Record<string, unknown>;
+  }
+): Promise<SoulQualitySignalRow> {
+  const result = await pool.query(
+    `INSERT INTO soul_quality_signals (
+      chat_id, assistant_message_id, signal_type, soul_version, pattern_count, metadata
+    ) VALUES ($1, $2, $3, $4, $5, $6)
+    RETURNING *`,
+    [
+      params.chatId,
+      params.assistantMessageId,
+      params.signalType,
+      params.soulVersion,
+      params.patternCount,
+      JSON.stringify(params.metadata),
+    ]
+  );
+  return mapSoulQualitySignalRow(result.rows[0]);
+}
+
+/**
+ * Get aggregated soul quality stats for a chat within a time window.
+ */
+export async function getSoulQualityStats(
+  pool: pg.Pool,
+  chatId: string,
+  windowDays: number = 30
+): Promise<SoulQualityStats> {
+  const result = await pool.query(
+    `SELECT
+       COALESCE(SUM(CASE WHEN signal_type = 'felt_personal' THEN 1 ELSE 0 END), 0)::int AS felt_personal,
+       COALESCE(SUM(CASE WHEN signal_type = 'felt_generic' THEN 1 ELSE 0 END), 0)::int AS felt_generic,
+       COALESCE(SUM(CASE WHEN signal_type = 'correction' THEN 1 ELSE 0 END), 0)::int AS correction,
+       COALESCE(SUM(CASE WHEN signal_type = 'positive_reaction' THEN 1 ELSE 0 END), 0)::int AS positive_reaction,
+       COUNT(*)::int AS total
+     FROM soul_quality_signals
+     WHERE chat_id = $1 AND created_at >= NOW() - ($2 || ' days')::interval`,
+    [chatId, windowDays]
+  );
+  const row = result.rows[0];
+  const positiveSignals = row.felt_personal + row.positive_reaction;
+  const negativeSignals = row.felt_generic;
+  const qualityTotal = positiveSignals + negativeSignals;
+  return {
+    felt_personal: row.felt_personal,
+    felt_generic: row.felt_generic,
+    correction: row.correction,
+    positive_reaction: row.positive_reaction,
+    total: row.total,
+    personal_ratio: qualityTotal > 0 ? positiveSignals / qualityTotal : 0,
+  };
+}
+
+/**
+ * Get the most recent assistant message ID for a chat (for attaching feedback signals).
+ */
+export async function getLastAssistantMessageId(
+  pool: pg.Pool,
+  chatId: string
+): Promise<number | null> {
+  const result = await pool.query(
+    `SELECT id FROM chat_messages
+     WHERE chat_id = $1 AND role = 'assistant' AND compacted_at IS NULL
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [chatId]
+  );
+  return result.rows[0]?.id ?? null;
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 
@@ -1219,6 +1324,19 @@ function mapSoulStateRow(row: Record<string, unknown>): ChatSoulStateRow {
     version: Number(row.version),
     created_at: row.created_at as Date,
     updated_at: row.updated_at as Date,
+  };
+}
+
+function mapSoulQualitySignalRow(row: Record<string, unknown>): SoulQualitySignalRow {
+  return {
+    id: row.id as number,
+    chat_id: String(row.chat_id),
+    assistant_message_id: (row.assistant_message_id as number | null) ?? null,
+    signal_type: row.signal_type as string,
+    soul_version: Number(row.soul_version),
+    pattern_count: Number(row.pattern_count),
+    metadata: (row.metadata as Record<string, unknown>) ?? {},
+    created_at: row.created_at as Date,
   };
 }
 

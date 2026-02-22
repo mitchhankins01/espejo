@@ -26,6 +26,8 @@ const {
   mockFindSimilarPatterns,
   mockGetLastCompactionTime,
   mockCountStaleEventPatterns,
+  mockInsertSoulQualitySignal,
+  mockGetSoulQualityStats,
   mockGenerateEmbedding,
   mockAnthropicCreate,
   mockOpenAIChatCreate,
@@ -69,6 +71,24 @@ const {
   mockFindSimilarPatterns: vi.fn().mockResolvedValue([]),
   mockGetLastCompactionTime: vi.fn().mockResolvedValue(null),
   mockCountStaleEventPatterns: vi.fn().mockResolvedValue(0),
+  mockInsertSoulQualitySignal: vi.fn().mockResolvedValue({
+    id: 1,
+    chat_id: "100",
+    assistant_message_id: null,
+    signal_type: "correction",
+    soul_version: 1,
+    pattern_count: 0,
+    metadata: {},
+    created_at: new Date(),
+  }),
+  mockGetSoulQualityStats: vi.fn().mockResolvedValue({
+    felt_personal: 0,
+    felt_generic: 0,
+    correction: 0,
+    positive_reaction: 0,
+    total: 0,
+    personal_ratio: 0,
+  }),
   mockGenerateEmbedding: vi.fn().mockResolvedValue(new Array(1536).fill(0)),
   mockAnthropicCreate: vi.fn(),
   mockOpenAIChatCreate: vi.fn(),
@@ -146,6 +166,8 @@ vi.mock("../../src/db/queries.js", () => ({
   findSimilarPatterns: mockFindSimilarPatterns,
   getLastCompactionTime: mockGetLastCompactionTime,
   countStaleEventPatterns: mockCountStaleEventPatterns,
+  insertSoulQualitySignal: mockInsertSoulQualitySignal,
+  getSoulQualityStats: mockGetSoulQualityStats,
 }));
 
 vi.mock("../../src/db/embeddings.js", () => ({
@@ -228,6 +250,24 @@ beforeEach(() => {
   });
   mockFindSimilarPatterns.mockReset().mockResolvedValue([]);
   mockCountStaleEventPatterns.mockReset().mockResolvedValue(0);
+  mockInsertSoulQualitySignal.mockReset().mockResolvedValue({
+    id: 1,
+    chat_id: "100",
+    assistant_message_id: null,
+    signal_type: "correction",
+    soul_version: 1,
+    pattern_count: 0,
+    metadata: {},
+    created_at: new Date(),
+  });
+  mockGetSoulQualityStats.mockReset().mockResolvedValue({
+    felt_personal: 0,
+    felt_generic: 0,
+    correction: 0,
+    positive_reaction: 0,
+    total: 0,
+    personal_ratio: 0,
+  });
   mockGenerateEmbedding.mockReset().mockResolvedValue(new Array(1536).fill(0));
   mockAnthropicCreate.mockReset();
   mockOpenAIChatCreate.mockReset();

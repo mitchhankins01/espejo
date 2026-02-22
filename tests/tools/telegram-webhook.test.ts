@@ -16,9 +16,13 @@ const {
   mockExtractTextFromDocument,
   mockSetMessageHandler,
   mockProcessUpdate,
+  mockGetSoulState,
+  mockGetSoulQualityStats,
+  mockGetLastAssistantMessageId,
+  mockInsertSoulQualitySignal,
   mockConfig,
 } = vi.hoisted(() => ({
-  mockRunAgent: vi.fn().mockResolvedValue({ response: "agent response", activity: "" }),
+  mockRunAgent: vi.fn().mockResolvedValue({ response: "agent response", activity: "", soulVersion: 1, patternCount: 0 }),
   mockForceCompact: vi.fn().mockResolvedValue(undefined),
   mockSendTelegramMessage: vi.fn().mockResolvedValue(undefined),
   mockSendTelegramVoice: vi.fn().mockResolvedValue(true),
@@ -29,6 +33,12 @@ const {
   mockExtractTextFromDocument: vi.fn().mockResolvedValue("document text"),
   mockSetMessageHandler: vi.fn(),
   mockProcessUpdate: vi.fn(),
+  mockGetSoulState: vi.fn().mockResolvedValue(null),
+  mockGetSoulQualityStats: vi.fn().mockResolvedValue({
+    felt_personal: 0, felt_generic: 0, correction: 0, positive_reaction: 0, total: 0, personal_ratio: 0,
+  }),
+  mockGetLastAssistantMessageId: vi.fn().mockResolvedValue(42),
+  mockInsertSoulQualitySignal: vi.fn().mockResolvedValue({ id: 1 }),
   mockConfig: {
     config: {
       telegram: {
@@ -41,6 +51,8 @@ const {
         voiceReplyMaxChars: 450,
         voiceModel: "gpt-4o-mini-tts",
         voiceName: "alloy",
+        soulEnabled: true,
+        soulFeedbackEvery: 8,
       },
     },
   },
@@ -81,11 +93,23 @@ vi.mock("../../src/telegram/updates.js", () => ({
   processUpdate: mockProcessUpdate,
 }));
 
+vi.mock("../../src/db/client.js", () => ({
+  pool: {},
+}));
+
+vi.mock("../../src/db/queries.js", () => ({
+  getSoulState: mockGetSoulState,
+  getSoulQualityStats: mockGetSoulQualityStats,
+  getLastAssistantMessageId: mockGetLastAssistantMessageId,
+  insertSoulQualitySignal: mockInsertSoulQualitySignal,
+}));
+
 vi.mock("../../src/config.js", () => mockConfig);
 
 import {
   registerTelegramRoutes,
   clearWebhookChatModes,
+  clearFeedbackCounters,
 } from "../../src/telegram/webhook.js";
 
 // ---------------------------------------------------------------------------
@@ -153,7 +177,7 @@ function getHandler(): (msg: Record<string, unknown>) => Promise<void> {
 let errorSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
-  mockRunAgent.mockReset().mockResolvedValue({ response: "agent response", activity: "" });
+  mockRunAgent.mockReset().mockResolvedValue({ response: "agent response", activity: "", soulVersion: 1, patternCount: 0 });
   mockSendTelegramMessage.mockReset().mockResolvedValue(undefined);
   mockSendTelegramVoice.mockReset().mockResolvedValue(true);
   mockSendChatAction.mockReset().mockResolvedValue(undefined);
@@ -163,11 +187,20 @@ beforeEach(() => {
   mockExtractTextFromDocument.mockReset().mockResolvedValue("document text");
   mockSetMessageHandler.mockReset();
   mockProcessUpdate.mockReset();
+  mockGetSoulState.mockReset().mockResolvedValue(null);
+  mockGetSoulQualityStats.mockReset().mockResolvedValue({
+    felt_personal: 0, felt_generic: 0, correction: 0, positive_reaction: 0, total: 0, personal_ratio: 0,
+  });
+  mockGetLastAssistantMessageId.mockReset().mockResolvedValue(42);
+  mockInsertSoulQualitySignal.mockReset().mockResolvedValue({ id: 1 });
   mockConfig.config.telegram.voiceReplyMode = "off";
   mockConfig.config.telegram.voiceReplyEvery = 3;
   mockConfig.config.telegram.voiceReplyMinChars = 1;
   mockConfig.config.telegram.voiceReplyMaxChars = 450;
+  mockConfig.config.telegram.soulEnabled = true;
+  mockConfig.config.telegram.soulFeedbackEvery = 8;
   clearWebhookChatModes();
+  clearFeedbackCounters();
   errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -886,5 +919,234 @@ describe("error handling", () => {
     );
     const thirdCall = mockRunAgent.mock.calls[1][0];
     expect(thirdCall.mode).toBe("default");
+  });
+});
+
+describe("soul feedback buttons", () => {
+  it("attaches inline buttons on every Nth message based on soulFeedbackEvery", async () => {
+    mockConfig.config.telegram.soulFeedbackEvery = 2;
+
+    const handler = getHandler();
+    // Message 1: counter=1, not divisible by 2
+    await handler({ chatId: 100, text: "first", messageId: 1, date: 1000 });
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith("100", "agent response");
+
+    mockSendTelegramMessage.mockClear();
+
+    // Message 2: counter=2, divisible by 2 — should get buttons
+    await handler({ chatId: 100, text: "second", messageId: 2, date: 1001 });
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      "agent response",
+      expect.objectContaining({
+        inline_keyboard: expect.arrayContaining([
+          expect.arrayContaining([
+            expect.objectContaining({ callback_data: "soul:personal" }),
+            expect.objectContaining({ callback_data: "soul:generic" }),
+          ]),
+        ]),
+      })
+    );
+  });
+
+  it("does not attach buttons when soulEnabled is false", async () => {
+    mockConfig.config.telegram.soulEnabled = false;
+    mockConfig.config.telegram.soulFeedbackEvery = 1;
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith("100", "agent response");
+  });
+});
+
+describe("soul feedback callbacks", () => {
+  it("handles soul:personal callback and inserts felt_personal signal", async () => {
+    mockGetSoulState.mockResolvedValueOnce({ version: 5 });
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "soul:personal", messageId: 10, date: 1000, callbackData: "soul:personal" });
+
+    expect(mockInsertSoulQualitySignal).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        chatId: "100",
+        signalType: "felt_personal",
+        soulVersion: 5,
+        metadata: { source: "inline_button" },
+      })
+    );
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      expect.stringContaining("Noted")
+    );
+    expect(mockRunAgent).not.toHaveBeenCalled();
+  });
+
+  it("handles soul:generic callback and inserts felt_generic signal", async () => {
+    mockGetSoulState.mockResolvedValueOnce({ version: 3 });
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "soul:generic", messageId: 11, date: 1000, callbackData: "soul:generic" });
+
+    expect(mockInsertSoulQualitySignal).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        chatId: "100",
+        signalType: "felt_generic",
+        soulVersion: 3,
+        metadata: { source: "inline_button" },
+      })
+    );
+    expect(mockRunAgent).not.toHaveBeenCalled();
+  });
+
+  it("handles soul feedback callback error gracefully", async () => {
+    mockGetSoulState.mockRejectedValueOnce(new Error("db down"));
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "soul:personal", messageId: 10, date: 1000, callbackData: "soul:personal" });
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("soul feedback error"),
+      expect.any(Error)
+    );
+    expect(mockRunAgent).not.toHaveBeenCalled();
+  });
+});
+
+describe("message reactions", () => {
+  it("logs positive reaction as positive_reaction signal", async () => {
+    mockGetSoulState.mockResolvedValueOnce({ version: 4 });
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "", messageId: 5, date: 1000, reactionEmoji: "👍" });
+
+    expect(mockInsertSoulQualitySignal).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        signalType: "positive_reaction",
+        metadata: { source: "reaction", emoji: "👍" },
+      })
+    );
+    expect(mockRunAgent).not.toHaveBeenCalled();
+    expect(mockSendChatAction).not.toHaveBeenCalled();
+  });
+
+  it("logs negative reaction as felt_generic signal", async () => {
+    mockGetSoulState.mockResolvedValueOnce({ version: 2 });
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "", messageId: 5, date: 1000, reactionEmoji: "👎" });
+
+    expect(mockInsertSoulQualitySignal).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        signalType: "felt_generic",
+        metadata: { source: "reaction", emoji: "👎" },
+      })
+    );
+    expect(mockRunAgent).not.toHaveBeenCalled();
+  });
+
+  it("ignores unknown reaction emojis", async () => {
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "", messageId: 5, date: 1000, reactionEmoji: "🤷" });
+
+    expect(mockInsertSoulQualitySignal).not.toHaveBeenCalled();
+    expect(mockRunAgent).not.toHaveBeenCalled();
+  });
+
+  it("skips reaction logging when soulEnabled is false", async () => {
+    mockConfig.config.telegram.soulEnabled = false;
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "", messageId: 5, date: 1000, reactionEmoji: "👍" });
+
+    expect(mockInsertSoulQualitySignal).not.toHaveBeenCalled();
+  });
+
+  it("handles reaction signal error gracefully", async () => {
+    mockGetSoulState.mockRejectedValueOnce(new Error("db fail"));
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "", messageId: 5, date: 1000, reactionEmoji: "❤️" });
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("reaction signal error"),
+      expect.any(Error)
+    );
+  });
+});
+
+describe("/soul command", () => {
+  it("displays soul state and quality stats", async () => {
+    mockGetSoulState.mockResolvedValueOnce({
+      version: 7,
+      identity_summary: "A steady companion.",
+      relational_commitments: ["stay direct", "be concise"],
+      tone_signature: ["warm", "grounded"],
+      growth_notes: ["user prefers specifics"],
+    });
+    mockGetSoulQualityStats.mockResolvedValueOnce({
+      felt_personal: 10,
+      felt_generic: 2,
+      correction: 5,
+      positive_reaction: 8,
+      total: 25,
+      personal_ratio: 0.9,
+    });
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/soul", messageId: 1, date: 1000 });
+
+    expect(mockRunAgent).not.toHaveBeenCalled();
+    const sentMessage = mockSendTelegramMessage.mock.calls.find(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (c: any[]) => typeof c[1] === "string" && c[1].includes("Soul State")
+    );
+    expect(sentMessage).toBeDefined();
+    const text = sentMessage![1] as string;
+    expect(text).toContain("v7");
+    expect(text).toContain("A steady companion.");
+    expect(text).toContain("stay direct, be concise");
+    expect(text).toContain("warm, grounded");
+    expect(text).toContain("Felt personal: 10");
+    expect(text).toContain("Felt generic: 2");
+    expect(text).toContain("90%");
+  });
+
+  it("shows fallback when no soul state exists", async () => {
+    mockGetSoulState.mockResolvedValueOnce(null);
+    mockGetSoulQualityStats.mockResolvedValueOnce({
+      felt_personal: 0, felt_generic: 0, correction: 0, positive_reaction: 0, total: 0, personal_ratio: 0,
+    });
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/soul", messageId: 1, date: 1000 });
+
+    expect(mockRunAgent).not.toHaveBeenCalled();
+    const sentMessage = mockSendTelegramMessage.mock.calls.find(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (c: any[]) => typeof c[1] === "string" && c[1].includes("Soul State")
+    );
+    expect(sentMessage).toBeDefined();
+    expect(sentMessage![1] as string).toContain("No soul state yet");
+  });
+
+  it("handles /soul error gracefully", async () => {
+    mockGetSoulState.mockRejectedValueOnce(new Error("db error"));
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/soul", messageId: 1, date: 1000 });
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("/soul error"),
+      expect.any(Error)
+    );
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      "Error loading soul state."
+    );
   });
 });

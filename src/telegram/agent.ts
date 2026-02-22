@@ -28,6 +28,8 @@ import {
   reinforcePattern,
   searchPatterns,
   updatePatternStatus,
+  insertSoulQualitySignal,
+  getSoulQualityStats,
   type ChatMessageRow,
   type ChatSoulStateRow,
   type PatternSearchRow,
@@ -1258,6 +1260,8 @@ export async function forceCompact(
 export interface AgentResult {
   response: string | null;
   activity: string;
+  soulVersion: number;
+  patternCount: number;
 }
 
 export async function runAgent(params: {
@@ -1319,6 +1323,7 @@ export async function runAgent(params: {
   const { text, toolCallCount, toolNames } = await runToolLoop(systemPrompt, messages, chatId, prefill);
 
   // 5. Build activity summary
+  const soulVersion = persistedSoulState?.version ?? 0;
   const activityParts: string[] = [];
   if (patterns.length > 0) {
     const topKinds = [...new Set(patterns.map((p) => p.kind))].slice(0, 3).join(", ");
@@ -1328,9 +1333,23 @@ export async function runAgent(params: {
   if (costNote) activityParts.push(costNote);
   if (degraded) activityParts.push("memory degraded");
   if (toolCallCount > 0) activityParts.push(`${toolCallCount} tools (${toolNames.join(", ")})`);
+
+  // Include soul quality ratio when enough signals exist
+  if (config.telegram.soulEnabled) {
+    try {
+      const stats = await getSoulQualityStats(pool, chatId);
+      if (stats.total >= 5) {
+        const pct = Math.round(stats.personal_ratio * 100);
+        activityParts.push(`soul v${soulVersion} (${pct}% personal)`);
+      }
+    } catch {
+      /* v8 ignore next -- non-critical: quality stats are best-effort */
+    }
+  }
+
   const activity = activityParts.join(" | ");
 
-  if (!text) return { response: null, activity };
+  if (!text) return { response: null, activity, soulVersion, patternCount: patterns.length };
 
   // 6. Store assistant response
   await insertChatMessage(pool, {
@@ -1340,7 +1359,7 @@ export async function runAgent(params: {
     content: text,
   });
 
-  // 7. Persist evolving soul state
+  // 7. Persist evolving soul state + log correction signal
   if (config.telegram.soulEnabled) {
     try {
       const nextSoulState = evolveSoulState(
@@ -1356,6 +1375,15 @@ export async function runAgent(params: {
           growthNotes: nextSoulState.growthNotes,
           version: nextSoulState.version,
         });
+        // Log implicit correction signal — user message triggered soul evolution
+        await insertSoulQualitySignal(pool, {
+          chatId,
+          assistantMessageId: null,
+          signalType: "correction",
+          soulVersion: nextSoulState.version,
+          patternCount: patterns.length,
+          metadata: { source: "implicit_correction" },
+        });
       }
     } catch (err) {
       console.error(`Telegram soul persistence error [chat:${chatId}]:`, err);
@@ -1368,5 +1396,5 @@ export async function runAgent(params: {
     console.error(`Telegram compaction error [chat:${chatId}]:`, err);
   });
 
-  return { response: text, activity };
+  return { response: text, activity, soulVersion, patternCount: patterns.length };
 }

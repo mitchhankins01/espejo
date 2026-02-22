@@ -70,6 +70,11 @@ const telegramVoiceReplyMaxChars = parseIntegerEnv(
   16
 );
 const telegramSoulEnabled = parseBooleanEnv("TELEGRAM_SOUL_ENABLED", true);
+const telegramSoulFeedbackEvery = parseIntegerEnv(
+  "TELEGRAM_SOUL_FEEDBACK_EVERY",
+  8,
+  1
+);
 
 if (telegramVoiceReplyMinChars > telegramVoiceReplyMaxChars) {
   throw new Error(
@@ -155,6 +160,7 @@ export const config = {
     voiceReplyMinChars: telegramVoiceReplyMinChars,
     voiceReplyMaxChars: telegramVoiceReplyMaxChars,
     soulEnabled: telegramSoulEnabled,
+    soulFeedbackEvery: telegramSoulFeedbackEvery,
     voiceModel: process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts",
     voiceName: process.env.OPENAI_TTS_VOICE || "alloy",
   },

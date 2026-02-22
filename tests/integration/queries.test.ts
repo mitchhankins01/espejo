@@ -42,6 +42,9 @@ import {
   getLastCompactionTime,
   getSoulState,
   upsertSoulState,
+  insertSoulQualitySignal,
+  getSoulQualityStats,
+  getLastAssistantMessageId,
 } from "../../src/db/queries.js";
 import { fixturePatterns } from "../../specs/fixtures/seed.js";
 
@@ -1166,5 +1169,90 @@ describe("upsertSoulState", () => {
     expect(updated.version).toBe(7);
     const fetched = await getSoulState(pool, "888");
     expect(fetched?.version).toBe(7);
+  });
+});
+
+// ============================================================================
+// soul_quality_signals
+// ============================================================================
+
+describe("insertSoulQualitySignal", () => {
+  it("inserts a quality signal and returns it", async () => {
+    const signal = await insertSoulQualitySignal(pool, {
+      chatId: "100",
+      assistantMessageId: null,
+      signalType: "felt_personal",
+      soulVersion: 3,
+      patternCount: 2,
+      metadata: { source: "inline_button" },
+    });
+
+    expect(signal.id).toBeGreaterThan(0);
+    expect(signal.chat_id).toBe("100");
+    expect(signal.signal_type).toBe("felt_personal");
+    expect(signal.soul_version).toBe(3);
+    expect(signal.pattern_count).toBe(2);
+    expect(signal.metadata).toEqual({ source: "inline_button" });
+    expect(signal.created_at).toBeInstanceOf(Date);
+  });
+
+  it("accepts all valid signal types", async () => {
+    for (const signalType of ["felt_personal", "felt_generic", "correction", "positive_reaction"]) {
+      const signal = await insertSoulQualitySignal(pool, {
+        chatId: "100",
+        assistantMessageId: null,
+        signalType,
+        soulVersion: 1,
+        patternCount: 0,
+        metadata: {},
+      });
+      expect(signal.signal_type).toBe(signalType);
+    }
+  });
+});
+
+describe("getSoulQualityStats", () => {
+  it("returns zero counts when no signals exist", async () => {
+    const stats = await getSoulQualityStats(pool, "999");
+    expect(stats.felt_personal).toBe(0);
+    expect(stats.felt_generic).toBe(0);
+    expect(stats.correction).toBe(0);
+    expect(stats.positive_reaction).toBe(0);
+    expect(stats.total).toBe(0);
+    expect(stats.personal_ratio).toBe(0);
+  });
+
+  it("aggregates signals correctly and computes personal_ratio", async () => {
+    const chatId = "200";
+    // 3 positive, 1 negative
+    await insertSoulQualitySignal(pool, { chatId, assistantMessageId: null, signalType: "felt_personal", soulVersion: 1, patternCount: 0, metadata: {} });
+    await insertSoulQualitySignal(pool, { chatId, assistantMessageId: null, signalType: "felt_personal", soulVersion: 1, patternCount: 0, metadata: {} });
+    await insertSoulQualitySignal(pool, { chatId, assistantMessageId: null, signalType: "positive_reaction", soulVersion: 1, patternCount: 0, metadata: {} });
+    await insertSoulQualitySignal(pool, { chatId, assistantMessageId: null, signalType: "felt_generic", soulVersion: 1, patternCount: 0, metadata: {} });
+    await insertSoulQualitySignal(pool, { chatId, assistantMessageId: null, signalType: "correction", soulVersion: 1, patternCount: 0, metadata: {} });
+
+    const stats = await getSoulQualityStats(pool, chatId);
+    expect(stats.felt_personal).toBe(2);
+    expect(stats.felt_generic).toBe(1);
+    expect(stats.positive_reaction).toBe(1);
+    expect(stats.correction).toBe(1);
+    expect(stats.total).toBe(5);
+    // personal_ratio = (2 + 1) / (2 + 1 + 1) = 0.75
+    expect(stats.personal_ratio).toBe(0.75);
+  });
+});
+
+describe("getLastAssistantMessageId", () => {
+  it("returns null when no assistant messages exist", async () => {
+    const result = await getLastAssistantMessageId(pool, "999999");
+    expect(result).toBeNull();
+  });
+
+  it("returns the most recent assistant message id", async () => {
+    await insertChatMessage(pool, { chatId: "300", externalMessageId: "1", role: "user", content: "hi" });
+    const msg = await insertChatMessage(pool, { chatId: "300", externalMessageId: null, role: "assistant", content: "hello" });
+
+    const result = await getLastAssistantMessageId(pool, "300");
+    expect(result).toBe(msg.id);
   });
 });

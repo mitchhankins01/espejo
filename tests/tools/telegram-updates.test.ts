@@ -418,6 +418,69 @@ describe("processUpdate", () => {
     processUpdate(makeUpdate());
     expect(handler).not.toHaveBeenCalled();
   });
+
+  it("processes message_reaction updates", async () => {
+    const update = makeUpdate({
+      message_reaction: {
+        chat: { id: 100 },
+        message_id: 7,
+        date: 2000,
+        new_reaction: [{ type: "emoji", emoji: "👍" }],
+      },
+    });
+
+    processUpdate(update);
+    await vi.advanceTimersToNextTimerAsync();
+
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: 100,
+        text: "",
+        messageId: 7,
+        date: 2000,
+        reactionEmoji: "👍",
+      })
+    );
+  });
+
+  it("ignores message_reaction without emoji", () => {
+    const update = makeUpdate({
+      message_reaction: {
+        chat: { id: 100 },
+        message_id: 7,
+        date: 2000,
+        new_reaction: [],
+      },
+    });
+
+    processUpdate(update);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("deduplicates message_reaction updates", () => {
+    const update1 = makeUpdate({
+      update_id: 50,
+      message_reaction: {
+        chat: { id: 100 },
+        message_id: 7,
+        date: 2000,
+        new_reaction: [{ type: "emoji", emoji: "❤️" }],
+      },
+    });
+    expect(isDuplicate(update1)).toBe(false);
+
+    const update2 = makeUpdate({
+      update_id: 51,
+      message_reaction: {
+        chat: { id: 100 },
+        message_id: 7,
+        date: 2000,
+        new_reaction: [{ type: "emoji", emoji: "❤️" }],
+      },
+    });
+    // Same chat:message_id → reaction dedup key matches
+    expect(isDuplicate(update2)).toBe(true);
+  });
 });
 
 describe("text fragment reassembly", () => {

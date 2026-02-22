@@ -76,27 +76,33 @@ function chunkText(text: string): string[] {
  */
 export async function sendTelegramMessage(
   chatId: string,
-  text: string
+  text: string,
+  replyMarkup?: Record<string, unknown>
 ): Promise<void> {
   const chunks = chunkText(text);
 
-  for (const chunk of chunks) {
-    await sendSingleMessage(chatId, chunk);
+  for (let i = 0; i < chunks.length; i++) {
+    // Only attach reply_markup to the last chunk
+    const markup = i === chunks.length - 1 ? replyMarkup : undefined;
+    await sendSingleMessage(chatId, chunks[i], markup);
   }
 }
 
 async function sendSingleMessage(
   chatId: string,
-  text: string
+  text: string,
+  replyMarkup?: Record<string, unknown>
 ): Promise<void> {
   // Try with HTML parse mode first
   for (let attempt = 0; ; attempt++) {
     try {
-      const res = await telegramPost("sendMessage", {
+      const body: Record<string, unknown> = {
         chat_id: chatId,
         text,
         parse_mode: "HTML",
-      });
+      };
+      if (replyMarkup) body.reply_markup = replyMarkup;
+      const res = await telegramPost("sendMessage", body);
 
       if (res.ok) return;
 

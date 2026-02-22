@@ -1,5 +1,12 @@
 import type { Express, Request, Response } from "express";
 import { config } from "../config.js";
+import { pool } from "../db/client.js";
+import {
+  getSoulState,
+  getSoulQualityStats,
+  getLastAssistantMessageId,
+  insertSoulQualitySignal,
+} from "../db/queries.js";
 import { runAgent, forceCompact } from "./agent.js";
 import {
   sendTelegramMessage,
@@ -26,6 +33,29 @@ import {
 const MAX_TEXT_MESSAGE_VOICE_CHARS = 260;
 const chatModes = new Map<string, AgentMode>();
 const EVENING_DISABLE_TOKENS = new Set(["off", "stop", "end", "done", "exit"]);
+const chatMessageCounters = new Map<string, number>();
+
+const SOUL_FEEDBACK_BUTTONS = {
+  inline_keyboard: [
+    [
+      { text: "\u2728 Feels like you", callback_data: "soul:personal" },
+      { text: "\uD83D\uDE10 Felt generic", callback_data: "soul:generic" },
+    ],
+  ],
+};
+
+function shouldAttachFeedbackButtons(chatId: string): boolean {
+  if (!config.telegram.soulEnabled) return false;
+  const count = (chatMessageCounters.get(chatId) ?? 0) + 1;
+  chatMessageCounters.set(chatId, count);
+  const every = Math.max(1, config.telegram.soulFeedbackEvery);
+  return count % every === 0;
+}
+
+/** Visible for testing only. */
+export function clearFeedbackCounters(): void {
+  chatMessageCounters.clear();
+}
 
 function parseSlashCommand(
   text: string
@@ -89,8 +119,34 @@ function shouldReplyWithVoice(
   return replyEvery === 1 || messageId % replyEvery === 0;
 }
 
+const POSITIVE_REACTION_EMOJIS = new Set(["👍", "❤️", "🔥", "👏", "🎉", "💯", "⚡", "🫡"]);
+const NEGATIVE_REACTION_EMOJIS = new Set(["👎", "💩"]);
+
 async function handleMessage(msg: AssembledMessage): Promise<void> {
   const chatId = String(msg.chatId);
+
+  // Handle message reactions — log as soul quality signal, no typing indicator
+  if (msg.reactionEmoji) {
+    const emoji = msg.reactionEmoji;
+    const isPositive = POSITIVE_REACTION_EMOJIS.has(emoji);
+    const isNegative = NEGATIVE_REACTION_EMOJIS.has(emoji);
+    if ((isPositive || isNegative) && config.telegram.soulEnabled) {
+      try {
+        const soulState = await getSoulState(pool, chatId);
+        await insertSoulQualitySignal(pool, {
+          chatId,
+          assistantMessageId: null,
+          signalType: isPositive ? "positive_reaction" : "felt_generic",
+          soulVersion: soulState?.version ?? 0,
+          patternCount: 0,
+          metadata: { source: "reaction", emoji },
+        });
+      } catch (err) {
+        console.error(`Telegram reaction signal error [chat:${chatId}]:`, err);
+      }
+    }
+    return;
+  }
 
   // Show typing indicator immediately
   await sendChatAction(chatId, "typing");
@@ -139,11 +195,75 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
 
     const command = parseSlashCommand(text);
 
+    // Handle soul feedback callbacks (soul:personal, soul:generic)
+    if (msg.callbackData?.startsWith("soul:")) {
+      const signalType = msg.callbackData === "soul:personal" ? "felt_personal" : "felt_generic";
+      try {
+        const assistantMsgId = await getLastAssistantMessageId(pool, chatId);
+        const soulState = await getSoulState(pool, chatId);
+        await insertSoulQualitySignal(pool, {
+          chatId,
+          assistantMessageId: assistantMsgId,
+          signalType,
+          soulVersion: soulState?.version ?? 0,
+          patternCount: 0,
+          metadata: { source: "inline_button" },
+        });
+        const ack = signalType === "felt_personal" ? "\u2728 Noted \u2014 thanks!" : "\uD83D\uDE10 Noted \u2014 I\u2019ll work on that.";
+        await sendTelegramMessage(chatId, `<i>${ack}</i>`);
+      } catch (err) {
+        console.error(`Telegram soul feedback error [chat:${chatId}]:`, err);
+      }
+      return;
+    }
+
     // Handle /compact command
     if (command?.name === "compact") {
       await forceCompact(chatId, async (summary) => {
         await sendTelegramMessage(chatId, `<i>Memory note: ${summary}</i>`);
       });
+      return;
+    }
+
+    // Handle /soul command — show soul state + quality stats
+    if (command?.name === "soul") {
+      try {
+        const soulState = await getSoulState(pool, chatId);
+        const stats = await getSoulQualityStats(pool, chatId);
+        const lines: string[] = [];
+        if (soulState) {
+          lines.push(`\uD83E\uDE9E <b>Soul State</b> (v${soulState.version})\n`);
+          if (soulState.identity_summary) {
+            lines.push(`<b>Identity:</b> ${soulState.identity_summary}`);
+          }
+          if (soulState.relational_commitments.length > 0) {
+            lines.push(`<b>Commitments:</b> ${soulState.relational_commitments.join(", ")}`);
+          }
+          if (soulState.tone_signature.length > 0) {
+            lines.push(`<b>Tone:</b> ${soulState.tone_signature.join(", ")}`);
+          }
+          if (soulState.growth_notes.length > 0) {
+            lines.push(`<b>Growth:</b> ${soulState.growth_notes.join("; ")}`);
+          }
+        } else {
+          lines.push("\uD83E\uDE9E <b>Soul State</b>\n");
+          lines.push("No soul state yet. Keep chatting \u2014 it evolves over time.");
+        }
+        if (stats.total > 0) {
+          lines.push("");
+          lines.push("<b>Quality (last 30 days):</b>");
+          lines.push(`  \u2728 Felt personal: ${stats.felt_personal}`);
+          lines.push(`  \uD83D\uDE10 Felt generic: ${stats.felt_generic}`);
+          lines.push(`  \uD83D\uDD27 Corrections: ${stats.correction}`);
+          lines.push(`  \uD83D\uDC4D Reactions: ${stats.positive_reaction}`);
+          const pct = Math.round(stats.personal_ratio * 100);
+          lines.push(`  Personal ratio: ${pct}%`);
+        }
+        await sendTelegramMessage(chatId, lines.join("\n"));
+      } catch (err) {
+        console.error(`Telegram /soul error [chat:${chatId}]:`, err);
+        await sendTelegramMessage(chatId, "Error loading soul state.");
+      }
       return;
     }
 
@@ -185,6 +305,10 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
         ? `${response}\n\n<i>${activity}</i>`
         : response;
 
+      // Determine if we should attach soul feedback buttons
+      const attachButtons = shouldAttachFeedbackButtons(chatId);
+      const replyMarkup = attachButtons ? SOUL_FEEDBACK_BUTTONS : undefined;
+
       const useVoice = shouldReplyWithVoice(
         response,
         Boolean(msg.voice),
@@ -207,7 +331,11 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
         }
       }
 
-      await sendTelegramMessage(chatId, fullResponse);
+      if (replyMarkup) {
+        await sendTelegramMessage(chatId, fullResponse, replyMarkup);
+      } else {
+        await sendTelegramMessage(chatId, fullResponse);
+      }
     }
   } catch (err) {
     console.error(`Telegram error [chat:${chatId}]:`, err);
@@ -247,7 +375,8 @@ export function registerTelegramRoutes(app: Express): void {
     if (allowedChatId) {
       const chatId =
         update.message?.chat.id ??
-        update.callback_query?.message?.chat.id;
+        update.callback_query?.message?.chat.id ??
+        update.message_reaction?.chat.id;
       if (chatId !== undefined && String(chatId) !== allowedChatId) {
         res.status(403).json({ error: "Forbidden" });
         return;
