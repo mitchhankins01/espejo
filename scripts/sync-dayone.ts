@@ -128,8 +128,8 @@ interface EntryRow {
 }
 
 interface TagRow {
-  Z_17ENTRIES: number;
-  ZNAME: string;
+  entryId: number;
+  tagName: string;
 }
 
 interface AttachmentRow {
@@ -187,6 +187,41 @@ function elapsed(start: bigint): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+function quoteSqliteIdentifier(name: string): string {
+  if (!/^[A-Za-z0-9_]+$/.test(name)) {
+    throw new Error(`Unsafe SQLite identifier: ${name}`);
+  }
+  return `"${name}"`;
+}
+
+function resolveEntryTagJoin(
+  sqlite: Database.Database
+): { table: string; entryCol: string; tagCol: string } {
+  const tables = sqlite
+    .prepare(
+      `SELECT name
+       FROM sqlite_master
+       WHERE type = 'table'
+         AND name LIKE 'Z\\_%TAGS' ESCAPE '\\'`
+    )
+    .all() as Array<{ name: string }>;
+
+  for (const t of tables) {
+    const cols = sqlite
+      .prepare(`PRAGMA table_info(${quoteSqliteIdentifier(t.name)})`)
+      .all() as Array<{ name: string }>;
+    const entryCol = cols.find((c) => /ENTRIES$/.test(c.name))?.name;
+    const tagCol = cols.find((c) => /TAGS\d*$/.test(c.name))?.name;
+    if (entryCol && tagCol && !/EXCLUDE/i.test(tagCol)) {
+      return { table: t.name, entryCol, tagCol };
+    }
+  }
+
+  throw new Error(
+    "Unable to resolve Day One tag schema: could not find an entry-tags join table"
+  );
+}
+
 async function syncDayOne(): Promise<void> {
   const t0 = process.hrtime.bigint();
   const sqlitePath = getSqlitePath();
@@ -233,21 +268,22 @@ async function syncDayOne(): Promise<void> {
     }
   }
 
-  // Read all entry-tag relationships
+  // Read all entry-tag relationships (schema differs across Day One versions)
+  const tagJoin = resolveEntryTagJoin(sqlite);
   const tagRows = sqlite
     .prepare(
-      `SELECT jt.Z_17ENTRIES, t.ZNAME
-     FROM Z_17TAGS jt
-     JOIN ZTAG t ON t.Z_PK = jt.Z_64TAGS1`
+      `SELECT jt.${quoteSqliteIdentifier(tagJoin.entryCol)} AS entryId, t.ZNAME AS tagName
+     FROM ${quoteSqliteIdentifier(tagJoin.table)} jt
+     JOIN ZTAG t ON t.Z_PK = jt.${quoteSqliteIdentifier(tagJoin.tagCol)}`
     )
     .all() as TagRow[];
 
   // Group tags by entry Z_PK
   const tagsByEntry = new Map<number, string[]>();
   for (const row of tagRows) {
-    const existing = tagsByEntry.get(row.Z_17ENTRIES) || [];
-    existing.push(row.ZNAME);
-    tagsByEntry.set(row.Z_17ENTRIES, existing);
+    const existing = tagsByEntry.get(row.entryId) || [];
+    existing.push(row.tagName);
+    tagsByEntry.set(row.entryId, existing);
   }
 
   // Read all attachments (including ZHASDATA for local file check)
