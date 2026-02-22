@@ -1346,6 +1346,59 @@ describe("runAgent", () => {
     );
   });
 
+  it("stores raw user command but sends transformed prompt message when provided", async () => {
+    mockGetRecentMessages.mockResolvedValueOnce([
+      {
+        id: 1,
+        chat_id: "100",
+        external_message_id: "update:evening-raw",
+        role: "user",
+        content: "/evening",
+        tool_call_id: null,
+        compacted_at: null,
+        created_at: new Date(),
+      },
+    ]);
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Starting your evening review." }],
+      usage: { input_tokens: 120, output_tokens: 20 },
+    });
+
+    await runAgent({
+      chatId: "100",
+      message:
+        "Start my evening review now. Pull my last 7 days first, then ask the first bilingual question.",
+      storedUserMessage: "/evening",
+      externalMessageId: "update:evening-raw",
+      messageDate: 1000,
+      mode: "evening_review",
+    });
+
+    expect(mockInsertChatMessage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        role: "user",
+        content: "/evening",
+      })
+    );
+
+    const call = mockAnthropicCreate.mock.calls[0][0];
+    expect(call.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "user",
+          content:
+            "Start my evening review now. Pull my last 7 days first, then ask the first bilingual question.",
+        }),
+      ])
+    );
+    expect(call.messages).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: "user", content: "/evening" }),
+      ])
+    );
+  });
+
   it("skips soul-state lookup when TELEGRAM_SOUL_ENABLED is false", async () => {
     mockConfig.telegram.soulEnabled = false;
     mockAnthropicCreate.mockResolvedValueOnce({

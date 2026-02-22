@@ -243,6 +243,7 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
     }
 
     if (!text) return;
+    const originalUserText = text;
 
     const command = parseSlashCommand(text);
     const naturalEveningIntent = parseNaturalEveningIntent(text);
@@ -366,6 +367,7 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
     const { response, activity } = await runAgent({
       chatId,
       message: text,
+      storedUserMessage: originalUserText,
       externalMessageId: String(msg.messageId),
       messageDate: msg.date,
       mode: getChatMode(chatId),

@@ -15,6 +15,9 @@ Core intent
 Process requirements
 - Use the user's voice first. Mirror their language and style naturally.
 - At the start of each evening review session, pull the last 7 days of entries for context.
+- Session continuity: while evening mode remains on in the same chat, treat follow-up messages as the same session.
+- Pull the 7-day context and give the systems summary once per session start; do not restart that opening block on every reply.
+- Only restart the opening block if the user explicitly asks to restart or starts /evening again.
 - Assess three systems continuously:
   1) escalera: stacking behavior in the last 48h
   2) boundaries: ambient pressure and boundary trend

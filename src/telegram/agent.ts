@@ -1512,6 +1512,7 @@ export interface AgentResult {
 export async function runAgent(params: {
   chatId: string;
   message: string;
+  storedUserMessage?: string;
   externalMessageId: string;
   messageDate: number;
   mode?: AgentMode;
@@ -1521,6 +1522,7 @@ export async function runAgent(params: {
   const {
     chatId,
     message,
+    storedUserMessage,
     externalMessageId,
     mode = "default",
     prefill,
@@ -1532,7 +1534,7 @@ export async function runAgent(params: {
     chatId,
     externalMessageId,
     role: "user",
-    content: message,
+    content: storedUserMessage ?? message,
   });
 
   // 2. Retrieve patterns (skip for trivial messages)
@@ -1563,6 +1565,16 @@ export async function runAgent(params: {
   );
   const recentMessages = await getRecentMessages(pool, chatId, RECENT_MESSAGES_LIMIT);
   const messages = reconstructMessages(recentMessages);
+  // Allow command handlers to persist the raw user command while still
+  // steering the current model turn with a transformed prompt message.
+  if (storedUserMessage && storedUserMessage !== message) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "user" && messages[i].content === storedUserMessage) {
+        messages[i].content = message;
+        break;
+      }
+    }
+  }
 
   // 4. Run tool loop
   const { text, toolCallCount, toolNames } = await runToolLoop(systemPrompt, messages, chatId, prefill);
