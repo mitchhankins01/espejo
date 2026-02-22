@@ -39,6 +39,8 @@ import {
   insertCostNotification,
   getUsageSummary,
   getLastCompactionTime,
+  getSoulState,
+  upsertSoulState,
 } from "../../src/db/queries.js";
 import { fixturePatterns } from "../../specs/fixtures/seed.js";
 
@@ -1057,5 +1059,82 @@ describe("getLastCompactionTime", () => {
 
     const result = await getLastCompactionTime(pool, "999");
     expect(result).toBeInstanceOf(Date);
+  });
+});
+
+// ============================================================================
+// chat_soul_state
+// ============================================================================
+
+describe("getSoulState", () => {
+  it("returns null when no soul state exists for a chat", async () => {
+    const state = await getSoulState(pool, "123456789");
+    expect(state).toBeNull();
+  });
+});
+
+describe("upsertSoulState", () => {
+  it("inserts soul state on first write", async () => {
+    const state = await upsertSoulState(pool, {
+      chatId: "555",
+      identitySummary: "A steady companion that remembers context.",
+      relationalCommitments: ["stay grounded", "be direct"],
+      toneSignature: ["warm", "clear"],
+      growthNotes: ["first run"],
+    });
+
+    expect(state.chat_id).toBe("555");
+    expect(state.identity_summary).toContain("steady companion");
+    expect(state.relational_commitments).toEqual(["stay grounded", "be direct"]);
+    expect(state.tone_signature).toEqual(["warm", "clear"]);
+    expect(state.growth_notes).toEqual(["first run"]);
+    expect(state.version).toBe(1);
+  });
+
+  it("updates existing soul state and increments version", async () => {
+    await upsertSoulState(pool, {
+      chatId: "777",
+      identitySummary: "Initial soul state.",
+      relationalCommitments: ["be calm"],
+      toneSignature: ["grounded"],
+      growthNotes: ["initial"],
+    });
+
+    const updated = await upsertSoulState(pool, {
+      chatId: "777",
+      identitySummary: "Evolved soul state.",
+      relationalCommitments: ["be calm", "be concrete"],
+      toneSignature: ["grounded", "direct"],
+      growthNotes: ["user asked for more specificity"],
+    });
+
+    expect(updated.identity_summary).toBe("Evolved soul state.");
+    expect(updated.relational_commitments).toEqual(["be calm", "be concrete"]);
+    expect(updated.tone_signature).toEqual(["grounded", "direct"]);
+    expect(updated.version).toBe(2);
+    expect(updated.updated_at).toBeInstanceOf(Date);
+  });
+
+  it("respects provided version when it is higher than auto-increment", async () => {
+    await upsertSoulState(pool, {
+      chatId: "888",
+      identitySummary: "State one",
+      relationalCommitments: [],
+      toneSignature: [],
+      growthNotes: [],
+    });
+
+    const updated = await upsertSoulState(pool, {
+      chatId: "888",
+      identitySummary: "State two",
+      relationalCommitments: [],
+      toneSignature: [],
+      growthNotes: [],
+      version: 7,
+    });
+
+    expect(updated.version).toBe(7);
+    const fetched = await getSoulState(pool, "888");
+    expect(fetched?.version).toBe(7);
   });
 });

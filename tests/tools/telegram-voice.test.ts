@@ -48,9 +48,11 @@ import {
 } from "../../src/telegram/voice.js";
 
 let fetchSpy: ReturnType<typeof vi.spyOn>;
+let errorSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   fetchSpy = vi.spyOn(globalThis, "fetch");
+  errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
   mockLogApiUsage.mockReset();
   mockTranscriptionCreate.mockReset();
   mockSpeechCreate.mockReset();
@@ -59,6 +61,7 @@ beforeEach(() => {
 
 afterEach(() => {
   fetchSpy.mockRestore();
+  errorSpy.mockRestore();
 });
 
 describe("transcribeVoiceMessage", () => {
@@ -164,6 +167,21 @@ describe("synthesizeVoiceReply", () => {
   it("throws for empty text after normalization", async () => {
     await expect(synthesizeVoiceReply("<b> </b>")).rejects.toThrow(
       "Cannot synthesize an empty voice reply."
+    );
+  });
+
+  it("returns audio even when usage logging fails", async () => {
+    mockSpeechCreate.mockResolvedValueOnce({
+      arrayBuffer: vi.fn().mockResolvedValue(Buffer.from("mp3-bytes")),
+    });
+    mockLogApiUsage.mockRejectedValueOnce(new Error("db down"));
+
+    const audio = await synthesizeVoiceReply("Hello");
+
+    expect(Buffer.isBuffer(audio)).toBe(true);
+    expect(errorSpy).toHaveBeenCalledWith(
+      "TTS usage logging failed:",
+      expect.any(Error)
     );
   });
 });

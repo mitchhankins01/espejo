@@ -525,6 +525,17 @@ export interface ChatMessageRow {
   created_at: Date;
 }
 
+export interface ChatSoulStateRow {
+  chat_id: string;
+  identity_summary: string;
+  relational_commitments: string[];
+  tone_signature: string[];
+  growth_notes: string[];
+  version: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
 export interface PatternRow {
   id: number;
   content: string;
@@ -654,6 +665,69 @@ export async function getLastCompactionTime(
     [chatId]
   );
   return result.rows[0]?.last_compacted ?? null;
+}
+
+/**
+ * Get the persistent soul state for a chat.
+ */
+export async function getSoulState(
+  pool: pg.Pool,
+  chatId: string
+): Promise<ChatSoulStateRow | null> {
+  const result = await pool.query(
+    `SELECT *
+     FROM chat_soul_state
+     WHERE chat_id = $1
+     LIMIT 1`,
+    [chatId]
+  );
+  if (result.rows.length === 0) return null;
+  return mapSoulStateRow(result.rows[0]);
+}
+
+/**
+ * Insert or update a chat's soul state. On update, version auto-increments.
+ */
+export async function upsertSoulState(
+  pool: pg.Pool,
+  params: {
+    chatId: string;
+    identitySummary: string;
+    relationalCommitments: string[];
+    toneSignature: string[];
+    growthNotes: string[];
+    version?: number;
+  }
+): Promise<ChatSoulStateRow> {
+  const version = Math.max(1, params.version ?? 1);
+  const result = await pool.query(
+    `INSERT INTO chat_soul_state (
+       chat_id,
+       identity_summary,
+       relational_commitments,
+       tone_signature,
+       growth_notes,
+       version
+     )
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (chat_id) DO UPDATE SET
+       identity_summary = EXCLUDED.identity_summary,
+       relational_commitments = EXCLUDED.relational_commitments,
+       tone_signature = EXCLUDED.tone_signature,
+       growth_notes = EXCLUDED.growth_notes,
+       version = GREATEST(chat_soul_state.version + 1, EXCLUDED.version),
+       updated_at = NOW()
+     RETURNING *`,
+    [
+      params.chatId,
+      params.identitySummary,
+      params.relationalCommitments,
+      params.toneSignature,
+      params.growthNotes,
+      version,
+    ]
+  );
+  return mapSoulStateRow(result.rows[0]);
 }
 
 // ============================================================================
@@ -1126,6 +1200,25 @@ function mapPatternRow(row: Record<string, unknown>): PatternRow {
     first_seen: row.first_seen as Date,
     last_seen: row.last_seen as Date,
     created_at: row.created_at as Date,
+  };
+}
+
+function mapSoulStateRow(row: Record<string, unknown>): ChatSoulStateRow {
+  return {
+    chat_id: String(row.chat_id),
+    identity_summary: row.identity_summary as string,
+    relational_commitments:
+      /* v8 ignore next -- defensive: SQL defaults arrays to '{}' */ (row
+        .relational_commitments as string[]) || [],
+    tone_signature:
+      /* v8 ignore next -- defensive: SQL defaults arrays to '{}' */ (row
+        .tone_signature as string[]) || [],
+    growth_notes:
+      /* v8 ignore next -- defensive: SQL defaults arrays to '{}' */ (row
+        .growth_notes as string[]) || [],
+    version: Number(row.version),
+    created_at: row.created_at as Date,
+    updated_at: row.updated_at as Date,
   };
 }
 
