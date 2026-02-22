@@ -937,6 +937,23 @@ describe("runAgent", () => {
     expect(call.system).toContain("Telegram HTML");
   });
 
+  it("includes journal composition instructions in system prompt", async () => {
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Entry text" }],
+      usage: { input_tokens: 100, output_tokens: 20 },
+    });
+
+    await runAgent({
+      chatId: "100",
+      message: "write the entry",
+      externalMessageId: "update:compose-1",
+      messageDate: 1000,
+    });
+
+    const call = mockAnthropicCreate.mock.calls[0][0];
+    expect(call.system).toContain("Journal entry composition:");
+  });
+
   it("omits memory kind suffix in activity when retrieved kind is blank", async () => {
     mockSearchPatterns.mockResolvedValueOnce([
       {

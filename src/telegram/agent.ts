@@ -120,7 +120,15 @@ Your memory works automatically: patterns are extracted from conversations and s
 
  You have access to 8 tools:
  - 7 journal tools: search_entries, get_entry, get_entries_by_date, on_this_day, find_similar, list_tags, entry_stats
- - log_weight: log daily weight measurements`;
+ - log_weight: log daily weight measurements
+
+Journal entry composition:
+When the user has been doing a conversational journal session (morning review, evening review, or any Q&A about their day) and they signal they want the entry composed — using phrases like "write", "close", "write it up", "compose the entry", "write the entry", "escríbelo", or similar — you must:
+1. Compose a complete journal entry from the entire conversation, written in the user's voice and style.
+2. Include ALL topics discussed during the session — do not summarize or omit anything.
+3. Match the user's existing journal format. If unsure, use a simple structure: a title/mantra line, optional metrics (sleep score, HRV, etc. if discussed), then free-form paragraphs covering each topic.
+4. Write the entry as a single message the user can copy into their journal app. Do NOT add conversational commentary before or after — just the entry itself.
+5. Use the language(s) the user used during the session (often a mix of English and Spanish).`;
 
   prompt += `\n\n${buildSoulPromptSection(soulState)}`;
 
