@@ -20,6 +20,7 @@ const {
   mockGetSoulQualityStats,
   mockGetLastAssistantMessageId,
   mockInsertSoulQualitySignal,
+  mockGetLastPulseCheck,
   mockConfig,
 } = vi.hoisted(() => ({
   mockRunAgent: vi.fn().mockResolvedValue({ response: "agent response", activity: "", soulVersion: 1, patternCount: 0 }),
@@ -39,6 +40,7 @@ const {
   }),
   mockGetLastAssistantMessageId: vi.fn().mockResolvedValue(42),
   mockInsertSoulQualitySignal: vi.fn().mockResolvedValue({ id: 1 }),
+  mockGetLastPulseCheck: vi.fn().mockResolvedValue(null),
   mockConfig: {
     config: {
       telegram: {
@@ -102,6 +104,7 @@ vi.mock("../../src/db/queries.js", () => ({
   getSoulQualityStats: mockGetSoulQualityStats,
   getLastAssistantMessageId: mockGetLastAssistantMessageId,
   insertSoulQualitySignal: mockInsertSoulQualitySignal,
+  getLastPulseCheck: mockGetLastPulseCheck,
 }));
 
 vi.mock("../../src/config.js", () => mockConfig);

@@ -6,6 +6,7 @@ import {
   getSoulQualityStats,
   getLastAssistantMessageId,
   insertSoulQualitySignal,
+  getLastPulseCheck,
 } from "../db/queries.js";
 import { runAgent, forceCompact } from "./agent.js";
 import {
@@ -225,11 +226,12 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
       return;
     }
 
-    // Handle /soul command — show soul state + quality stats
+    // Handle /soul command — show soul state + quality stats + pulse
     if (command?.name === "soul") {
       try {
         const soulState = await getSoulState(pool, chatId);
         const stats = await getSoulQualityStats(pool, chatId);
+        const lastPulse = await getLastPulseCheck(pool, chatId);
         const lines: string[] = [];
         if (soulState) {
           lines.push(`\uD83E\uDE9E <b>Soul State</b> (v${soulState.version})\n`);
@@ -258,6 +260,22 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
           lines.push(`  \uD83D\uDC4D Reactions: ${stats.positive_reaction}`);
           const pct = Math.round(stats.personal_ratio * 100);
           lines.push(`  Personal ratio: ${pct}%`);
+        }
+        if (lastPulse) {
+          const statusEmoji = {
+            healthy: "\uD83D\uDFE2",
+            drifting: "\uD83D\uDFE1",
+            stale: "\u26AA",
+            overcorrecting: "\uD83D\uDFE0",
+          }[lastPulse.status] ?? "\u2753";
+          const ago = Math.round(
+            (Date.now() - lastPulse.created_at.getTime()) / (1000 * 60 * 60)
+          );
+          lines.push("");
+          lines.push(`<b>Pulse:</b> ${statusEmoji} ${lastPulse.status} (${ago}h ago)`);
+          if (lastPulse.repairs_applied.length > 0) {
+            lines.push(`  Repairs: ${lastPulse.repairs_applied.length} applied`);
+          }
         }
         await sendTelegramMessage(chatId, lines.join("\n"));
       } catch (err) {

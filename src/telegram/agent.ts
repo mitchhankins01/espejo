@@ -30,6 +30,9 @@ import {
   updatePatternStatus,
   insertSoulQualitySignal,
   getSoulQualityStats,
+  insertPulseCheck,
+  getLastPulseCheckTime,
+  insertSoulStateHistory,
   type ChatMessageRow,
   type ChatSoulStateRow,
   type PatternSearchRow,
@@ -41,6 +44,11 @@ import {
   type SoulStateSnapshot,
 } from "./soul.js";
 import { getModePrompt, type AgentMode } from "./evening-review.js";
+import {
+  diagnoseQuality,
+  applySoulRepairs,
+  buildSoulCompactionContext,
+} from "./pulse.js";
 import {
   allToolNames,
   toAnthropicToolDefinition,
@@ -858,7 +866,8 @@ function computeCanonicalHash(content: string): string {
 
 async function extractPatterns(
   messages: ChatMessageRow[],
-  existingPatterns: { id: number; content: string }[]
+  existingPatterns: { id: number; content: string }[],
+  soulState?: SoulStateSnapshot | null
 ): Promise<CompactionExtraction | null> {
   const messagesText = messages
     .map((m) => {
@@ -871,8 +880,10 @@ async function extractPatterns(
     ? existingPatterns.map((p) => `[id:${p.id}] ${p.content}`).join("\n")
     : "None";
 
-  const prompt = `Analyze these conversation messages and extract patterns, facts, and events.
+  const soulContext = buildSoulCompactionContext(soulState ?? null);
 
+  const prompt = `Analyze these conversation messages and extract patterns, facts, and events.
+${soulContext}
 Existing patterns (for reference, to reinforce or contradict):
 ${existingText}
 
@@ -1090,8 +1101,14 @@ async function runCompaction(
     content: p.content,
   }));
 
-  // Extract patterns
-  const extraction = await extractPatterns(toCompact, existingForExtraction);
+  // Load soul state for soul-aware extraction
+  const soulRow = config.telegram.soulEnabled
+    ? await getSoulState(pool, chatId)
+    : null;
+  const soulSnapshot = toSoulSnapshot(soulRow);
+
+  // Extract patterns (with soul context for guided extraction)
+  const extraction = await extractPatterns(toCompact, existingForExtraction, soulSnapshot);
   if (!extraction) {
     // Extraction failed — still mark as compacted to prevent retry loop
     await markMessagesCompacted(pool, toCompact.map((m) => m.id));
@@ -1194,6 +1211,86 @@ async function runCompaction(
     }
 
     if (notes.length > 0) await onCompacted(notes.join(" · "));
+  }
+
+  // Run pulse check after compaction (self-healing organism)
+  if (config.telegram.pulseEnabled && config.telegram.soulEnabled) {
+    try {
+      await runPulseCheck(chatId, soulSnapshot, onCompacted);
+    } catch (err) {
+      /* v8 ignore next -- pulse errors are non-critical */
+      console.error(`Telegram pulse check error [chat:${chatId}]:`, err);
+    }
+  }
+}
+
+async function runPulseCheck(
+  chatId: string,
+  soulSnapshot: SoulStateSnapshot | null,
+  onCompacted?: (summary: string) => Promise<void>
+): Promise<void> {
+  // Rate limit: check interval
+  const lastPulseTime = await getLastPulseCheckTime(pool, chatId);
+  const intervalMs = config.telegram.pulseIntervalHours * 60 * 60 * 1000;
+  if (lastPulseTime && Date.now() - lastPulseTime.getTime() < intervalMs) {
+    return;
+  }
+
+  // Get quality stats
+  const stats = await getSoulQualityStats(pool, chatId);
+  const diagnosis = diagnoseQuality(stats);
+
+  const soulVersionBefore = soulSnapshot?.version ?? 0;
+  let soulVersionAfter = soulVersionBefore;
+
+  // Apply repairs if any
+  if (diagnosis.repairs.length > 0 && soulSnapshot) {
+    const repaired = applySoulRepairs(soulSnapshot, diagnosis.repairs);
+    if (repaired) {
+      await upsertSoulState(pool, {
+        chatId,
+        identitySummary: repaired.identitySummary,
+        relationalCommitments: repaired.relationalCommitments,
+        toneSignature: repaired.toneSignature,
+        growthNotes: repaired.growthNotes,
+        version: repaired.version,
+      });
+      soulVersionAfter = repaired.version;
+
+      // Record audit trail
+      await insertSoulStateHistory(pool, {
+        chatId,
+        version: repaired.version,
+        identitySummary: repaired.identitySummary,
+        relationalCommitments: repaired.relationalCommitments,
+        toneSignature: repaired.toneSignature,
+        growthNotes: repaired.growthNotes,
+        changeReason: `pulse: ${diagnosis.status} — ${diagnosis.recommendation}`,
+      });
+    }
+  }
+
+  // Log the pulse check
+  await insertPulseCheck(pool, {
+    chatId,
+    status: diagnosis.status,
+    personalRatio: diagnosis.personalRatio,
+    correctionRate: diagnosis.correctionRate,
+    signalCounts: {
+      felt_personal: stats.felt_personal,
+      felt_generic: stats.felt_generic,
+      correction: stats.correction,
+      positive_reaction: stats.positive_reaction,
+      total: stats.total,
+    },
+    repairsApplied: diagnosis.repairs.map((r) => ({ type: r.type, value: r.value })),
+    soulVersionBefore,
+    soulVersionAfter,
+  });
+
+  // Notify user of pulse result if repairs were applied
+  if (diagnosis.repairs.length > 0 && onCompacted) {
+    await onCompacted(`pulse: ${diagnosis.status} — ${diagnosis.recommendation}`);
   }
 }
 

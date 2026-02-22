@@ -75,6 +75,12 @@ const telegramSoulFeedbackEvery = parseIntegerEnv(
   8,
   1
 );
+const telegramPulseEnabled = parseBooleanEnv("TELEGRAM_PULSE_ENABLED", true);
+const telegramPulseIntervalHours = parseIntegerEnv(
+  "TELEGRAM_PULSE_INTERVAL_HOURS",
+  24,
+  1
+);
 
 if (telegramVoiceReplyMinChars > telegramVoiceReplyMaxChars) {
   throw new Error(
@@ -161,6 +167,8 @@ export const config = {
     voiceReplyMaxChars: telegramVoiceReplyMaxChars,
     soulEnabled: telegramSoulEnabled,
     soulFeedbackEvery: telegramSoulFeedbackEvery,
+    pulseEnabled: telegramPulseEnabled,
+    pulseIntervalHours: telegramPulseIntervalHours,
     voiceModel: process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts",
     voiceName: process.env.OPENAI_TTS_VOICE || "alloy",
   },
