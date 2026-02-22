@@ -311,14 +311,9 @@ describe("runAgent", () => {
         outputTokens: 20,
       })
     );
-    expect(mockLogMemoryRetrieval).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        chatId: "100",
-        queryText: "Hi",
-        degraded: false,
-      })
-    );
+    // Short messages skip pattern retrieval and logging
+    expect(mockGenerateEmbedding).not.toHaveBeenCalled();
+    expect(mockLogMemoryRetrieval).not.toHaveBeenCalled();
   });
 
   it("supports openai provider for chat responses", async () => {
@@ -924,7 +919,7 @@ describe("runAgent", () => {
 
     await runAgent({
       chatId: "100",
-      message: "I'm feeling overwhelmed",
+      message: "I'm feeling really overwhelmed by everything going on",
       externalMessageId: "update:7",
       messageDate: 1000,
     });
@@ -978,6 +973,23 @@ describe("runAgent", () => {
     expect(lastMsg.content).toBe("#");
   });
 
+  it("skips pattern retrieval and logging for short messages", async () => {
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Hey!" }],
+      usage: { input_tokens: 50, output_tokens: 10 },
+    });
+
+    await runAgent({
+      chatId: "100",
+      message: "Hey",
+      externalMessageId: "update:short-1",
+      messageDate: 1000,
+    });
+
+    expect(mockGenerateEmbedding).not.toHaveBeenCalled();
+    expect(mockLogMemoryRetrieval).not.toHaveBeenCalled();
+  });
+
   it("omits memory kind suffix in activity when retrieved kind is blank", async () => {
     mockSearchPatterns.mockResolvedValueOnce([
       {
@@ -1005,7 +1017,7 @@ describe("runAgent", () => {
 
     const result = await runAgent({
       chatId: "100",
-      message: "remember this",
+      message: "I want you to remember this important detail about me",
       externalMessageId: "update:blank-kind",
       messageDate: 1000,
     });
@@ -1128,7 +1140,7 @@ describe("runAgent", () => {
 
     const result = await runAgent({
       chatId: "100",
-      message: "hello",
+      message: "Tell me what patterns you remember about me from our conversations",
       externalMessageId: "update:8",
       messageDate: 1000,
     });
@@ -1212,7 +1224,7 @@ describe("runAgent", () => {
 
     const result = await runAgent({
       chatId: "100",
-      message: "How am I doing?",
+      message: "How am I doing overall with my goals and habits lately?",
       externalMessageId: "update:11",
       messageDate: 1000,
     });

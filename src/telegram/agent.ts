@@ -89,6 +89,7 @@ const MIN_MESSAGES_FOR_TIME_COMPACT = 10;
 const MIN_MESSAGES_FOR_FORCE_COMPACT = 4;
 const MAX_NEW_PATTERNS_PER_COMPACTION = 7;
 const RECENT_MESSAGES_LIMIT = 50;
+const MIN_RETRIEVAL_CHARS = 30;
 const COST_NOTIFICATION_INTERVAL_HOURS = 12;
 
 // ---------------------------------------------------------------------------
@@ -213,6 +214,7 @@ function mmrRerank(
   patterns: PatternSearchRow[],
   lambda: number = 0.7
 ): PatternSearchRow[] {
+  /* v8 ignore next -- defensive guard; searchPatterns returns [] before mmrRerank */
   if (patterns.length === 0) return [];
 
   const selected: PatternSearchRow[] = [];
@@ -1284,17 +1286,21 @@ export async function runAgent(params: {
     content: message,
   });
 
-  // 2. Retrieve patterns
-  const { patterns, degraded } = await retrievePatterns(message);
-  await logMemoryRetrieval(pool, {
-    chatId,
-    queryText: message,
-    queryHash: crypto.createHash("sha256").update(normalizeContent(message)).digest("hex"),
-    degraded,
-    patternIds: patterns.map((p) => p.id),
-    patternKinds: [...new Set(patterns.map((p) => p.kind))],
-    topScore: patterns[0]?.score ?? null,
-  });
+  // 2. Retrieve patterns (skip for trivial messages)
+  let patterns: PatternSearchRow[] = [];
+  let degraded = false;
+  if (message.length >= MIN_RETRIEVAL_CHARS) {
+    ({ patterns, degraded } = await retrievePatterns(message));
+    await logMemoryRetrieval(pool, {
+      chatId,
+      queryText: message,
+      queryHash: crypto.createHash("sha256").update(normalizeContent(message)).digest("hex"),
+      degraded,
+      patternIds: patterns.map((p) => p.id),
+      patternKinds: [...new Set(patterns.map((p) => p.kind))],
+      topScore: patterns[0]?.score ?? null,
+    });
+  }
 
   // 3. Build context
   const persistedSoulState = config.telegram.soulEnabled
