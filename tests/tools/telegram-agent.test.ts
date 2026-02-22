@@ -965,17 +965,17 @@ describe("runAgent", () => {
       message: "Write the entry now.",
       externalMessageId: "update:prefill-1",
       messageDate: 1000,
-      prefill: "# ",
+      prefill: "#",
     });
 
     // Prefill is prepended to the response
-    expect(result.response).toBe("# Open. Trust. Flow.\n\nSleep/Ready: 49/66");
+    expect(result.response).toBe("#Open. Trust. Flow.\n\nSleep/Ready: 49/66");
 
     // Prefill is sent as a partial assistant message
     const call = mockAnthropicCreate.mock.calls[0][0];
     const lastMsg = call.messages[call.messages.length - 1];
     expect(lastMsg.role).toBe("assistant");
-    expect(lastMsg.content).toBe("# ");
+    expect(lastMsg.content).toBe("#");
   });
 
   it("omits memory kind suffix in activity when retrieved kind is blank", async () => {

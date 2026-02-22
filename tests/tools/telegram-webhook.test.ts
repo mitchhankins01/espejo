@@ -831,7 +831,7 @@ describe("error handling", () => {
     expect(mockRunAgent).toHaveBeenCalledTimes(1);
     const call = mockRunAgent.mock.calls[0][0];
     expect(call.message).toBe("Write the entry now.");
-    expect(call.prefill).toBe("# ");
+    expect(call.prefill).toBe("#");
   });
 
   it("activates evening review mode with /evening", async () => {

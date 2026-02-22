@@ -151,7 +151,7 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
     let prefill: string | undefined;
     if (command?.name === "compose") {
       text = "Write the entry now.";
-      prefill = "# ";
+      prefill = "#";
     }
 
     // Handle /evening command
