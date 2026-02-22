@@ -637,10 +637,15 @@ export async function getRecentMessages(
   limit: number
 ): Promise<ChatMessageRow[]> {
   const result = await pool.query(
-    `SELECT * FROM chat_messages
-     WHERE chat_id = $1 AND compacted_at IS NULL
-     ORDER BY created_at ASC
-     LIMIT $2`,
+    `SELECT *
+     FROM (
+       SELECT *
+       FROM chat_messages
+       WHERE chat_id = $1 AND compacted_at IS NULL
+       ORDER BY created_at DESC, id DESC
+       LIMIT $2
+     ) AS recent
+     ORDER BY created_at ASC, id ASC`,
     [chatId, limit]
   );
   return result.rows;

@@ -591,6 +591,8 @@ describe("getRecentMessages", () => {
     }
     const messages = await getRecentMessages(pool, "12345", 2);
     expect(messages).toHaveLength(2);
+    expect(messages[0].content).toBe("Message 3");
+    expect(messages[1].content).toBe("Message 4");
   });
 });
 
