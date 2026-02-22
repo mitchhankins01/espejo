@@ -28,6 +28,7 @@ import {
   searchPatterns,
   getTopPatterns,
   pruneExpiredEventPatterns,
+  countStaleEventPatterns,
   insertPatternObservation,
   insertPatternRelation,
   insertPatternAlias,
@@ -811,6 +812,35 @@ describe("pruneExpiredEventPatterns", () => {
       [pattern.id]
     );
     expect(row.rows[0].status).toBe("deprecated");
+  });
+});
+
+describe("countStaleEventPatterns", () => {
+  it("counts active event memories that are expired", async () => {
+    await insertPattern(pool, {
+      content: "User attended a local meetup in 2020.",
+      kind: "event",
+      confidence: 0.65,
+      embedding: fixturePatterns[4].embedding,
+      temporal: null,
+      canonicalHash: "stale-event-active-001",
+      expiresAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+      timestamp: new Date(),
+    });
+
+    await insertPattern(pool, {
+      content: "User plans to attend a workshop next month.",
+      kind: "event",
+      confidence: 0.72,
+      embedding: fixturePatterns[4].embedding,
+      temporal: null,
+      canonicalHash: "fresh-event-active-001",
+      expiresAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000),
+      timestamp: new Date(),
+    });
+
+    const count = await countStaleEventPatterns(pool);
+    expect(count).toBeGreaterThanOrEqual(1);
   });
 });
 

@@ -10,6 +10,7 @@ import {
   getLastCompactionTime,
   getRecentMessages,
   getSoulState,
+  upsertSoulState,
   getTopPatterns,
   insertChatMessage,
   insertPattern,
@@ -32,7 +33,11 @@ import {
   type PatternSearchRow,
 } from "../db/queries.js";
 import { toolHandlers } from "../server.js";
-import { buildSoulPromptSection, type SoulStateSnapshot } from "./soul.js";
+import {
+  buildSoulPromptSection,
+  evolveSoulState,
+  type SoulStateSnapshot,
+} from "./soul.js";
 import {
   allToolNames,
   toAnthropicToolDefinition,
@@ -1116,7 +1121,9 @@ async function runCompaction(
 
     if (saved > 0) {
       const kindSet = new Set(extraction.new_patterns.map((p) => p.kind));
-      notes.push(`saved ${saved} memory${saved === 1 ? "" : "ies"} (${[...kindSet].join(", ")})`);
+      notes.push(
+        `saved ${saved} ${saved === 1 ? "memory" : "memories"} (${[...kindSet].join(", ")})`
+      );
     }
     if (reinforced > 0) notes.push(`reinforced ${reinforced}`);
     if (challenged > 0) notes.push(`flagged ${challenged} as disputed`);
@@ -1262,7 +1269,29 @@ export async function runAgent(params: {
     content: text,
   });
 
-  // 7. Trigger compaction asynchronously
+  // 7. Persist evolving soul state
+  if (config.telegram.soulEnabled) {
+    try {
+      const nextSoulState = evolveSoulState(
+        toSoulSnapshot(persistedSoulState),
+        message
+      );
+      if (nextSoulState) {
+        await upsertSoulState(pool, {
+          chatId,
+          identitySummary: nextSoulState.identitySummary,
+          relationalCommitments: nextSoulState.relationalCommitments,
+          toneSignature: nextSoulState.toneSignature,
+          growthNotes: nextSoulState.growthNotes,
+          version: nextSoulState.version,
+        });
+      }
+    } catch (err) {
+      console.error(`Telegram soul persistence error [chat:${chatId}]:`, err);
+    }
+  }
+
+  // 8. Trigger compaction asynchronously
   /* v8 ignore next 3 -- async compaction error: tested via compactIfNeeded unit tests */
   void compactIfNeeded(chatId, onCompacted).catch((err) => {
     console.error(`Telegram compaction error [chat:${chatId}]:`, err);

@@ -10,6 +10,7 @@ const {
   mockSearchPatterns,
   mockGetTopPatterns,
   mockGetSoulState,
+  mockUpsertSoulState,
   mockInsertPattern,
   mockReinforcePattern,
   mockInsertPatternAlias,
@@ -36,6 +37,16 @@ const {
   mockSearchPatterns: vi.fn().mockResolvedValue([]),
   mockGetTopPatterns: vi.fn().mockResolvedValue([]),
   mockGetSoulState: vi.fn().mockResolvedValue(null),
+  mockUpsertSoulState: vi.fn().mockResolvedValue({
+    chat_id: "100",
+    identity_summary: "A steady companion.",
+    relational_commitments: ["stay direct"],
+    tone_signature: ["warm", "direct"],
+    growth_notes: ["initialized soul state from early conversation"],
+    version: 1,
+    created_at: new Date(),
+    updated_at: new Date(),
+  }),
   mockInsertPattern: vi.fn().mockResolvedValue({ id: 1, content: "", kind: "behavior", confidence: 0.8, strength: 1, times_seen: 1, status: "active", temporal: null, canonical_hash: "abc", first_seen: new Date(), last_seen: new Date(), created_at: new Date() }),
   mockReinforcePattern: vi.fn().mockResolvedValue({ id: 1, content: "", kind: "behavior", confidence: 0.8, strength: 2, times_seen: 2, status: "active", temporal: null, canonical_hash: "abc", first_seen: new Date(), last_seen: new Date(), created_at: new Date() }),
   mockInsertPatternAlias: vi.fn().mockResolvedValue(undefined),
@@ -119,6 +130,7 @@ vi.mock("../../src/db/queries.js", () => ({
   searchPatterns: mockSearchPatterns,
   getTopPatterns: mockGetTopPatterns,
   getSoulState: mockGetSoulState,
+  upsertSoulState: mockUpsertSoulState,
   insertPattern: mockInsertPattern,
   reinforcePattern: mockReinforcePattern,
   insertPatternAlias: mockInsertPatternAlias,
@@ -185,6 +197,16 @@ beforeEach(() => {
   mockSearchPatterns.mockReset().mockResolvedValue([]);
   mockGetTopPatterns.mockReset().mockResolvedValue([]);
   mockGetSoulState.mockReset().mockResolvedValue(null);
+  mockUpsertSoulState.mockReset().mockResolvedValue({
+    chat_id: "100",
+    identity_summary: "A steady companion.",
+    relational_commitments: ["stay direct"],
+    tone_signature: ["warm", "direct"],
+    growth_notes: ["initialized soul state from early conversation"],
+    version: 1,
+    created_at: new Date(),
+    updated_at: new Date(),
+  });
   mockInsertPattern.mockReset().mockResolvedValue({ id: 1, content: "", kind: "behavior", confidence: 0.8, strength: 1, times_seen: 1, status: "active", temporal: null, canonical_hash: "abc", first_seen: new Date(), last_seen: new Date(), created_at: new Date() });
   mockReinforcePattern.mockReset().mockResolvedValue({ id: 1, content: "", kind: "behavior", confidence: 0.8, strength: 2, times_seen: 2, status: "active", temporal: null, canonical_hash: "abc", first_seen: new Date(), last_seen: new Date(), created_at: new Date() });
   mockInsertPatternAlias.mockReset().mockResolvedValue(undefined);
@@ -271,6 +293,14 @@ describe("runAgent", () => {
       })
     );
 
+    expect(mockUpsertSoulState).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        chatId: "100",
+        version: 1,
+      })
+    );
+
     // Logs API usage
     expect(mockLogApiUsage).toHaveBeenCalledWith(
       expect.anything(),
@@ -346,6 +376,68 @@ describe("runAgent", () => {
         costUsd: 0.127,
       })
     );
+  });
+
+  it("does not add cost note when the last notification is within the throttle window", async () => {
+    mockGetLastCostNotificationTime.mockResolvedValueOnce(
+      new Date(Date.now() - 60 * 60 * 1000)
+    );
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "No new cost note." }],
+      usage: { input_tokens: 90, output_tokens: 12 },
+    });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "quick ping",
+      externalMessageId: "update:cost-throttle",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("No new cost note.");
+    expect(result.activity).not.toContain("cost ~$");
+    expect(mockGetTotalApiCostSince).not.toHaveBeenCalled();
+    expect(mockInsertCostNotification).not.toHaveBeenCalled();
+  });
+
+  it("formats low accrued cost with three decimals in activity note", async () => {
+    mockGetLastCostNotificationTime.mockResolvedValueOnce(
+      new Date(Date.now() - 13 * 60 * 60 * 1000)
+    );
+    mockGetTotalApiCostSince.mockResolvedValueOnce(0.056);
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Cost note format check." }],
+      usage: { input_tokens: 100, output_tokens: 20 },
+    });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "status?",
+      externalMessageId: "update:cost-2",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("Cost note format check.");
+    expect(result.activity).toContain("cost ~$0.056 since last note");
+  });
+
+  it("uses last 12h wording when no prior cost notification exists", async () => {
+    mockGetLastCostNotificationTime.mockResolvedValueOnce(null);
+    mockGetTotalApiCostSince.mockResolvedValueOnce(0.2);
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Initial cost note." }],
+      usage: { input_tokens: 90, output_tokens: 12 },
+    });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "status?",
+      externalMessageId: "update:cost-first",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("Initial cost note.");
+    expect(result.activity).toContain("cost ~$0.20 since last 12h");
   });
 
   it("handles openai agent responses without usage metadata", async () => {
@@ -600,6 +692,7 @@ describe("runAgent", () => {
     });
 
     expect(result.response).toBeNull();
+    expect(mockUpsertSoulState).not.toHaveBeenCalled();
   });
 
   it("stops openai tool loop at MAX_TOOL_CALLS", async () => {
@@ -785,6 +878,7 @@ describe("runAgent", () => {
     });
 
     expect(result.response).toBeNull();
+    expect(mockUpsertSoulState).not.toHaveBeenCalled();
   });
 
   it("includes retrieved patterns in system prompt", async () => {
@@ -843,6 +937,42 @@ describe("runAgent", () => {
     expect(call.system).toContain("Telegram HTML");
   });
 
+  it("omits memory kind suffix in activity when retrieved kind is blank", async () => {
+    mockSearchPatterns.mockResolvedValueOnce([
+      {
+        id: 99,
+        content: "Pattern without explicit kind label",
+        kind: "",
+        confidence: 0.7,
+        strength: 1,
+        times_seen: 1,
+        status: "active",
+        temporal: null,
+        canonical_hash: "blank-kind",
+        first_seen: new Date(),
+        last_seen: new Date(),
+        created_at: new Date(),
+        score: 0.7,
+        similarity: 0.7,
+      },
+    ]);
+
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Noted." }],
+      usage: { input_tokens: 90, output_tokens: 12 },
+    });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "remember this",
+      externalMessageId: "update:blank-kind",
+      messageDate: 1000,
+    });
+
+    expect(result.activity).toContain("used 1 memories");
+    expect(result.activity).not.toContain("used 1 memories (");
+  });
+
   it("includes persisted soul state in the system prompt", async () => {
     mockGetSoulState.mockResolvedValueOnce({
       chat_id: "100",
@@ -891,6 +1021,39 @@ describe("runAgent", () => {
     });
 
     expect(mockGetSoulState).not.toHaveBeenCalled();
+    expect(mockUpsertSoulState).not.toHaveBeenCalled();
+  });
+
+  it("logs and continues when soul persistence fails", async () => {
+    mockGetSoulState.mockResolvedValueOnce({
+      chat_id: "100",
+      identity_summary:
+        "A steady companion that is warm, direct, and emotionally present.",
+      relational_commitments: ["stay direct and emotionally present"],
+      tone_signature: ["warm", "direct", "grounded"],
+      growth_notes: ["initialized soul state from early conversation"],
+      version: 2,
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+    mockUpsertSoulState.mockRejectedValueOnce(new Error("write failed"));
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Got it, I will be more concise." }],
+      usage: { input_tokens: 110, output_tokens: 16 },
+    });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "be more concise",
+      externalMessageId: "update:soul-write-fail",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("Got it, I will be more concise.");
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Telegram soul persistence error [chat:100]:"),
+      expect.any(Error)
+    );
   });
 
   it("handles pattern retrieval failure gracefully", async () => {
@@ -1696,6 +1859,54 @@ describe("compactIfNeeded", () => {
     }
   });
 
+  it("uses chat-level sourceId when extracted pattern has no evidence ids", async () => {
+    const longContent = "x".repeat(10_000);
+    const messages = Array.from({ length: 20 }, (_, i) => ({
+      id: i + 1,
+      role: "user",
+      content: longContent,
+      chat_id: "100",
+      external_message_id: null,
+      tool_call_id: null,
+      compacted_at: null,
+      created_at: new Date(),
+    }));
+
+    mockGetRecentMessages
+      .mockResolvedValueOnce(messages)
+      .mockResolvedValueOnce(messages);
+
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            new_patterns: [{
+              content: "User values clean structure in planning.",
+              kind: "preference",
+              confidence: 0.8,
+              signal: "explicit",
+              evidence_message_ids: [],
+              entry_uuids: [],
+              temporal: {},
+            }],
+            reinforcements: [],
+            contradictions: [],
+            supersedes: [],
+          }),
+        },
+      ],
+      usage: { input_tokens: 500, output_tokens: 100 },
+    });
+
+    await compactIfNeeded("100");
+
+    expect(mockInsertPattern).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ sourceId: "chat:100" })
+    );
+  });
+
   it("skips compaction when lock is not acquired", async () => {
     const longContent = "x".repeat(10_000);
     const messages = Array.from({ length: 20 }, (_, i) => ({
@@ -1806,6 +2017,63 @@ describe("compactIfNeeded", () => {
     );
   });
 
+  it("pluralizes saved memories in compaction summary", async () => {
+    const longContent = "x".repeat(10_000);
+    const messages = Array.from({ length: 20 }, (_, i) => ({
+      id: i + 1,
+      role: "user",
+      content: longContent,
+      chat_id: "100",
+      external_message_id: null,
+      tool_call_id: null,
+      compacted_at: null,
+      created_at: new Date(),
+    }));
+
+    mockGetRecentMessages
+      .mockResolvedValueOnce(messages)
+      .mockResolvedValueOnce(messages);
+
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          new_patterns: [
+            {
+              content: "Pattern one",
+              kind: "behavior",
+              confidence: 0.8,
+              signal: "explicit",
+              evidence_message_ids: [1],
+              entry_uuids: [],
+              temporal: {},
+            },
+            {
+              content: "Pattern two",
+              kind: "fact",
+              confidence: 0.8,
+              signal: "explicit",
+              evidence_message_ids: [2],
+              entry_uuids: [],
+              temporal: {},
+            },
+          ],
+          reinforcements: [],
+          contradictions: [],
+          supersedes: [],
+        }),
+      }],
+      usage: { input_tokens: 500, output_tokens: 100 },
+    });
+
+    const onCompacted = vi.fn().mockResolvedValue(undefined);
+    await compactIfNeeded("100", onCompacted);
+
+    expect(onCompacted).toHaveBeenCalledWith(
+      "saved 2 memories (behavior, fact)"
+    );
+  });
+
   it("reports stale event memories pending review (no auto-prune)", async () => {
     const longContent = "x".repeat(10_000);
     const messages = Array.from({ length: 20 }, (_, i) => ({
@@ -1843,6 +2111,45 @@ describe("compactIfNeeded", () => {
 
     expect(onCompacted).toHaveBeenCalledWith(
       "2 stale event memories pending review"
+    );
+  });
+
+  it("reports singular stale event memory wording", async () => {
+    const longContent = "x".repeat(10_000);
+    const messages = Array.from({ length: 20 }, (_, i) => ({
+      id: i + 1,
+      role: "user",
+      content: longContent,
+      chat_id: "100",
+      external_message_id: null,
+      tool_call_id: null,
+      compacted_at: null,
+      created_at: new Date(),
+    }));
+
+    mockGetRecentMessages
+      .mockResolvedValueOnce(messages)
+      .mockResolvedValueOnce(messages);
+
+    mockCountStaleEventPatterns.mockResolvedValueOnce(1);
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          new_patterns: [],
+          reinforcements: [],
+          contradictions: [],
+          supersedes: [],
+        }),
+      }],
+      usage: { input_tokens: 500, output_tokens: 100 },
+    });
+
+    const onCompacted = vi.fn().mockResolvedValue(undefined);
+    await compactIfNeeded("100", onCompacted);
+
+    expect(onCompacted).toHaveBeenCalledWith(
+      "1 stale event memory pending review"
     );
   });
 
