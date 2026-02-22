@@ -362,6 +362,10 @@ describe("config", () => {
       input: 3.0,
       output: 15.0,
     });
+    expect(config.apiRates["gpt-4.1"]).toEqual({
+      input: 2.0,
+      output: 8.0,
+    });
     expect(config.apiRates["text-embedding-3-small"]).toEqual({
       input: 0.02,
       output: 0,

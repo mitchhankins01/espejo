@@ -23,6 +23,15 @@ function getOpenAI(): OpenAI {
   return openaiClient;
 }
 
+function computeCost(
+  model: string,
+  inputTokens: number,
+  outputTokens: number
+): number {
+  const rates = config.apiRates?.[model] ?? { input: 0, output: 0 };
+  return (inputTokens / 1_000_000) * rates.input + (outputTokens / 1_000_000) * rates.output;
+}
+
 async function fetchTelegramFile(fileId: string): Promise<{ buffer: Buffer; filePath: string }> {
   const fileRes = await fetch(
     `${TELEGRAM_API}/bot${config.telegram.botToken}/getFile?file_id=${fileId}`
@@ -93,7 +102,7 @@ async function extractTextFromImageBuffer(
     purpose: "vision_ocr",
     inputTokens,
     outputTokens,
-    costUsd: 0,
+    costUsd: computeCost("gpt-4.1", inputTokens, outputTokens),
     latencyMs,
   });
 
@@ -146,7 +155,7 @@ async function extractTextFromPdfBuffer(
     purpose: "pdf_ocr",
     inputTokens,
     outputTokens,
-    costUsd: 0,
+    costUsd: computeCost(config.openai.chatModel, inputTokens, outputTokens),
     latencyMs,
   });
 

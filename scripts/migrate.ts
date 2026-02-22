@@ -242,6 +242,93 @@ const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_chat_soul_state_updated ON chat_soul_state(updated_at);
     `,
   },
+  {
+    name: "008-memory-data-backfill",
+    getSql: () => `
+      UPDATE memory_retrieval_logs
+      SET pattern_kinds = COALESCE(
+        (
+          SELECT array_agg(COALESCE(memory_retrieval_logs.pattern_kinds[idx], 'unknown') ORDER BY idx)
+          FROM generate_subscripts(memory_retrieval_logs.pattern_ids, 1) AS idx
+        ),
+        '{}'::TEXT[]
+      )
+      WHERE cardinality(pattern_kinds) IS DISTINCT FROM cardinality(pattern_ids);
+
+      ALTER TABLE memory_retrieval_logs
+        DROP CONSTRAINT IF EXISTS memory_retrieval_logs_pattern_arrays_match;
+      ALTER TABLE memory_retrieval_logs
+        ADD CONSTRAINT memory_retrieval_logs_pattern_arrays_match
+        CHECK (cardinality(pattern_ids) = cardinality(pattern_kinds));
+
+      UPDATE patterns
+      SET source_type = 'chat_compaction'
+      WHERE source_type = 'compaction';
+      UPDATE pattern_observations
+      SET source_type = 'chat_compaction'
+      WHERE source_type = 'compaction';
+
+      UPDATE patterns
+      SET source_id = 'legacy:' || source_type || ':pattern:' || id::TEXT
+      WHERE source_id IS NULL;
+      UPDATE pattern_observations
+      SET source_id = 'legacy:' || source_type || ':observation:' || id::TEXT
+      WHERE source_id IS NULL;
+
+      UPDATE pattern_observations
+      SET evidence = CASE
+        WHEN evidence IS JSON ARRAY THEN (evidence::jsonb)::TEXT
+        WHEN evidence IS JSON THEN jsonb_build_array(evidence::jsonb)::TEXT
+        ELSE jsonb_build_array(jsonb_build_object('legacy_evidence', evidence))::TEXT
+      END;
+
+      WITH observation_counts AS (
+        SELECT pattern_id, COUNT(*)::INT AS observation_count
+        FROM pattern_observations
+        GROUP BY pattern_id
+      ),
+      missing AS (
+        SELECT
+          p.id AS pattern_id,
+          GREATEST(COALESCE(p.times_seen, 0) - COALESCE(oc.observation_count, 0), 0) AS missing_count,
+          COALESCE(p.last_seen, NOW()) AS observed_at
+        FROM patterns p
+        LEFT JOIN observation_counts oc ON oc.pattern_id = p.id
+      )
+      INSERT INTO pattern_observations (
+        pattern_id,
+        chat_message_ids,
+        evidence,
+        evidence_roles,
+        confidence,
+        extractor_version,
+        source_type,
+        source_id,
+        observed_at
+      )
+      SELECT
+        m.pattern_id,
+        NULL,
+        jsonb_build_array(
+          jsonb_build_object(
+            'migration',
+            '008-memory-data-backfill',
+            'note',
+            'synthetic observation inserted to align times_seen with observation count',
+            'synthetic_index',
+            gs.n
+          )
+        )::TEXT,
+        '{}'::TEXT[],
+        0.5,
+        'migration-backfill',
+        'migration',
+        'migration:008-memory-data-backfill',
+        m.observed_at
+      FROM missing m
+      JOIN LATERAL generate_series(1, m.missing_count) AS gs(n) ON TRUE;
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

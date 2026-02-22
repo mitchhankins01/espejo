@@ -1163,6 +1163,10 @@ export async function logMemoryRetrieval(
     topScore: number | null;
   }
 ): Promise<void> {
+  const alignedKinds = params.patternIds.map(
+    (_id, idx) => params.patternKinds[idx] ?? "unknown"
+  );
+
   await pool.query(
     `INSERT INTO memory_retrieval_logs (
       chat_id, query_text, query_hash, degraded, pattern_ids, pattern_kinds, top_score
@@ -1173,7 +1177,7 @@ export async function logMemoryRetrieval(
       params.queryHash,
       params.degraded,
       params.patternIds,
-      params.patternKinds,
+      alignedKinds,
       params.topScore,
     ]
   );

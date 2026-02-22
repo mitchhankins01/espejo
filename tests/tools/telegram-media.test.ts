@@ -14,6 +14,9 @@ vi.mock("../../src/config.js", () => ({
   config: {
     telegram: { botToken: "123:ABC" },
     openai: { apiKey: "sk-test", chatModel: "gpt-5-mini" },
+    apiRates: {
+      "gpt-4.1": { input: 2, output: 8 },
+    },
   },
 }));
 
@@ -84,6 +87,8 @@ describe("extractTextFromDocument", () => {
         purpose: "vision_ocr",
       })
     );
+    const usageArgs = mockLogApiUsage.mock.calls[0]?.[1];
+    expect(usageArgs.costUsd).toBeGreaterThan(0);
   });
 
   it("passes caption context into image OCR prompt", async () => {

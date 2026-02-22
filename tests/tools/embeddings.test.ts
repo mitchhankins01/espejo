@@ -20,7 +20,9 @@ vi.mock("../../src/config.js", () => ({
 
 import {
   generateEmbedding,
+  generateEmbeddingWithUsage,
   generateEmbeddingsBatch,
+  generateEmbeddingsBatchWithUsage,
 } from "../../src/db/embeddings.js";
 
 describe("generateEmbedding", () => {
@@ -50,6 +52,34 @@ describe("generateEmbedding", () => {
       dimensions: 1536,
     });
   });
+
+  it("returns usage metadata when available", async () => {
+    mockCreate.mockResolvedValue({
+      data: [{ embedding: [0.4, 0.5], index: 0 }],
+      usage: { total_tokens: 12, prompt_tokens: 11 },
+    });
+
+    const result = await generateEmbeddingWithUsage("usage text");
+    expect(result).toEqual({
+      embedding: [0.4, 0.5],
+      inputTokens: 12,
+    });
+  });
+
+  it("falls back to prompt_tokens and then 0 for embedding usage", async () => {
+    mockCreate.mockResolvedValueOnce({
+      data: [{ embedding: [0.7], index: 0 }],
+      usage: { prompt_tokens: 9 },
+    });
+    const withPromptFallback = await generateEmbeddingWithUsage("prompt-only");
+    expect(withPromptFallback.inputTokens).toBe(9);
+
+    mockCreate.mockResolvedValueOnce({
+      data: [{ embedding: [0.8], index: 0 }],
+    });
+    const withDefaultZero = await generateEmbeddingWithUsage("no-usage");
+    expect(withDefaultZero.inputTokens).toBe(0);
+  });
 });
 
 describe("generateEmbeddingsBatch", () => {
@@ -60,6 +90,12 @@ describe("generateEmbeddingsBatch", () => {
   it("returns empty array for empty input", async () => {
     const result = await generateEmbeddingsBatch([]);
     expect(result).toEqual([]);
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("returns empty embeddings result with usage metadata for empty input", async () => {
+    const result = await generateEmbeddingsBatchWithUsage([]);
+    expect(result).toEqual({ embeddings: [], inputTokens: 0 });
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
@@ -90,6 +126,22 @@ describe("generateEmbeddingsBatch", () => {
       model: "text-embedding-3-small",
       input: ["hello", "world"],
       dimensions: 1536,
+    });
+  });
+
+  it("returns usage metadata for batch embeddings", async () => {
+    mockCreate.mockResolvedValue({
+      data: [
+        { embedding: [0.1], index: 0 },
+        { embedding: [0.2], index: 1 },
+      ],
+      usage: { prompt_tokens: 14 },
+    });
+
+    const result = await generateEmbeddingsBatchWithUsage(["hello", "world"]);
+    expect(result).toEqual({
+      embeddings: [[0.1], [0.2]],
+      inputTokens: 14,
     });
   });
 });
