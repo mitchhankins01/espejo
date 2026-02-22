@@ -4,14 +4,42 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // Mocks
 // ---------------------------------------------------------------------------
 
-const { mockRunAgent, mockForceCompact, mockSendTelegramMessage, mockSendChatAction, mockTranscribeVoiceMessage, mockSetMessageHandler, mockProcessUpdate } = vi.hoisted(() => ({
+const {
+  mockRunAgent,
+  mockForceCompact,
+  mockSendTelegramMessage,
+  mockSendTelegramVoice,
+  mockSendChatAction,
+  mockTranscribeVoiceMessage,
+  mockSynthesizeVoiceReply,
+  mockSetMessageHandler,
+  mockProcessUpdate,
+  mockConfig,
+} = vi.hoisted(() => ({
   mockRunAgent: vi.fn().mockResolvedValue({ response: "agent response", activity: "" }),
   mockForceCompact: vi.fn().mockResolvedValue(undefined),
   mockSendTelegramMessage: vi.fn().mockResolvedValue(undefined),
+  mockSendTelegramVoice: vi.fn().mockResolvedValue(true),
   mockSendChatAction: vi.fn().mockResolvedValue(undefined),
   mockTranscribeVoiceMessage: vi.fn().mockResolvedValue("transcribed text"),
+  mockSynthesizeVoiceReply: vi.fn().mockResolvedValue(Buffer.from("voice")),
   mockSetMessageHandler: vi.fn(),
   mockProcessUpdate: vi.fn(),
+  mockConfig: {
+    config: {
+      telegram: {
+        botToken: "test-bot-token",
+        secretToken: "test-secret",
+        allowedChatId: "100",
+        voiceReplyMode: "off",
+        voiceReplyEvery: 3,
+        voiceReplyMinChars: 16,
+        voiceReplyMaxChars: 450,
+        voiceModel: "gpt-4o-mini-tts",
+        voiceName: "alloy",
+      },
+    },
+  },
 }));
 
 vi.mock("../../src/telegram/agent.js", () => ({
@@ -21,11 +49,22 @@ vi.mock("../../src/telegram/agent.js", () => ({
 
 vi.mock("../../src/telegram/client.js", () => ({
   sendTelegramMessage: mockSendTelegramMessage,
+  sendTelegramVoice: mockSendTelegramVoice,
   sendChatAction: mockSendChatAction,
 }));
 
 vi.mock("../../src/telegram/voice.js", () => ({
   transcribeVoiceMessage: mockTranscribeVoiceMessage,
+  synthesizeVoiceReply: mockSynthesizeVoiceReply,
+  normalizeVoiceText: (text: string) =>
+    text
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/\s+/g, " ")
+      .trim(),
 }));
 
 vi.mock("../../src/telegram/updates.js", () => ({
@@ -33,15 +72,7 @@ vi.mock("../../src/telegram/updates.js", () => ({
   processUpdate: mockProcessUpdate,
 }));
 
-vi.mock("../../src/config.js", () => ({
-  config: {
-    telegram: {
-      botToken: "test-bot-token",
-      secretToken: "test-secret",
-      allowedChatId: "100",
-    },
-  },
-}));
+vi.mock("../../src/config.js", () => mockConfig);
 
 import { registerTelegramRoutes } from "../../src/telegram/webhook.js";
 
@@ -112,10 +143,16 @@ let errorSpy: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
   mockRunAgent.mockReset().mockResolvedValue({ response: "agent response", activity: "" });
   mockSendTelegramMessage.mockReset().mockResolvedValue(undefined);
+  mockSendTelegramVoice.mockReset().mockResolvedValue(true);
   mockSendChatAction.mockReset().mockResolvedValue(undefined);
   mockTranscribeVoiceMessage.mockReset().mockResolvedValue("transcribed text");
+  mockSynthesizeVoiceReply.mockReset().mockResolvedValue(Buffer.from("voice"));
   mockSetMessageHandler.mockReset();
   mockProcessUpdate.mockReset();
+  mockConfig.config.telegram.voiceReplyMode = "off";
+  mockConfig.config.telegram.voiceReplyEvery = 3;
+  mockConfig.config.telegram.voiceReplyMinChars = 1;
+  mockConfig.config.telegram.voiceReplyMaxChars = 450;
   errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -326,6 +363,98 @@ describe("message handler", () => {
     expect(mockRunAgent).toHaveBeenCalledWith(
       expect.objectContaining({ message: "transcribed text" })
     );
+  });
+
+  it("replies with a voice note for voice-origin messages when adaptive mode is enabled", async () => {
+    mockConfig.config.telegram.voiceReplyMode = "adaptive";
+
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "",
+      messageId: 1,
+      date: 1000,
+      voice: { fileId: "voice-123", durationSeconds: 5 },
+    });
+
+    expect(mockSynthesizeVoiceReply).toHaveBeenCalledWith("agent response");
+    expect(mockSendTelegramVoice).toHaveBeenCalledWith("100", expect.any(Buffer));
+    expect(mockSendTelegramMessage).not.toHaveBeenCalledWith("100", "agent response");
+  });
+
+  it("falls back to text when voice send fails", async () => {
+    mockConfig.config.telegram.voiceReplyMode = "adaptive";
+    mockSendTelegramVoice.mockResolvedValueOnce(false);
+
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "",
+      messageId: 1,
+      date: 1000,
+      voice: { fileId: "voice-123", durationSeconds: 5 },
+    });
+
+    expect(mockSendTelegramVoice).toHaveBeenCalled();
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith("100", "agent response");
+  });
+
+  it("uses voice for short conversational text replies in adaptive mode", async () => {
+    mockConfig.config.telegram.voiceReplyMode = "adaptive";
+    mockConfig.config.telegram.voiceReplyEvery = 1;
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
+
+    expect(mockSynthesizeVoiceReply).toHaveBeenCalledWith("agent response");
+    expect(mockSendTelegramVoice).toHaveBeenCalled();
+  });
+
+  it("keeps text output when response is not voice-friendly", async () => {
+    mockConfig.config.telegram.voiceReplyMode = "adaptive";
+    mockRunAgent.mockResolvedValueOnce({
+      response: "Use this link: https://example.com for the full answer",
+      activity: "",
+    });
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
+
+    expect(mockSynthesizeVoiceReply).not.toHaveBeenCalled();
+    expect(mockSendTelegramVoice).not.toHaveBeenCalled();
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      "Use this link: https://example.com for the full answer"
+    );
+  });
+
+  it("sends activity as text when the main response is sent as voice", async () => {
+    mockConfig.config.telegram.voiceReplyMode = "adaptive";
+    mockConfig.config.telegram.voiceReplyEvery = 1;
+    mockRunAgent.mockResolvedValueOnce({
+      response: "Found it!",
+      activity: "3 patterns | 2 tools (search_entries, get_entry)",
+    });
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
+
+    expect(mockSendTelegramVoice).toHaveBeenCalled();
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      "<i>3 patterns | 2 tools (search_entries, get_entry)</i>"
+    );
+  });
+
+  it("uses text when adaptive cadence has not hit the configured interval", async () => {
+    mockConfig.config.telegram.voiceReplyMode = "adaptive";
+    mockConfig.config.telegram.voiceReplyEvery = 3;
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
+
+    expect(mockSendTelegramVoice).not.toHaveBeenCalled();
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith("100", "agent response");
   });
 
   it("skips sending when agent returns null response", async () => {

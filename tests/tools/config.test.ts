@@ -159,12 +159,24 @@ describe("config", () => {
     process.env.TELEGRAM_SECRET_TOKEN = "secret123";
     process.env.TELEGRAM_ALLOWED_CHAT_ID = "456789";
     process.env.TELEGRAM_LLM_PROVIDER = "openai";
+    process.env.TELEGRAM_VOICE_REPLY_MODE = "always";
+    process.env.TELEGRAM_VOICE_REPLY_EVERY = "2";
+    process.env.TELEGRAM_VOICE_REPLY_MIN_CHARS = "10";
+    process.env.TELEGRAM_VOICE_REPLY_MAX_CHARS = "200";
+    process.env.OPENAI_TTS_MODEL = "gpt-4o-mini-tts";
+    process.env.OPENAI_TTS_VOICE = "alloy";
 
     const { config } = await import("../../src/config.js");
     expect(config.telegram.botToken).toBe("123:ABC");
     expect(config.telegram.secretToken).toBe("secret123");
     expect(config.telegram.allowedChatId).toBe("456789");
     expect(config.telegram.llmProvider).toBe("openai");
+    expect(config.telegram.voiceReplyMode).toBe("always");
+    expect(config.telegram.voiceReplyEvery).toBe(2);
+    expect(config.telegram.voiceReplyMinChars).toBe(10);
+    expect(config.telegram.voiceReplyMaxChars).toBe(200);
+    expect(config.telegram.voiceModel).toBe("gpt-4o-mini-tts");
+    expect(config.telegram.voiceName).toBe("alloy");
   });
 
   it("uses telegram defaults when env vars are missing", async () => {
@@ -173,12 +185,24 @@ describe("config", () => {
     delete process.env.TELEGRAM_SECRET_TOKEN;
     delete process.env.TELEGRAM_ALLOWED_CHAT_ID;
     delete process.env.TELEGRAM_LLM_PROVIDER;
+    delete process.env.TELEGRAM_VOICE_REPLY_MODE;
+    delete process.env.TELEGRAM_VOICE_REPLY_EVERY;
+    delete process.env.TELEGRAM_VOICE_REPLY_MIN_CHARS;
+    delete process.env.TELEGRAM_VOICE_REPLY_MAX_CHARS;
+    delete process.env.OPENAI_TTS_MODEL;
+    delete process.env.OPENAI_TTS_VOICE;
 
     const { config } = await import("../../src/config.js");
     expect(config.telegram.botToken).toBe("");
     expect(config.telegram.secretToken).toBe("");
     expect(config.telegram.allowedChatId).toBe("");
     expect(config.telegram.llmProvider).toBe("anthropic");
+    expect(config.telegram.voiceReplyMode).toBe("adaptive");
+    expect(config.telegram.voiceReplyEvery).toBe(3);
+    expect(config.telegram.voiceReplyMinChars).toBe(16);
+    expect(config.telegram.voiceReplyMaxChars).toBe(450);
+    expect(config.telegram.voiceModel).toBe("gpt-4o-mini-tts");
+    expect(config.telegram.voiceName).toBe("alloy");
   });
 
   it("throws for invalid TELEGRAM_LLM_PROVIDER", async () => {
@@ -187,6 +211,25 @@ describe("config", () => {
 
     await expect(() => import("../../src/config.js")).rejects.toThrow(
       "Invalid TELEGRAM_LLM_PROVIDER"
+    );
+  });
+
+  it("throws for invalid TELEGRAM_VOICE_REPLY_MODE", async () => {
+    process.env.NODE_ENV = "development";
+    process.env.TELEGRAM_VOICE_REPLY_MODE = "sometimes";
+
+    await expect(() => import("../../src/config.js")).rejects.toThrow(
+      "Invalid TELEGRAM_VOICE_REPLY_MODE"
+    );
+  });
+
+  it("throws when TELEGRAM_VOICE_REPLY_MIN_CHARS is greater than max", async () => {
+    process.env.NODE_ENV = "development";
+    process.env.TELEGRAM_VOICE_REPLY_MIN_CHARS = "200";
+    process.env.TELEGRAM_VOICE_REPLY_MAX_CHARS = "100";
+
+    await expect(() => import("../../src/config.js")).rejects.toThrow(
+      "TELEGRAM_VOICE_REPLY_MIN_CHARS must be less than or equal to TELEGRAM_VOICE_REPLY_MAX_CHARS."
     );
   });
 

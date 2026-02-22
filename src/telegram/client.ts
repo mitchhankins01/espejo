@@ -21,6 +21,21 @@ async function telegramPost(
   });
 }
 
+async function telegramPostForm(
+  method: string,
+  form: FormData
+): Promise<Response> {
+  return fetch(botUrl(method), {
+    method: "POST",
+    body: form,
+  });
+}
+
+async function extractTelegramDescription(res: Response): Promise<string | undefined> {
+  const body = await res.json().catch(/* v8 ignore next */ () => ({}));
+  return (body as Record<string, unknown>).description as string | undefined;
+}
+
 /**
  * Split text into chunks at paragraph boundaries, respecting the max length.
  */
@@ -85,10 +100,7 @@ async function sendSingleMessage(
 
       if (res.ok) return;
 
-      const body = await res.json().catch(/* v8 ignore next */ () => ({}));
-      const description = (body as Record<string, unknown>).description as
-        | string
-        | undefined;
+      const description = await extractTelegramDescription(res);
 
       // If it's a parse error, retry as plain text (no parse_mode)
       if (
@@ -113,6 +125,49 @@ async function sendSingleMessage(
       await sleep(BASE_DELAY_MS * Math.pow(2, attempt));
     }
   }
+}
+
+/**
+ * Send a voice reply via Telegram Bot API with retry.
+ * Uses sendVoice endpoint so the reply appears as a voice note.
+ */
+export async function sendTelegramVoice(
+  chatId: string,
+  audio: Buffer,
+  caption?: string
+): Promise<boolean> {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const form = new FormData();
+      form.append("chat_id", chatId);
+      if (caption) {
+        form.append("caption", caption);
+      }
+      const audioBytes = new Uint8Array(audio.byteLength);
+      audio.copy(audioBytes, 0, 0, audio.byteLength);
+      form.append(
+        "voice",
+        new Blob([audioBytes.buffer], { type: "audio/mpeg" }),
+        "reply.mp3"
+      );
+
+      const res = await telegramPostForm("sendVoice", form);
+      if (res.ok) return true;
+
+      const description = await extractTelegramDescription(res);
+      console.error(
+        `Telegram voice API error [chat:${chatId}]: ${description ?? res.status}`
+      );
+      return false;
+    } catch (err) {
+      if (!isRecoverableNetworkError(err) || attempt === MAX_RETRIES) {
+        console.error(`Telegram voice send failed [chat:${chatId}]:`, err);
+        return false;
+      }
+      await sleep(BASE_DELAY_MS * Math.pow(2, attempt));
+    }
+  }
+  return false;
 }
 
 /**

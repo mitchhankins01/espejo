@@ -1,14 +1,62 @@
 import type { Express, Request, Response } from "express";
 import { config } from "../config.js";
 import { runAgent, forceCompact } from "./agent.js";
-import { sendTelegramMessage, sendChatAction } from "./client.js";
-import { transcribeVoiceMessage } from "./voice.js";
+import {
+  sendTelegramMessage,
+  sendChatAction,
+  sendTelegramVoice,
+} from "./client.js";
+import {
+  transcribeVoiceMessage,
+  normalizeVoiceText,
+  synthesizeVoiceReply,
+} from "./voice.js";
 import { setMessageHandler, processUpdate } from "./updates.js";
 import type { AssembledMessage, TelegramUpdate } from "./updates.js";
 
 // ---------------------------------------------------------------------------
 // Message handler — wires updates → agent → client
 // ---------------------------------------------------------------------------
+
+const MAX_TEXT_MESSAGE_VOICE_CHARS = 260;
+
+function isVoiceFriendlyResponse(response: string): boolean {
+  const plainText = normalizeVoiceText(response);
+  if (!plainText) return false;
+
+  if (plainText.length < config.telegram.voiceReplyMinChars) return false;
+  if (plainText.length > config.telegram.voiceReplyMaxChars) return false;
+
+  if (/https?:\/\/|www\./i.test(plainText)) return false;
+  if (/`/.test(response)) return false;
+  if (response.split("\n").length > 5) return false;
+  if (/^\s*[-*•]\s/m.test(response)) return false;
+  if (/^\s*\d+\.\s/m.test(response)) return false;
+
+  return true;
+}
+
+function shouldReplyWithVoice(
+  response: string,
+  incomingWasVoice: boolean,
+  messageId: number
+): boolean {
+  if (config.telegram.voiceReplyMode === "off") return false;
+  if (!isVoiceFriendlyResponse(response)) return false;
+  if (config.telegram.voiceReplyMode === "always") return true;
+
+  if (incomingWasVoice) return true;
+
+  const plainText = normalizeVoiceText(response);
+  const maxTextChars = Math.min(
+    MAX_TEXT_MESSAGE_VOICE_CHARS,
+    config.telegram.voiceReplyMaxChars
+  );
+  if (plainText.length > maxTextChars) return false;
+
+  const replyEvery = Math.max(1, config.telegram.voiceReplyEvery);
+  return replyEvery === 1 || messageId % replyEvery === 0;
+}
 
 async function handleMessage(msg: AssembledMessage): Promise<void> {
   const chatId = String(msg.chatId);
@@ -52,6 +100,29 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
       const fullResponse = activity
         ? `${response}\n\n<i>${activity}</i>`
         : response;
+
+      const useVoice = shouldReplyWithVoice(
+        response,
+        Boolean(msg.voice),
+        msg.messageId
+      );
+      if (useVoice) {
+        try {
+          await sendChatAction(chatId, "record_voice");
+          const voiceAudio = await synthesizeVoiceReply(response);
+          await sendChatAction(chatId, "upload_voice");
+          const voiceSent = await sendTelegramVoice(chatId, voiceAudio);
+          if (voiceSent) {
+            if (activity) {
+              await sendTelegramMessage(chatId, `<i>${activity}</i>`);
+            }
+            return;
+          }
+        } catch (voiceErr) {
+          console.error(`Telegram voice reply failed [chat:${chatId}]:`, voiceErr);
+        }
+      }
+
       await sendTelegramMessage(chatId, fullResponse);
     }
   } catch (err) {

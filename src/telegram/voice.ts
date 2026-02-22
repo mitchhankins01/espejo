@@ -15,6 +15,20 @@ function getOpenAI(): OpenAI {
 const TELEGRAM_API = "https://api.telegram.org";
 
 /**
+ * Convert Telegram HTML output into clean plain text suitable for speech.
+ */
+export function normalizeVoiceText(text: string): string {
+  return text
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
  * Download a voice message from Telegram and transcribe via Whisper.
  * Returns the transcribed text and the voice duration in seconds.
  */
@@ -67,4 +81,43 @@ export async function transcribeVoiceMessage(
   });
 
   return transcription as unknown as string;
+}
+
+/**
+ * Synthesize a short voice reply with OpenAI TTS and return MP3 bytes.
+ */
+export async function synthesizeVoiceReply(text: string): Promise<Buffer> {
+  const input = normalizeVoiceText(text);
+  if (!input) {
+    throw new Error("Cannot synthesize an empty voice reply.");
+  }
+
+  const startMs = Date.now();
+  const model = config.telegram.voiceModel;
+
+  const audioResponse = await getOpenAI().audio.speech.create({
+    model: model as never,
+    voice: config.telegram.voiceName as never,
+    input,
+    response_format: "mp3",
+  });
+
+  const audio = Buffer.from(await audioResponse.arrayBuffer());
+
+  try {
+    await logApiUsage(pool, {
+      provider: "openai",
+      model,
+      purpose: "tts",
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+      latencyMs: Date.now() - startMs,
+    });
+  } catch (err) {
+    // Keep replies flowing even if usage logging is temporarily unavailable.
+    console.error("TTS usage logging failed:", err);
+  }
+
+  return audio;
 }
