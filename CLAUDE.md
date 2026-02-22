@@ -68,11 +68,11 @@ src/
     entry-stats.ts  — Writing frequency and trends.
     log-weight.ts   — Daily weight logging (reuses upsertDailyMetric).
   telegram/
-    webhook.ts      — Telegram webhook handler. Validates secret token, dispatches updates.
+    webhook.ts      — Telegram webhook handler. Validates secret token, processes text/voice/photo/doc updates, dispatches responses.
     updates.ts      — Update deduplication, per-chat queue, fragment reassembly.
-    agent.ts        — Claude agent loop. Context building, tool dispatch, compaction, pattern extraction.
-    client.ts       — Telegram Bot API client. Retry, chunking, HTML parse fallback.
-    voice.ts        — Voice message download + Whisper transcription.
+    agent.ts        — Anthropic/OpenAI agent loop. Context building, tool dispatch, compaction, pattern extraction.
+    client.ts       — Telegram Bot API client. sendMessage/sendVoice, retry, chunking, HTML parse fallback.
+    voice.ts        — Voice processing: Telegram download, Whisper transcription, TTS synthesis helpers.
   storage/
     r2.ts           — Cloudflare R2 client. Upload, exists check, public URL.
   formatters/
@@ -368,15 +368,29 @@ The Dockerfile is multi-stage: TypeScript build → slim Node.js runtime. The pr
 
 ### Telegram Bot Deployment
 
-The Telegram chatbot is opt-in. If `TELEGRAM_BOT_TOKEN` is set in production, these vars are also required (startup will fail otherwise):
+The Telegram chatbot is opt-in. If `TELEGRAM_BOT_TOKEN` is set in production, these vars are required (startup will fail otherwise):
 
 | Variable | Purpose |
 |----------|---------|
 | `TELEGRAM_BOT_TOKEN` | Bot API token from @BotFather |
 | `TELEGRAM_SECRET_TOKEN` | Webhook verification (you generate this — any random string) |
 | `TELEGRAM_ALLOWED_CHAT_ID` | Your personal chat ID (single-user access control) |
-| `ANTHROPIC_API_KEY` | Claude agent for conversation |
-| `OPENAI_API_KEY` | Embeddings (pattern search) + Whisper (voice transcription) |
+| `OPENAI_API_KEY` | Embeddings + Whisper transcription + voice reply TTS |
+| `ANTHROPIC_API_KEY` | Required only when `TELEGRAM_LLM_PROVIDER=anthropic` (default provider) |
+
+**Optional Telegram behavior/config vars:**
+
+| Variable | Purpose |
+|----------|---------|
+| `TELEGRAM_LLM_PROVIDER` | Conversation model provider: `anthropic` or `openai` |
+| `OPENAI_CHAT_MODEL` | OpenAI chat model when `TELEGRAM_LLM_PROVIDER=openai` |
+| `ANTHROPIC_MODEL` | Anthropic model when `TELEGRAM_LLM_PROVIDER=anthropic` |
+| `TELEGRAM_VOICE_REPLY_MODE` | Voice reply policy: `off`, `adaptive`, or `always` |
+| `TELEGRAM_VOICE_REPLY_EVERY` | In adaptive mode, send voice for every Nth text-origin message |
+| `TELEGRAM_VOICE_REPLY_MIN_CHARS` | Lower character bound for voice-eligible responses |
+| `TELEGRAM_VOICE_REPLY_MAX_CHARS` | Upper character bound for voice-eligible responses |
+| `OPENAI_TTS_MODEL` | OpenAI speech model used for voice replies |
+| `OPENAI_TTS_VOICE` | Voice preset used for TTS output |
 
 **Setting up the webhook:**
 
@@ -431,10 +445,12 @@ pnpm telegram:setup --delete
 A Telegram chatbot with pattern-based long-term memory. Deployed to Railway, opt-in via `TELEGRAM_BOT_TOKEN`. Original design: `specs/telegram-chatbot-plan.md`.
 
 **What it does:**
-- Conversational interface via text or voice messages, powered by Claude
+- Conversational interface powered by Anthropic or OpenAI (configurable provider)
 - Queries the journal using the existing 7 MCP tools via tool_use loop
 - Logs weight via natural language ("I weighed in at 76.5 today")
+- Accepts text, voice, photo, and document messages (with OCR/text extraction for media)
 - Voice messages transcribed via OpenAI Whisper
+- Optionally responds with Telegram voice notes using adaptive/fallback rules
 - Extracts patterns from conversations during compaction — the bot's long-term memory
 
 **Commands:**

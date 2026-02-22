@@ -327,12 +327,6 @@ Deployed to Railway with the same patterns as [oura-ring-mcp](https://github.com
 # - OPENAI_API_KEY (for query-time embedding)
 ```
 
-Apply DB migrations before validating new memory features:
-
-```bash
-pnpm migrate:prod
-```
-
 Supports both stdio transport (for Claude Desktop) and HTTP/SSE transport (for remote/Railway deployment).
 
 Quick post-deploy smoke check:
@@ -342,6 +336,29 @@ pnpm deploy:smoke https://your-app.railway.app
 ```
 
 This verifies `/health`, and if `TELEGRAM_BOT_TOKEN` is set locally, it also checks Telegram webhook status via `getWebhookInfo`.
+
+### Optional Telegram Bot
+
+The project includes an optional Telegram chatbot (single-user scoped by chat ID).
+
+Required env vars when enabling Telegram:
+
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_SECRET_TOKEN`
+- `TELEGRAM_ALLOWED_CHAT_ID`
+- `OPENAI_API_KEY` (embeddings + Whisper + voice reply TTS)
+
+Provider configuration:
+
+- `TELEGRAM_LLM_PROVIDER=anthropic|openai`
+- `ANTHROPIC_API_KEY` required when provider is `anthropic`
+
+Voice reply controls:
+
+- `TELEGRAM_VOICE_REPLY_MODE=off|adaptive|always`
+- `TELEGRAM_VOICE_REPLY_EVERY` (adaptive cadence for text-origin chats)
+- `TELEGRAM_VOICE_REPLY_MIN_CHARS` / `TELEGRAM_VOICE_REPLY_MAX_CHARS`
+- `OPENAI_TTS_MODEL` / `OPENAI_TTS_VOICE`
 
 ## License
 
