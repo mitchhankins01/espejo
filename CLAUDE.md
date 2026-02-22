@@ -78,6 +78,7 @@ scripts/
 specs/
   schema.sql        — Canonical DB schema.
   tools.spec.ts     — Tool contracts: params, types, descriptions, examples.
+  telegram-chatbot-plan.md — Implementation plan for Telegram chatbot with pattern memory.
   fixtures/
     seed.ts         — Test data with pre-computed embeddings for determinism.
 ```
@@ -380,13 +381,23 @@ The Dockerfile is multi-stage: TypeScript build → slim Node.js runtime. The pr
 | `@aws-sdk/client-s3` | Cloudflare R2 media storage (S3-compatible) |
 | `better-sqlite3` | Read DayOne.sqlite during sync |
 
+## Telegram Chatbot (Next Phase)
+
+The next major feature is a Telegram chatbot with pattern-based long-term memory. Full implementation plan: `specs/telegram-chatbot-plan.md`.
+
+Key additions:
+- `src/telegram/` — webhook, update processing, voice transcription, Claude agent, Telegram client
+- `src/tools/log-weight.ts` — weight logging tool (reuses `upsertDailyMetric`)
+- 7 new DB tables: `chat_messages`, `patterns`, `pattern_observations`, `pattern_relations`, `pattern_aliases`, `pattern_entries`, `api_usage`
+- New dependency: `@anthropic-ai/sdk`
+
 ## What's Out of Scope
 
 Do not implement these (they're planned future work, not part of the current build):
 
 - Clustering analysis (HDBSCAN/k-means over embeddings)
 - Oura Ring data correlation
-- Write/update/delete tools (this server is read-only)
+- Write/update/delete tools (this server is read-only for journal entries)
 - Web UI or dashboard
 - Multi-user support or auth beyond MCP SDK defaults
 - Chunking strategies (entries fit in single embeddings)
