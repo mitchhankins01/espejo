@@ -45,6 +45,10 @@ import {
   insertSoulQualitySignal,
   getSoulQualityStats,
   getLastAssistantMessageId,
+  insertPulseCheck,
+  getLastPulseCheckTime,
+  getLastPulseCheck,
+  insertSoulStateHistory,
 } from "../../src/db/queries.js";
 import { fixturePatterns } from "../../specs/fixtures/seed.js";
 
@@ -1273,5 +1277,79 @@ describe("getLastAssistantMessageId", () => {
 
     const result = await getLastAssistantMessageId(pool, "300");
     expect(result).toBe(msg.id);
+  });
+});
+
+describe("pulse checks", () => {
+  it("returns null when no pulse checks exist", async () => {
+    const pulse = await getLastPulseCheck(pool, "404");
+    const pulseTime = await getLastPulseCheckTime(pool, "404");
+
+    expect(pulse).toBeNull();
+    expect(pulseTime).toBeNull();
+  });
+
+  it("inserts and reads back the latest pulse check", async () => {
+    const inserted = await insertPulseCheck(pool, {
+      chatId: "310",
+      status: "drifting",
+      personalRatio: 0.32,
+      correctionRate: 0.11,
+      signalCounts: {
+        felt_personal: 2,
+        felt_generic: 5,
+        correction: 1,
+        positive_reaction: 1,
+        total: 9,
+      },
+      repairsApplied: [{ type: "add_growth_note", value: "focus on specifics" }],
+      soulVersionBefore: 3,
+      soulVersionAfter: 4,
+    });
+
+    expect(inserted.chat_id).toBe("310");
+    expect(inserted.status).toBe("drifting");
+    expect(inserted.signal_counts.total).toBe(9);
+    expect(inserted.repairs_applied).toEqual([
+      { type: "add_growth_note", value: "focus on specifics" },
+    ]);
+
+    const latest = await getLastPulseCheck(pool, "310");
+    const latestTime = await getLastPulseCheckTime(pool, "310");
+
+    expect(latest).not.toBeNull();
+    expect(latest?.id).toBe(inserted.id);
+    expect(latest?.soul_version_before).toBe(3);
+    expect(latest?.soul_version_after).toBe(4);
+    expect(latestTime).toBeInstanceOf(Date);
+  });
+});
+
+describe("insertSoulStateHistory", () => {
+  it("records an auditable soul-state snapshot", async () => {
+    const snapshot = await insertSoulStateHistory(pool, {
+      chatId: "320",
+      version: 8,
+      identitySummary: "A companion who is specific, warm, and direct.",
+      relationalCommitments: ["be specific", "name tradeoffs"],
+      toneSignature: ["warm", "clear"],
+      growthNotes: ["pulse: reinforced specificity"],
+      changeReason: "pulse: drifting — restore specificity",
+    });
+
+    expect(snapshot.id).toBeGreaterThan(0);
+    expect(snapshot.chat_id).toBe("320");
+    expect(snapshot.version).toBe(8);
+    expect(snapshot.identity_summary).toContain("specific");
+    expect(snapshot.relational_commitments).toEqual([
+      "be specific",
+      "name tradeoffs",
+    ]);
+    expect(snapshot.tone_signature).toEqual(["warm", "clear"]);
+    expect(snapshot.growth_notes).toEqual([
+      "pulse: reinforced specificity",
+    ]);
+    expect(snapshot.change_reason).toContain("pulse: drifting");
+    expect(snapshot.created_at).toBeInstanceOf(Date);
   });
 });

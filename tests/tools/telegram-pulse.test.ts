@@ -157,6 +157,20 @@ describe("applySoulRepairs", () => {
     expect(result).toBeNull();
   });
 
+  it("adds a new commitment when under capacity and not duplicated", () => {
+    const repairs: SoulRepairAction[] = [
+      { type: "add_commitment", value: "anchor responses in concrete examples" },
+    ];
+
+    const result = applySoulRepairs(baseSoul, repairs);
+
+    expect(result).not.toBeNull();
+    expect(result?.version).toBe(4);
+    expect(result?.relationalCommitments).toContain(
+      "anchor responses in concrete examples"
+    );
+  });
+
   it("adds a growth note from pulse diagnosis", () => {
     const repairs: SoulRepairAction[] = [
       {

@@ -517,6 +517,59 @@ describe("runAgent", () => {
     expect(result.activity).toContain("cost ~$0.20 since last 12h");
   });
 
+  it("adds soul quality ratio to activity when enough feedback signals exist", async () => {
+    mockGetSoulState.mockResolvedValueOnce({
+      chat_id: "100",
+      identity_summary: "A steady companion.",
+      relational_commitments: ["stay direct"],
+      tone_signature: ["warm"],
+      growth_notes: [],
+      version: 3,
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+    mockGetSoulQualityStats.mockResolvedValueOnce({
+      felt_personal: 4,
+      felt_generic: 2,
+      correction: 1,
+      positive_reaction: 1,
+      total: 8,
+      personal_ratio: 0.71,
+    });
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Noted." }],
+      usage: { input_tokens: 60, output_tokens: 12 },
+    });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "quick update",
+      externalMessageId: "update:soul-activity",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("Noted.");
+    expect(result.activity).toContain("soul v3 (71% personal)");
+  });
+
+  it("ignores soul quality stats errors when building activity", async () => {
+    mockGetSoulQualityStats.mockRejectedValueOnce(new Error("stats failed"));
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Still replying." }],
+      usage: { input_tokens: 60, output_tokens: 12 },
+    });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "quick update",
+      externalMessageId: "update:soul-stats-error",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("Still replying.");
+    expect(result.activity).not.toContain("soul v");
+  });
+
   it("handles openai agent responses without usage metadata", async () => {
     mockConfig.telegram.llmProvider = "openai";
     mockOpenAIChatCreate.mockResolvedValueOnce({
@@ -3134,6 +3187,25 @@ describe("pulse check after compaction", () => {
     // Should notify user
     expect(onCompacted).toHaveBeenCalledWith(
       expect.stringContaining("pulse:")
+    );
+  });
+
+  it("logs and continues when pulse check throws", async () => {
+    const messages = buildCompactionMessages(20);
+    mockGetRecentMessages
+      .mockResolvedValueOnce(messages)
+      .mockResolvedValueOnce(messages);
+    setupCompactionExtraction();
+
+    mockGetLastPulseCheckTime.mockRejectedValueOnce(
+      new Error("pulse lookup failed")
+    );
+
+    await compactIfNeeded("100");
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Telegram pulse check error [chat:100]:",
+      expect.any(Error)
     );
   });
 });

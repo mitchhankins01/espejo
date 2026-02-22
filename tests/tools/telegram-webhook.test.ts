@@ -196,6 +196,7 @@ beforeEach(() => {
   });
   mockGetLastAssistantMessageId.mockReset().mockResolvedValue(42);
   mockInsertSoulQualitySignal.mockReset().mockResolvedValue({ id: 1 });
+  mockGetLastPulseCheck.mockReset().mockResolvedValue(null);
   mockConfig.config.telegram.voiceReplyMode = "off";
   mockConfig.config.telegram.voiceReplyEvery = 3;
   mockConfig.config.telegram.voiceReplyMinChars = 1;
@@ -330,6 +331,33 @@ describe("POST /api/telegram", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual({ ok: true });
+    expect(mockProcessUpdate).toHaveBeenCalledWith(update);
+  });
+
+  it("accepts allowed message_reaction updates", () => {
+    const { handler } = setup();
+    const res = createMockRes();
+
+    const update = {
+      update_id: 2,
+      message_reaction: {
+        chat: { id: 100 },
+        date: 1001,
+        message_id: 9,
+        old_reaction: [],
+        new_reaction: [{ type: "emoji", emoji: "👍" }],
+      },
+    };
+
+    handler(
+      {
+        headers: { "x-telegram-bot-api-secret-token": "test-secret" },
+        body: update,
+      },
+      res
+    );
+
+    expect(res.statusCode).toBe(200);
     expect(mockProcessUpdate).toHaveBeenCalledWith(update);
   });
 
@@ -1004,6 +1032,26 @@ describe("soul feedback callbacks", () => {
     expect(mockRunAgent).not.toHaveBeenCalled();
   });
 
+  it("defaults callback soulVersion to 0 when no soul state exists", async () => {
+    mockGetSoulState.mockResolvedValueOnce(null);
+
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "soul:personal",
+      messageId: 12,
+      date: 1000,
+      callbackData: "soul:personal",
+    });
+
+    expect(mockInsertSoulQualitySignal).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        soulVersion: 0,
+      })
+    );
+  });
+
   it("handles soul feedback callback error gracefully", async () => {
     mockGetSoulState.mockRejectedValueOnce(new Error("db down"));
 
@@ -1050,6 +1098,21 @@ describe("message reactions", () => {
       })
     );
     expect(mockRunAgent).not.toHaveBeenCalled();
+  });
+
+  it("defaults reaction soulVersion to 0 when no soul state exists", async () => {
+    mockGetSoulState.mockResolvedValueOnce(null);
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "", messageId: 6, date: 1000, reactionEmoji: "👍" });
+
+    expect(mockInsertSoulQualitySignal).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        signalType: "positive_reaction",
+        soulVersion: 0,
+      })
+    );
   });
 
   it("ignores unknown reaction emojis", async () => {
@@ -1135,6 +1198,95 @@ describe("/soul command", () => {
     );
     expect(sentMessage).toBeDefined();
     expect(sentMessage![1] as string).toContain("No soul state yet");
+  });
+
+  it("includes pulse status and applied repair count when available", async () => {
+    mockGetSoulState.mockResolvedValueOnce({
+      version: 4,
+      identity_summary: "Grounded and specific.",
+      relational_commitments: ["be concrete"],
+      tone_signature: ["warm"],
+      growth_notes: [],
+    });
+    mockGetSoulQualityStats.mockResolvedValueOnce({
+      felt_personal: 6,
+      felt_generic: 3,
+      correction: 1,
+      positive_reaction: 2,
+      total: 12,
+      personal_ratio: 0.73,
+    });
+    mockGetLastPulseCheck.mockResolvedValueOnce({
+      id: 11,
+      chat_id: "100",
+      status: "drifting",
+      personal_ratio: 0.31,
+      correction_rate: 0.1,
+      signal_counts: {
+        felt_personal: 1,
+        felt_generic: 6,
+        correction: 1,
+        positive_reaction: 1,
+        total: 9,
+      },
+      repairs_applied: [{ type: "add_growth_note" }, { type: "add_commitment" }],
+      soul_version_before: 3,
+      soul_version_after: 4,
+      created_at: new Date(Date.now() - 2 * 60 * 60 * 1000),
+    });
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/soul", messageId: 1, date: 1000 });
+
+    const sentMessage = mockSendTelegramMessage.mock.calls.find(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (c: any[]) => typeof c[1] === "string" && c[1].includes("<b>Pulse:</b>")
+    );
+    expect(sentMessage).toBeDefined();
+    const text = sentMessage![1] as string;
+    expect(text).toContain("<b>Pulse:</b>");
+    expect(text).toContain("drifting");
+    expect(text).toContain("Repairs: 2 applied");
+  });
+
+  it("uses fallback pulse emoji for unknown pulse status", async () => {
+    mockGetSoulState.mockResolvedValueOnce({
+      version: 2,
+      identity_summary: "Calm and direct.",
+      relational_commitments: [],
+      tone_signature: [],
+      growth_notes: [],
+    });
+    mockGetSoulQualityStats.mockResolvedValueOnce({
+      felt_personal: 0,
+      felt_generic: 0,
+      correction: 0,
+      positive_reaction: 0,
+      total: 0,
+      personal_ratio: 0,
+    });
+    mockGetLastPulseCheck.mockResolvedValueOnce({
+      id: 12,
+      chat_id: "100",
+      status: "mystery",
+      personal_ratio: 0,
+      correction_rate: 0,
+      signal_counts: {},
+      repairs_applied: [],
+      soul_version_before: 2,
+      soul_version_after: 2,
+      created_at: new Date(Date.now() - 60 * 60 * 1000),
+    });
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/soul", messageId: 1, date: 1000 });
+
+    const sentMessage = mockSendTelegramMessage.mock.calls.find(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (c: any[]) => typeof c[1] === "string" && c[1].includes("<b>Pulse:</b>")
+    );
+    expect(sentMessage).toBeDefined();
+    expect(sentMessage![1] as string).toContain("<b>Pulse:</b> ❓ mystery");
   });
 
   it("handles /soul error gracefully", async () => {

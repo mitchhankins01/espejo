@@ -49,7 +49,7 @@ export function diagnoseQuality(stats: SoulQualityStats): PulseDiagnosis {
     };
   }
 
-  const correctionRate = total > 0 ? correction / total : 0;
+  const correctionRate = correction / total;
 
   // Overcorrecting: soul is changing too frequently
   if (correctionRate > OVERCORRECTING_THRESHOLD) {

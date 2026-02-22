@@ -5,6 +5,8 @@ import {
   getTopPatterns,
   pruneExpiredEventPatterns,
   countStaleEventPatterns,
+  insertSoulQualitySignal,
+  insertPulseCheck,
 } from "../../src/db/queries.js";
 
 describe("queries defensive fallbacks", () => {
@@ -75,5 +77,70 @@ describe("queries defensive fallbacks", () => {
 
     const count = await countStaleEventPatterns(pool);
     expect(count).toBe(0);
+  });
+
+  it("maps soul quality signal metadata to {} when row metadata is nullish", async () => {
+    const query = vi.fn().mockResolvedValue({
+      rows: [
+        {
+          id: 1,
+          chat_id: "100",
+          assistant_message_id: null,
+          signal_type: "felt_personal",
+          soul_version: 1,
+          pattern_count: 0,
+          metadata: undefined,
+          created_at: new Date("2026-01-01T00:00:00Z"),
+        },
+      ],
+    });
+    const pool = {
+      query,
+    } as unknown as Parameters<typeof insertSoulQualitySignal>[0];
+
+    const result = await insertSoulQualitySignal(pool, {
+      chatId: "100",
+      assistantMessageId: null,
+      signalType: "felt_personal",
+      soulVersion: 1,
+      patternCount: 0,
+      metadata: {},
+    });
+
+    expect(result.metadata).toEqual({});
+  });
+
+  it("maps pulse check nullish JSON fields to empty defaults", async () => {
+    const query = vi.fn().mockResolvedValue({
+      rows: [
+        {
+          id: 7,
+          chat_id: "100",
+          status: "stale",
+          personal_ratio: "0.1",
+          correction_rate: "0.2",
+          signal_counts: undefined,
+          repairs_applied: undefined,
+          soul_version_before: 1,
+          soul_version_after: 1,
+          created_at: new Date("2026-01-01T00:00:00Z"),
+        },
+      ],
+    });
+    const pool = { query } as unknown as Parameters<typeof insertPulseCheck>[0];
+
+    const result = await insertPulseCheck(pool, {
+      chatId: "100",
+      status: "stale",
+      personalRatio: 0.1,
+      correctionRate: 0.2,
+      signalCounts: {},
+      repairsApplied: [],
+      soulVersionBefore: 1,
+      soulVersionAfter: 1,
+    });
+
+    expect(result.signal_counts).toEqual({});
+    expect(result.repairs_applied).toEqual([]);
   });
 });
