@@ -164,6 +164,7 @@ describe("config", () => {
     process.env.TELEGRAM_VOICE_REPLY_MIN_CHARS = "10";
     process.env.TELEGRAM_VOICE_REPLY_MAX_CHARS = "200";
     process.env.TELEGRAM_SOUL_ENABLED = "false";
+    process.env.TELEGRAM_SOUL_FEEDBACK_EVERY = "4";
     process.env.OPENAI_TTS_MODEL = "gpt-4o-mini-tts";
     process.env.OPENAI_TTS_VOICE = "alloy";
 
@@ -177,6 +178,7 @@ describe("config", () => {
     expect(config.telegram.voiceReplyMinChars).toBe(10);
     expect(config.telegram.voiceReplyMaxChars).toBe(200);
     expect(config.telegram.soulEnabled).toBe(false);
+    expect(config.telegram.soulFeedbackEvery).toBe(4);
     expect(config.telegram.voiceModel).toBe("gpt-4o-mini-tts");
     expect(config.telegram.voiceName).toBe("alloy");
   });
@@ -192,6 +194,7 @@ describe("config", () => {
     delete process.env.TELEGRAM_VOICE_REPLY_MIN_CHARS;
     delete process.env.TELEGRAM_VOICE_REPLY_MAX_CHARS;
     delete process.env.TELEGRAM_SOUL_ENABLED;
+    delete process.env.TELEGRAM_SOUL_FEEDBACK_EVERY;
     delete process.env.OPENAI_TTS_MODEL;
     delete process.env.OPENAI_TTS_VOICE;
 
@@ -205,6 +208,7 @@ describe("config", () => {
     expect(config.telegram.voiceReplyMinChars).toBe(16);
     expect(config.telegram.voiceReplyMaxChars).toBe(450);
     expect(config.telegram.soulEnabled).toBe(true);
+    expect(config.telegram.soulFeedbackEvery).toBe(8);
     expect(config.telegram.voiceModel).toBe("gpt-4o-mini-tts");
     expect(config.telegram.voiceName).toBe("alloy");
   });

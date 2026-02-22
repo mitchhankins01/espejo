@@ -26,6 +26,11 @@ const {
   mockFindSimilarPatterns,
   mockGetLastCompactionTime,
   mockCountStaleEventPatterns,
+  mockInsertSoulQualitySignal,
+  mockGetSoulQualityStats,
+  mockInsertPulseCheck,
+  mockGetLastPulseCheckTime,
+  mockInsertSoulStateHistory,
   mockGenerateEmbedding,
   mockAnthropicCreate,
   mockOpenAIChatCreate,
@@ -69,6 +74,35 @@ const {
   mockFindSimilarPatterns: vi.fn().mockResolvedValue([]),
   mockGetLastCompactionTime: vi.fn().mockResolvedValue(null),
   mockCountStaleEventPatterns: vi.fn().mockResolvedValue(0),
+  mockInsertSoulQualitySignal: vi.fn().mockResolvedValue({
+    id: 1,
+    chat_id: "100",
+    assistant_message_id: null,
+    signal_type: "correction",
+    soul_version: 1,
+    pattern_count: 0,
+    metadata: {},
+    created_at: new Date(),
+  }),
+  mockGetSoulQualityStats: vi.fn().mockResolvedValue({
+    felt_personal: 0,
+    felt_generic: 0,
+    correction: 0,
+    positive_reaction: 0,
+    total: 0,
+    personal_ratio: 0,
+  }),
+  mockInsertPulseCheck: vi.fn().mockResolvedValue({
+    id: 1, chat_id: "100", status: "stale", personal_ratio: 0,
+    correction_rate: 0, signal_counts: {}, repairs_applied: [],
+    soul_version_before: 0, soul_version_after: 0, created_at: new Date(),
+  }),
+  mockGetLastPulseCheckTime: vi.fn().mockResolvedValue(null),
+  mockInsertSoulStateHistory: vi.fn().mockResolvedValue({
+    id: 1, chat_id: "100", version: 1, identity_summary: "",
+    relational_commitments: [], tone_signature: [], growth_notes: [],
+    change_reason: "", created_at: new Date(),
+  }),
   mockGenerateEmbedding: vi.fn().mockResolvedValue({
     embedding: new Array(1536).fill(0),
     inputTokens: 100,
@@ -83,6 +117,8 @@ const {
       allowedChatId: "100",
       llmProvider: "anthropic",
       soulEnabled: true,
+      pulseEnabled: true,
+      pulseIntervalHours: 24,
     },
     openai: {
       apiKey: "sk-test",
@@ -149,6 +185,11 @@ vi.mock("../../src/db/queries.js", () => ({
   findSimilarPatterns: mockFindSimilarPatterns,
   getLastCompactionTime: mockGetLastCompactionTime,
   countStaleEventPatterns: mockCountStaleEventPatterns,
+  insertSoulQualitySignal: mockInsertSoulQualitySignal,
+  getSoulQualityStats: mockGetSoulQualityStats,
+  insertPulseCheck: mockInsertPulseCheck,
+  getLastPulseCheckTime: mockGetLastPulseCheckTime,
+  insertSoulStateHistory: mockInsertSoulStateHistory,
 }));
 
 vi.mock("../../src/db/embeddings.js", () => ({
@@ -235,6 +276,35 @@ beforeEach(() => {
   });
   mockFindSimilarPatterns.mockReset().mockResolvedValue([]);
   mockCountStaleEventPatterns.mockReset().mockResolvedValue(0);
+  mockInsertSoulQualitySignal.mockReset().mockResolvedValue({
+    id: 1,
+    chat_id: "100",
+    assistant_message_id: null,
+    signal_type: "correction",
+    soul_version: 1,
+    pattern_count: 0,
+    metadata: {},
+    created_at: new Date(),
+  });
+  mockGetSoulQualityStats.mockReset().mockResolvedValue({
+    felt_personal: 0,
+    felt_generic: 0,
+    correction: 0,
+    positive_reaction: 0,
+    total: 0,
+    personal_ratio: 0,
+  });
+  mockInsertPulseCheck.mockReset().mockResolvedValue({
+    id: 1, chat_id: "100", status: "stale", personal_ratio: 0,
+    correction_rate: 0, signal_counts: {}, repairs_applied: [],
+    soul_version_before: 0, soul_version_after: 0, created_at: new Date(),
+  });
+  mockGetLastPulseCheckTime.mockReset().mockResolvedValue(null);
+  mockInsertSoulStateHistory.mockReset().mockResolvedValue({
+    id: 1, chat_id: "100", version: 1, identity_summary: "",
+    relational_commitments: [], tone_signature: [], growth_notes: [],
+    change_reason: "", created_at: new Date(),
+  });
   mockGenerateEmbedding.mockReset().mockResolvedValue({
     embedding: new Array(1536).fill(0),
     inputTokens: 100,
@@ -244,6 +314,8 @@ beforeEach(() => {
   mockToolHandler.mockReset().mockResolvedValue("tool result text");
   mockConfig.telegram.llmProvider = "anthropic";
   mockConfig.telegram.soulEnabled = true;
+  mockConfig.telegram.pulseEnabled = true;
+  mockConfig.telegram.pulseIntervalHours = 24;
   mockConfig.openai.chatModel = "gpt-5-mini";
   mockPoolQuery.mockReset().mockImplementation((sql: string) => {
     if (typeof sql === "string" && sql.includes("pg_try_advisory_lock")) {
@@ -443,6 +515,59 @@ describe("runAgent", () => {
 
     expect(result.response).toBe("Initial cost note.");
     expect(result.activity).toContain("cost ~$0.20 since last 12h");
+  });
+
+  it("adds soul quality ratio to activity when enough feedback signals exist", async () => {
+    mockGetSoulState.mockResolvedValueOnce({
+      chat_id: "100",
+      identity_summary: "A steady companion.",
+      relational_commitments: ["stay direct"],
+      tone_signature: ["warm"],
+      growth_notes: [],
+      version: 3,
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+    mockGetSoulQualityStats.mockResolvedValueOnce({
+      felt_personal: 4,
+      felt_generic: 2,
+      correction: 1,
+      positive_reaction: 1,
+      total: 8,
+      personal_ratio: 0.71,
+    });
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Noted." }],
+      usage: { input_tokens: 60, output_tokens: 12 },
+    });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "quick update",
+      externalMessageId: "update:soul-activity",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("Noted.");
+    expect(result.activity).toContain("soul v3 (71% personal)");
+  });
+
+  it("ignores soul quality stats errors when building activity", async () => {
+    mockGetSoulQualityStats.mockRejectedValueOnce(new Error("stats failed"));
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Still replying." }],
+      usage: { input_tokens: 60, output_tokens: 12 },
+    });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "quick update",
+      externalMessageId: "update:soul-stats-error",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("Still replying.");
+    expect(result.activity).not.toContain("soul v");
   });
 
   it("handles openai agent responses without usage metadata", async () => {
@@ -2898,5 +3023,189 @@ describe("forceCompact", () => {
     await forceCompact("100", onCompacted);
 
     expect(onCompacted).toHaveBeenCalledWith("compaction already in progress");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pulse check integration (Phase 5: self-healing organism)
+// ---------------------------------------------------------------------------
+
+describe("pulse check after compaction", () => {
+  beforeEach(() => {
+    mockConfig.telegram.llmProvider = "anthropic";
+    mockConfig.telegram.soulEnabled = true;
+    mockConfig.telegram.pulseEnabled = true;
+    mockConfig.telegram.pulseIntervalHours = 24;
+  });
+
+  function buildCompactionMessages(count: number): {
+    id: number;
+    role: string;
+    content: string;
+    chat_id: string;
+    external_message_id: string | null;
+    tool_call_id: string | null;
+    compacted_at: Date | null;
+    created_at: Date;
+  }[] {
+    const longContent = "x".repeat(10_000);
+    return Array.from({ length: count }, (_, i) => ({
+      id: i + 1,
+      role: "user",
+      content: longContent,
+      chat_id: "100",
+      external_message_id: null,
+      tool_call_id: null,
+      compacted_at: null,
+      created_at: new Date(),
+    }));
+  }
+
+  function setupCompactionExtraction(): void {
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          new_patterns: [],
+          reinforcements: [],
+          contradictions: [],
+          supersedes: [],
+        }),
+      }],
+      usage: { input_tokens: 100, output_tokens: 50 },
+    });
+  }
+
+  it("runs pulse check after compaction when enabled", async () => {
+    const messages = buildCompactionMessages(20);
+    mockGetRecentMessages
+      .mockResolvedValueOnce(messages)
+      .mockResolvedValueOnce(messages);
+    setupCompactionExtraction();
+
+    // Pulse check: no recent pulse, stale stats (total < 5)
+    mockGetLastPulseCheckTime.mockResolvedValueOnce(null);
+    mockGetSoulQualityStats.mockResolvedValueOnce({
+      felt_personal: 0, felt_generic: 0, correction: 0,
+      positive_reaction: 0, total: 0, personal_ratio: 0,
+    });
+
+    await compactIfNeeded("100");
+
+    expect(mockInsertPulseCheck).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        chatId: "100",
+        status: "stale",
+      })
+    );
+  });
+
+  it("skips pulse check when pulse is disabled", async () => {
+    mockConfig.telegram.pulseEnabled = false;
+
+    const messages = buildCompactionMessages(20);
+    mockGetRecentMessages
+      .mockResolvedValueOnce(messages)
+      .mockResolvedValueOnce(messages);
+    setupCompactionExtraction();
+
+    await compactIfNeeded("100");
+
+    expect(mockGetLastPulseCheckTime).not.toHaveBeenCalled();
+    expect(mockInsertPulseCheck).not.toHaveBeenCalled();
+  });
+
+  it("skips pulse check when soul is disabled", async () => {
+    mockConfig.telegram.soulEnabled = false;
+
+    const messages = buildCompactionMessages(20);
+    mockGetRecentMessages
+      .mockResolvedValueOnce(messages)
+      .mockResolvedValueOnce(messages);
+    setupCompactionExtraction();
+
+    await compactIfNeeded("100");
+
+    expect(mockGetLastPulseCheckTime).not.toHaveBeenCalled();
+    expect(mockInsertPulseCheck).not.toHaveBeenCalled();
+  });
+
+  it("skips pulse check when interval has not elapsed", async () => {
+    const messages = buildCompactionMessages(20);
+    mockGetRecentMessages
+      .mockResolvedValueOnce(messages)
+      .mockResolvedValueOnce(messages);
+    setupCompactionExtraction();
+
+    // Recent pulse check (1 hour ago)
+    mockGetLastPulseCheckTime.mockResolvedValueOnce(new Date(Date.now() - 1 * 60 * 60 * 1000));
+
+    await compactIfNeeded("100");
+
+    expect(mockInsertPulseCheck).not.toHaveBeenCalled();
+  });
+
+  it("applies soul repairs when drifting diagnosis detected", async () => {
+    const messages = buildCompactionMessages(20);
+    mockGetRecentMessages
+      .mockResolvedValueOnce(messages)
+      .mockResolvedValueOnce(messages);
+    setupCompactionExtraction();
+
+    // Soul state exists
+    mockGetSoulState.mockResolvedValueOnce({
+      chat_id: "100",
+      identity_summary: "A steady companion.",
+      relational_commitments: ["stay direct"],
+      tone_signature: ["warm"],
+      growth_notes: [],
+      version: 3,
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+
+    // Pulse check: no recent pulse, drifting stats
+    mockGetLastPulseCheckTime.mockResolvedValueOnce(null);
+    mockGetSoulQualityStats.mockResolvedValueOnce({
+      felt_personal: 1, felt_generic: 8, correction: 1,
+      positive_reaction: 0, total: 10, personal_ratio: 0.1,
+    });
+
+    const onCompacted = vi.fn();
+    await compactIfNeeded("100", onCompacted);
+
+    // Should apply repairs and update soul state
+    expect(mockUpsertSoulState).toHaveBeenCalled();
+    expect(mockInsertSoulStateHistory).toHaveBeenCalled();
+    expect(mockInsertPulseCheck).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        status: "drifting",
+      })
+    );
+    // Should notify user
+    expect(onCompacted).toHaveBeenCalledWith(
+      expect.stringContaining("pulse:")
+    );
+  });
+
+  it("logs and continues when pulse check throws", async () => {
+    const messages = buildCompactionMessages(20);
+    mockGetRecentMessages
+      .mockResolvedValueOnce(messages)
+      .mockResolvedValueOnce(messages);
+    setupCompactionExtraction();
+
+    mockGetLastPulseCheckTime.mockRejectedValueOnce(
+      new Error("pulse lookup failed")
+    );
+
+    await compactIfNeeded("100");
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Telegram pulse check error [chat:100]:",
+      expect.any(Error)
+    );
   });
 });

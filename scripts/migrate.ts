@@ -329,6 +329,26 @@ const migrations: Migration[] = [
       JOIN LATERAL generate_series(1, m.missing_count) AS gs(n) ON TRUE;
     `,
   },
+  {
+    name: "009-soul-quality-signals",
+    getSql: () => `
+      CREATE TABLE IF NOT EXISTS soul_quality_signals (
+          id SERIAL PRIMARY KEY,
+          chat_id BIGINT NOT NULL,
+          assistant_message_id INT REFERENCES chat_messages(id) ON DELETE SET NULL,
+          signal_type TEXT NOT NULL,
+          soul_version INT NOT NULL DEFAULT 1,
+          pattern_count INT NOT NULL DEFAULT 0,
+          metadata JSONB NOT NULL DEFAULT '{}',
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          CONSTRAINT soul_quality_signal_type_check CHECK (
+              signal_type IN ('felt_personal', 'felt_generic', 'correction', 'positive_reaction')
+          )
+      );
+      CREATE INDEX IF NOT EXISTS idx_soul_quality_signals_chat_created ON soul_quality_signals(chat_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_soul_quality_signals_type ON soul_quality_signals(signal_type);
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

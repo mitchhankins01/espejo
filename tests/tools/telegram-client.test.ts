@@ -201,6 +201,23 @@ describe("sendTelegramMessage", () => {
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
+
+  it("attaches reply_markup only to the final chunk", async () => {
+    fetchSpy.mockResolvedValue(okResponse());
+
+    const longText = `${"A".repeat(3000)}\n\n${"B".repeat(3000)}`;
+    const markup = {
+      inline_keyboard: [[{ text: "Yes", callback_data: "yes" }]],
+    };
+
+    await sendTelegramMessage("12345", longText, markup);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const firstBody = JSON.parse(fetchSpy.mock.calls[0][1]!.body as string);
+    const secondBody = JSON.parse(fetchSpy.mock.calls[1][1]!.body as string);
+    expect(firstBody.reply_markup).toBeUndefined();
+    expect(secondBody.reply_markup).toEqual(markup);
+  });
 });
 
 describe("sendChatAction", () => {

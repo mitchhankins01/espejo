@@ -254,3 +254,59 @@ CREATE TABLE IF NOT EXISTS cost_notifications (
 
 CREATE INDEX IF NOT EXISTS idx_cost_notifications_chat_created
     ON cost_notifications(chat_id, created_at DESC);
+
+-- Soul quality feedback signals (Phase 4: quality loop)
+CREATE TABLE IF NOT EXISTS soul_quality_signals (
+    id SERIAL PRIMARY KEY,
+    chat_id BIGINT NOT NULL,
+    assistant_message_id INT REFERENCES chat_messages(id) ON DELETE SET NULL,
+    signal_type TEXT NOT NULL,
+    soul_version INT NOT NULL DEFAULT 1,
+    pattern_count INT NOT NULL DEFAULT 0,
+    metadata JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT soul_quality_signal_type_check CHECK (
+        signal_type IN ('felt_personal', 'felt_generic', 'correction', 'positive_reaction')
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_soul_quality_signals_chat_created
+    ON soul_quality_signals(chat_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_soul_quality_signals_type
+    ON soul_quality_signals(signal_type);
+
+-- Self-healing pulse checks (Phase 5: autonomous quality loop)
+CREATE TABLE IF NOT EXISTS pulse_checks (
+    id SERIAL PRIMARY KEY,
+    chat_id BIGINT NOT NULL,
+    status TEXT NOT NULL,
+    personal_ratio DOUBLE PRECISION NOT NULL,
+    correction_rate DOUBLE PRECISION NOT NULL,
+    signal_counts JSONB NOT NULL DEFAULT '{}',
+    repairs_applied JSONB NOT NULL DEFAULT '[]',
+    soul_version_before INT NOT NULL,
+    soul_version_after INT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT pulse_checks_status_check CHECK (
+        status IN ('healthy', 'drifting', 'stale', 'overcorrecting')
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_pulse_checks_chat_created
+    ON pulse_checks(chat_id, created_at DESC);
+
+-- Soul state audit trail (Phase 5: tracks every soul mutation with reason)
+CREATE TABLE IF NOT EXISTS soul_state_history (
+    id SERIAL PRIMARY KEY,
+    chat_id BIGINT NOT NULL,
+    version INT NOT NULL,
+    identity_summary TEXT NOT NULL,
+    relational_commitments TEXT[] NOT NULL DEFAULT '{}',
+    tone_signature TEXT[] NOT NULL DEFAULT '{}',
+    growth_notes TEXT[] NOT NULL DEFAULT '{}',
+    change_reason TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_soul_state_history_chat_version
+    ON soul_state_history(chat_id, version DESC);

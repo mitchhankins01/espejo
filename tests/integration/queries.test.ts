@@ -42,6 +42,13 @@ import {
   getLastCompactionTime,
   getSoulState,
   upsertSoulState,
+  insertSoulQualitySignal,
+  getSoulQualityStats,
+  getLastAssistantMessageId,
+  insertPulseCheck,
+  getLastPulseCheckTime,
+  getLastPulseCheck,
+  insertSoulStateHistory,
 } from "../../src/db/queries.js";
 import { fixturePatterns } from "../../specs/fixtures/seed.js";
 
@@ -1185,5 +1192,164 @@ describe("upsertSoulState", () => {
     expect(updated.version).toBe(7);
     const fetched = await getSoulState(pool, "888");
     expect(fetched?.version).toBe(7);
+  });
+});
+
+// ============================================================================
+// soul_quality_signals
+// ============================================================================
+
+describe("insertSoulQualitySignal", () => {
+  it("inserts a quality signal and returns it", async () => {
+    const signal = await insertSoulQualitySignal(pool, {
+      chatId: "100",
+      assistantMessageId: null,
+      signalType: "felt_personal",
+      soulVersion: 3,
+      patternCount: 2,
+      metadata: { source: "inline_button" },
+    });
+
+    expect(signal.id).toBeGreaterThan(0);
+    expect(signal.chat_id).toBe("100");
+    expect(signal.signal_type).toBe("felt_personal");
+    expect(signal.soul_version).toBe(3);
+    expect(signal.pattern_count).toBe(2);
+    expect(signal.metadata).toEqual({ source: "inline_button" });
+    expect(signal.created_at).toBeInstanceOf(Date);
+  });
+
+  it("accepts all valid signal types", async () => {
+    for (const signalType of ["felt_personal", "felt_generic", "correction", "positive_reaction"]) {
+      const signal = await insertSoulQualitySignal(pool, {
+        chatId: "100",
+        assistantMessageId: null,
+        signalType,
+        soulVersion: 1,
+        patternCount: 0,
+        metadata: {},
+      });
+      expect(signal.signal_type).toBe(signalType);
+    }
+  });
+});
+
+describe("getSoulQualityStats", () => {
+  it("returns zero counts when no signals exist", async () => {
+    const stats = await getSoulQualityStats(pool, "999");
+    expect(stats.felt_personal).toBe(0);
+    expect(stats.felt_generic).toBe(0);
+    expect(stats.correction).toBe(0);
+    expect(stats.positive_reaction).toBe(0);
+    expect(stats.total).toBe(0);
+    expect(stats.personal_ratio).toBe(0);
+  });
+
+  it("aggregates signals correctly and computes personal_ratio", async () => {
+    const chatId = "200";
+    // 3 positive, 1 negative
+    await insertSoulQualitySignal(pool, { chatId, assistantMessageId: null, signalType: "felt_personal", soulVersion: 1, patternCount: 0, metadata: {} });
+    await insertSoulQualitySignal(pool, { chatId, assistantMessageId: null, signalType: "felt_personal", soulVersion: 1, patternCount: 0, metadata: {} });
+    await insertSoulQualitySignal(pool, { chatId, assistantMessageId: null, signalType: "positive_reaction", soulVersion: 1, patternCount: 0, metadata: {} });
+    await insertSoulQualitySignal(pool, { chatId, assistantMessageId: null, signalType: "felt_generic", soulVersion: 1, patternCount: 0, metadata: {} });
+    await insertSoulQualitySignal(pool, { chatId, assistantMessageId: null, signalType: "correction", soulVersion: 1, patternCount: 0, metadata: {} });
+
+    const stats = await getSoulQualityStats(pool, chatId);
+    expect(stats.felt_personal).toBe(2);
+    expect(stats.felt_generic).toBe(1);
+    expect(stats.positive_reaction).toBe(1);
+    expect(stats.correction).toBe(1);
+    expect(stats.total).toBe(5);
+    // personal_ratio = (2 + 1) / (2 + 1 + 1) = 0.75
+    expect(stats.personal_ratio).toBe(0.75);
+  });
+});
+
+describe("getLastAssistantMessageId", () => {
+  it("returns null when no assistant messages exist", async () => {
+    const result = await getLastAssistantMessageId(pool, "999999");
+    expect(result).toBeNull();
+  });
+
+  it("returns the most recent assistant message id", async () => {
+    await insertChatMessage(pool, { chatId: "300", externalMessageId: "1", role: "user", content: "hi" });
+    const msg = await insertChatMessage(pool, { chatId: "300", externalMessageId: null, role: "assistant", content: "hello" });
+
+    const result = await getLastAssistantMessageId(pool, "300");
+    expect(result).toBe(msg.id);
+  });
+});
+
+describe("pulse checks", () => {
+  it("returns null when no pulse checks exist", async () => {
+    const pulse = await getLastPulseCheck(pool, "404");
+    const pulseTime = await getLastPulseCheckTime(pool, "404");
+
+    expect(pulse).toBeNull();
+    expect(pulseTime).toBeNull();
+  });
+
+  it("inserts and reads back the latest pulse check", async () => {
+    const inserted = await insertPulseCheck(pool, {
+      chatId: "310",
+      status: "drifting",
+      personalRatio: 0.32,
+      correctionRate: 0.11,
+      signalCounts: {
+        felt_personal: 2,
+        felt_generic: 5,
+        correction: 1,
+        positive_reaction: 1,
+        total: 9,
+      },
+      repairsApplied: [{ type: "add_growth_note", value: "focus on specifics" }],
+      soulVersionBefore: 3,
+      soulVersionAfter: 4,
+    });
+
+    expect(inserted.chat_id).toBe("310");
+    expect(inserted.status).toBe("drifting");
+    expect(inserted.signal_counts.total).toBe(9);
+    expect(inserted.repairs_applied).toEqual([
+      { type: "add_growth_note", value: "focus on specifics" },
+    ]);
+
+    const latest = await getLastPulseCheck(pool, "310");
+    const latestTime = await getLastPulseCheckTime(pool, "310");
+
+    expect(latest).not.toBeNull();
+    expect(latest?.id).toBe(inserted.id);
+    expect(latest?.soul_version_before).toBe(3);
+    expect(latest?.soul_version_after).toBe(4);
+    expect(latestTime).toBeInstanceOf(Date);
+  });
+});
+
+describe("insertSoulStateHistory", () => {
+  it("records an auditable soul-state snapshot", async () => {
+    const snapshot = await insertSoulStateHistory(pool, {
+      chatId: "320",
+      version: 8,
+      identitySummary: "A companion who is specific, warm, and direct.",
+      relationalCommitments: ["be specific", "name tradeoffs"],
+      toneSignature: ["warm", "clear"],
+      growthNotes: ["pulse: reinforced specificity"],
+      changeReason: "pulse: drifting — restore specificity",
+    });
+
+    expect(snapshot.id).toBeGreaterThan(0);
+    expect(snapshot.chat_id).toBe("320");
+    expect(snapshot.version).toBe(8);
+    expect(snapshot.identity_summary).toContain("specific");
+    expect(snapshot.relational_commitments).toEqual([
+      "be specific",
+      "name tradeoffs",
+    ]);
+    expect(snapshot.tone_signature).toEqual(["warm", "clear"]);
+    expect(snapshot.growth_notes).toEqual([
+      "pulse: reinforced specificity",
+    ]);
+    expect(snapshot.change_reason).toContain("pulse: drifting");
+    expect(snapshot.created_at).toBeInstanceOf(Date);
   });
 });

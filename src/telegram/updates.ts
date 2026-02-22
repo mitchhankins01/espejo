@@ -32,10 +32,18 @@ export interface TelegramCallbackQuery {
   data?: string;
 }
 
+export interface TelegramReactionUpdate {
+  chat: { id: number };
+  message_id: number;
+  date: number;
+  new_reaction?: { type: string; emoji?: string }[];
+}
+
 export interface TelegramUpdate {
   update_id: number;
   message?: TelegramMessage;
   callback_query?: TelegramCallbackQuery;
+  message_reaction?: TelegramReactionUpdate;
 }
 
 export interface AssembledMessage {
@@ -52,6 +60,7 @@ export interface AssembledMessage {
   };
   voice?: { fileId: string; durationSeconds: number };
   callbackData?: string;
+  reactionEmoji?: string;
 }
 
 type MessageHandler = (msg: AssembledMessage) => Promise<void>;
@@ -99,6 +108,11 @@ export function isDuplicate(update: TelegramUpdate): boolean {
   // Tier 2: callback query ID
   if (update.callback_query) {
     keys.push(`callback:${update.callback_query.id}`);
+  }
+
+  // Tier 2b: reaction dedup key
+  if (update.message_reaction) {
+    keys.push(`reaction:${update.message_reaction.chat.id}:${update.message_reaction.message_id}`);
   }
 
   // Tier 3: (chat_id, message_id)
@@ -361,6 +375,24 @@ export function processUpdate(update: TelegramUpdate): void {
           messageId: cq.message!.message_id,
           date: cq.message!.date,
           callbackData: cq.data!,
+        })
+      );
+    }
+    return;
+  }
+
+  // Message reaction — extract first emoji and pass through
+  if (update.message_reaction) {
+    const mr = update.message_reaction;
+    const firstEmoji = mr.new_reaction?.[0]?.emoji;
+    if (firstEmoji) {
+      enqueue(String(mr.chat.id), () =>
+        handler({
+          chatId: mr.chat.id,
+          text: "",
+          messageId: mr.message_id,
+          date: mr.date,
+          reactionEmoji: firstEmoji,
         })
       );
     }
