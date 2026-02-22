@@ -353,6 +353,21 @@ The `lint` job runs cleanly on Apple Silicon. The `test` job may fail locally du
 
 Deployed to Railway. Mirrors the deployment pattern from [oura-ring-mcp](https://github.com/mitchhankins01/oura-ring-mcp).
 
+### Main Branch Release Protocol
+
+Any time you commit and push directly to `main`, follow this order:
+
+1. Run local validation:
+   ```bash
+   pnpm check
+   ```
+2. Run production migration **before** pushing:
+   ```bash
+   NODE_ENV=production DATABASE_URL=<railway_url> pnpm migrate
+   ```
+3. Push `main`.
+4. Watch Railway deployment to completion immediately after push (Railway dashboard/logs) and confirm it succeeds.
+
 **Required Railway env vars:**
 - `DATABASE_URL` — auto-set by Railway PostgreSQL addon (must have pgvector extension)
 - `OPENAI_API_KEY` — for query-time embedding in `search_entries`

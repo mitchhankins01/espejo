@@ -1460,6 +1460,358 @@ describe("runAgent", () => {
     expect(result.activity).toContain("used 1 memories");
   });
 
+  it("rewrites English-only drafts when language preference anchors require mixed language", async () => {
+    mockGetLanguagePreferencePatterns.mockResolvedValueOnce([
+      {
+        id: 301,
+        content:
+          "Mitch wants Spanish woven into his interactions, with English and Dutch as the primary communication base.",
+        kind: "preference",
+        confidence: 0.98,
+        strength: 1,
+        times_seen: 1,
+        status: "active",
+        temporal: null,
+        canonical_hash: "lang-rewrite-001",
+        first_seen: new Date(),
+        last_seen: new Date(),
+        created_at: new Date(),
+      },
+    ]);
+    mockAnthropicCreate
+      .mockResolvedValueOnce({
+        content: [
+          {
+            type: "text",
+            text: "Quantum mechanics models particles as probability amplitudes until measurement collapses outcomes to one observed state. Entanglement links distant particles so measuring one constrains the other. Think of it like distributed state with non-classical correlation.",
+          },
+        ],
+        usage: { input_tokens: 120, output_tokens: 40 },
+      })
+      .mockResolvedValueOnce({
+        content: [
+          {
+            type: "text",
+            text: "Quantum mechanics treats particles as probability amplitudes until measurement collapses outcomes to one observed state, en dat voelt als lazy evaluation with state commit. Entanglement links distant particles so measuring one constrains the other, como si two services shared hidden correlated state. Think of it like distributed state with non-classical correlation.",
+          },
+        ],
+        usage: { input_tokens: 80, output_tokens: 35 },
+      });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "explain quantum mechanics to a software engineer in 3 sentences",
+      externalMessageId: "update:lang-rewrite-1",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toContain("como si");
+    expect(result.response).toContain("en dat");
+    expect(mockAnthropicCreate).toHaveBeenCalledTimes(2);
+    expect(mockAnthropicCreate.mock.calls[1][0].system).toContain(
+      "Rewrite the assistant draft while preserving meaning and constraints."
+    );
+  });
+
+  it("skips language rewrite when user explicitly asks for English only", async () => {
+    mockGetLanguagePreferencePatterns.mockResolvedValueOnce([
+      {
+        id: 302,
+        content:
+          "Mitch wants Spanish woven into his interactions, with English and Dutch as the primary communication base.",
+        kind: "preference",
+        confidence: 0.98,
+        strength: 1,
+        times_seen: 1,
+        status: "active",
+        temporal: null,
+        canonical_hash: "lang-rewrite-002",
+        first_seen: new Date(),
+        last_seen: new Date(),
+        created_at: new Date(),
+      },
+    ]);
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "English only response." }],
+      usage: { input_tokens: 80, output_tokens: 10 },
+    });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "Explain quantum mechanics in English only in 3 sentences",
+      externalMessageId: "update:lang-rewrite-2",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("English only response.");
+    expect(mockAnthropicCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("rewrites via OpenAI provider when mixed language is required", async () => {
+    mockConfig.telegram.llmProvider = "openai";
+    mockGetLanguagePreferencePatterns.mockResolvedValueOnce([
+      {
+        id: 303,
+        content:
+          "Mitch wants Spanish woven into his interactions, with English and Dutch as the primary communication base.",
+        kind: "preference",
+        confidence: 0.98,
+        strength: 1,
+        times_seen: 1,
+        status: "active",
+        temporal: null,
+        canonical_hash: "lang-rewrite-003",
+        first_seen: new Date(),
+        last_seen: new Date(),
+        created_at: new Date(),
+      },
+    ]);
+    mockOpenAIChatCreate
+      .mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content:
+                "Quantum mechanics is a probabilistic model where measurement collapses possibilities into one observed value.",
+            },
+          },
+        ],
+        usage: { prompt_tokens: 70, completion_tokens: 18 },
+      })
+      .mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content:
+                "Quantum mechanics is a probabilistic model where measurement collapses possibilities into one observed value, en dat lijkt op lazy evaluation. Entanglement creates linked outcomes across distance, como una correlacion no clásica.",
+            },
+          },
+        ],
+        usage: { prompt_tokens: 50, completion_tokens: 20 },
+      });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "Explain quantum mechanics briefly",
+      externalMessageId: "update:lang-rewrite-openai",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toContain("en dat");
+    expect(result.response).toContain("como una");
+    expect(mockOpenAIChatCreate).toHaveBeenCalledTimes(2);
+    expect(mockAnthropicCreate).not.toHaveBeenCalled();
+  });
+
+  it("falls back to original draft when language rewrite call fails", async () => {
+    mockGetLanguagePreferencePatterns.mockResolvedValueOnce([
+      {
+        id: 304,
+        content:
+          "Mitch wants Spanish woven into his interactions, with English and Dutch as the primary communication base.",
+        kind: "preference",
+        confidence: 0.98,
+        strength: 1,
+        times_seen: 1,
+        status: "active",
+        temporal: null,
+        canonical_hash: "lang-rewrite-004",
+        first_seen: new Date(),
+        last_seen: new Date(),
+        created_at: new Date(),
+      },
+    ]);
+    mockAnthropicCreate
+      .mockResolvedValueOnce({
+        content: [{ type: "text", text: "English-only draft." }],
+        usage: { input_tokens: 80, output_tokens: 12 },
+      })
+      .mockRejectedValueOnce(new Error("rewrite offline"));
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "Explain quantum mechanics in 3 sentences",
+      externalMessageId: "update:lang-rewrite-fail",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("English-only draft.");
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Telegram language preference rewrite error:",
+      expect.any(Error)
+    );
+  });
+
+  it("rewrites when draft has Spanish signals but missing Dutch scaffolding", async () => {
+    mockGetLanguagePreferencePatterns.mockResolvedValueOnce([
+      {
+        id: 305,
+        content:
+          "Mitch wants Spanish woven into his interactions, with English and Dutch as the primary communication base.",
+        kind: "preference",
+        confidence: 0.98,
+        strength: 1,
+        times_seen: 1,
+        status: "active",
+        temporal: null,
+        canonical_hash: "lang-rewrite-005",
+        first_seen: new Date(),
+        last_seen: new Date(),
+        created_at: new Date(),
+      },
+    ]);
+    mockAnthropicCreate
+      .mockResolvedValueOnce({
+        content: [
+          {
+            type: "text",
+            text: "Hola, quantum mechanics models uncertainty through probabilities and superposition.",
+          },
+        ],
+        usage: { input_tokens: 90, output_tokens: 16 },
+      })
+      .mockResolvedValueOnce({
+        content: [
+          {
+            type: "text",
+            text: "Quantum mechanics models uncertainty through probabilities and superposition, en dat is vergelijkbaar met deferred state resolution. Claro, measurement collapses outcomes into one observed state.",
+          },
+        ],
+        usage: { input_tokens: 70, output_tokens: 22 },
+      });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "Explain quantum mechanics simply",
+      externalMessageId: "update:lang-rewrite-spanish-only-draft",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toContain("en dat");
+    expect(mockAnthropicCreate).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to original draft when OpenAI rewrite returns empty content/usage", async () => {
+    mockConfig.telegram.llmProvider = "openai";
+    mockGetLanguagePreferencePatterns.mockResolvedValueOnce([
+      {
+        id: 306,
+        content:
+          "Mitch wants Spanish woven into his interactions, with English and Dutch as the primary communication base.",
+        kind: "preference",
+        confidence: 0.98,
+        strength: 1,
+        times_seen: 1,
+        status: "active",
+        temporal: null,
+        canonical_hash: "lang-rewrite-006",
+        first_seen: new Date(),
+        last_seen: new Date(),
+        created_at: new Date(),
+      },
+    ]);
+    mockOpenAIChatCreate
+      .mockResolvedValueOnce({
+        choices: [{ message: { role: "assistant", content: "English-only OpenAI draft." } }],
+        usage: { prompt_tokens: 70, completion_tokens: 14 },
+      })
+      .mockResolvedValueOnce({
+        choices: [{ message: { role: "assistant", content: null } }],
+      });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "Explain quantum mechanics in 3 sentences",
+      externalMessageId: "update:lang-rewrite-openai-empty",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("English-only OpenAI draft.");
+    expect(mockOpenAIChatCreate).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to original draft when Anthropic rewrite returns no text block", async () => {
+    mockGetLanguagePreferencePatterns.mockResolvedValueOnce([
+      {
+        id: 307,
+        content:
+          "Mitch wants Spanish woven into his interactions, with English and Dutch as the primary communication base.",
+        kind: "preference",
+        confidence: 0.98,
+        strength: 1,
+        times_seen: 1,
+        status: "active",
+        temporal: null,
+        canonical_hash: "lang-rewrite-007",
+        first_seen: new Date(),
+        last_seen: new Date(),
+        created_at: new Date(),
+      },
+    ]);
+    mockAnthropicCreate
+      .mockResolvedValueOnce({
+        content: [{ type: "text", text: "English-only Anthropic draft." }],
+        usage: { input_tokens: 80, output_tokens: 12 },
+      })
+      .mockResolvedValueOnce({
+        content: [],
+        usage: { input_tokens: 30, output_tokens: 0 },
+      });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "Explain quantum mechanics in 3 sentences",
+      externalMessageId: "update:lang-rewrite-anthropic-empty",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("English-only Anthropic draft.");
+    expect(mockAnthropicCreate).toHaveBeenCalledTimes(2);
+  });
+
+  it("treats non-positive requested sentence counts as invalid during rewrite", async () => {
+    mockGetLanguagePreferencePatterns.mockResolvedValueOnce([
+      {
+        id: 308,
+        content:
+          "Mitch wants Spanish woven into his interactions, with English and Dutch as the primary communication base.",
+        kind: "preference",
+        confidence: 0.98,
+        strength: 1,
+        times_seen: 1,
+        status: "active",
+        temporal: null,
+        canonical_hash: "lang-rewrite-008",
+        first_seen: new Date(),
+        last_seen: new Date(),
+        created_at: new Date(),
+      },
+    ]);
+    mockAnthropicCreate
+      .mockResolvedValueOnce({
+        content: [{ type: "text", text: "English-only draft for invalid count." }],
+        usage: { input_tokens: 90, output_tokens: 12 },
+      })
+      .mockResolvedValueOnce({
+        content: [{ type: "text", text: "English en Nederlands, con un poco de español." }],
+        usage: { input_tokens: 50, output_tokens: 14 },
+      });
+
+    await runAgent({
+      chatId: "100",
+      message: "Explain quantum mechanics in 0 sentences",
+      externalMessageId: "update:lang-rewrite-invalid-sentence-count",
+      messageDate: 1000,
+    });
+
+    expect(mockAnthropicCreate).toHaveBeenCalledTimes(2);
+    expect(mockAnthropicCreate.mock.calls[1][0].system).toContain(
+      "Keep roughly the same sentence count as the draft."
+    );
+  });
+
   it("stores raw user command but sends transformed prompt message when provided", async () => {
     mockGetRecentMessages.mockResolvedValueOnce([
       {

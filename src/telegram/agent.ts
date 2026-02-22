@@ -340,6 +340,55 @@ function scoreFloorForQuery(queryText: string): number {
     : RETRIEVAL_SCORE_FLOOR_DEFAULT;
 }
 
+function hasSpanishSignals(text: string): boolean {
+  return /[áéíóúñ¿¡]|\b(hola|gracias|vamos|pero|porque|hoy|mañana|manana|yo|tu|eres|estoy|para|con)\b/i.test(
+    text
+  );
+}
+
+function hasDutchSignals(text: string): boolean {
+  return /\b(ik|jij|je|wij|jullie|niet|wel|maar|want|goed|de|het|een|met|voor|zoals)\b/i.test(
+    text
+  );
+}
+
+function hasSingleLanguageOverride(message: string): boolean {
+  return /\b(only|just)\s+english\b|\bin\s+english\s+only\b|\bsolo\s+ingles\b|\balleen\s+engels\b/i.test(
+    message
+  );
+}
+
+function extractRequestedSentenceCount(message: string): number | null {
+  const match = message.match(/\b(\d{1,2})\s+sentences?\b/i);
+  if (!match) return null;
+  const value = Number.parseInt(match[1], 10);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function shouldRewriteForLanguagePreference(
+  mode: AgentMode,
+  message: string,
+  responseText: string,
+  patterns: PatternSearchRow[]
+): boolean {
+  if (mode !== "default") return false;
+  if (hasSingleLanguageOverride(message)) return false;
+
+  const patternsText = patterns
+    .map((p) => normalizeContent(p.content))
+    .join(" ");
+  const hasEnglish = patternsText.includes("english");
+  const hasDutch = patternsText.includes("dutch") || patternsText.includes("nederlands");
+  const hasSpanish =
+    patternsText.includes("spanish") ||
+    patternsText.includes("espanol") ||
+    patternsText.includes("español");
+
+  if (!(hasEnglish && hasDutch && hasSpanish)) return false;
+
+  return !(hasSpanishSignals(responseText) && hasDutchSignals(responseText));
+}
+
 async function logEmbeddingUsage(
   inputTokens: number,
   latencyMs: number
@@ -420,6 +469,83 @@ function mergePromptPatterns(
   }
 
   return budgetCapPatterns(deduped, PATTERN_TOKEN_BUDGET);
+}
+
+async function rewriteWithLanguagePreference(
+  message: string,
+  responseText: string
+): Promise<string> {
+  const provider = getLlmProvider();
+  const model = getLlmModel(provider);
+  const requestedSentenceCount = extractRequestedSentenceCount(message);
+  const sentenceRule = requestedSentenceCount
+    ? `Use exactly ${requestedSentenceCount} sentences.`
+    : "Keep roughly the same sentence count as the draft.";
+  const systemPrompt = `Rewrite the assistant draft while preserving meaning and constraints.
+- Keep the response concise and natural.
+- Use English + Dutch as the communication scaffolding.
+- Weave in at least a little Spanish naturally.
+- Do not add new factual claims.
+- Keep Telegram HTML-compatible text only (no markdown fences).
+- ${sentenceRule}
+Return only the rewritten response text.`;
+  const userPrompt = `User message:
+${message}
+
+Draft response:
+${responseText}`;
+
+  try {
+    const apiStartMs = Date.now();
+    let rewritten: string | null = null;
+    let inputTokens = 0;
+    let outputTokens = 0;
+
+    if (provider === "openai") {
+      const openai = getOpenAI();
+      const response = await openai.chat.completions.create({
+        model,
+        max_tokens: 512,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+      });
+      rewritten = response.choices[0]?.message?.content ?? null;
+      inputTokens = response.usage?.prompt_tokens ?? 0;
+      outputTokens = response.usage?.completion_tokens ?? 0;
+    } else {
+      const anthropic = getAnthropic();
+      const response = await anthropic.messages.create({
+        model,
+        max_tokens: 512,
+        system: systemPrompt,
+        messages: [{ role: "user", content: userPrompt }],
+      });
+      const textBlock = response.content.find(
+        (b): b is Anthropic.TextBlock => b.type === "text"
+      );
+      rewritten = textBlock?.text ?? null;
+      inputTokens = response.usage.input_tokens;
+      outputTokens = response.usage.output_tokens;
+    }
+
+    await logApiUsage(pool, {
+      provider,
+      model,
+      purpose: "agent",
+      inputTokens,
+      outputTokens,
+      costUsd: computeCost(model, inputTokens, outputTokens),
+      latencyMs: Date.now() - apiStartMs,
+    });
+
+    const cleaned = rewritten?.trim();
+    return cleaned && cleaned.length > 0 ? cleaned : responseText;
+  } catch (err) {
+    console.error("Telegram language preference rewrite error:", err);
+    return responseText;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1617,6 +1743,10 @@ export async function runAgent(params: {
 
   // 4. Run tool loop
   const { text, toolCallCount, toolNames } = await runToolLoop(systemPrompt, messages, chatId, prefill);
+  const finalText =
+    text && shouldRewriteForLanguagePreference(mode, message, text, patterns)
+      ? await rewriteWithLanguagePreference(message, text)
+      : text;
 
   // 5. Build activity summary
   const soulVersion = persistedSoulState?.version ?? 0;
@@ -1645,14 +1775,14 @@ export async function runAgent(params: {
 
   const activity = activityParts.join(" | ");
 
-  if (!text) return { response: null, activity, soulVersion, patternCount: patterns.length };
+  if (!finalText) return { response: null, activity, soulVersion, patternCount: patterns.length };
 
   // 6. Store assistant response
   await insertChatMessage(pool, {
     chatId,
     externalMessageId: null,
     role: "assistant",
-    content: text,
+    content: finalText,
   });
 
   // 7. Persist evolving soul state + log correction signal
@@ -1692,5 +1822,5 @@ export async function runAgent(params: {
     console.error(`Telegram compaction error [chat:${chatId}]:`, err);
   });
 
-  return { response: text, activity, soulVersion, patternCount: patterns.length };
+  return { response: finalText, activity, soulVersion, patternCount: patterns.length };
 }
