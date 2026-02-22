@@ -18,6 +18,9 @@ const {
   mockMarkMessagesCompacted,
   mockLogApiUsage,
   mockLogMemoryRetrieval,
+  mockGetLastCostNotificationTime,
+  mockGetTotalApiCostSince,
+  mockInsertCostNotification,
   mockFindSimilarPatterns,
   mockGetLastCompactionTime,
   mockCountStaleEventPatterns,
@@ -40,6 +43,16 @@ const {
   mockMarkMessagesCompacted: vi.fn().mockResolvedValue(undefined),
   mockLogApiUsage: vi.fn().mockResolvedValue(undefined),
   mockLogMemoryRetrieval: vi.fn().mockResolvedValue(undefined),
+  mockGetLastCostNotificationTime: vi.fn().mockResolvedValue(null),
+  mockGetTotalApiCostSince: vi.fn().mockResolvedValue(0),
+  mockInsertCostNotification: vi.fn().mockResolvedValue({
+    id: 1,
+    chat_id: "100",
+    window_start: new Date(),
+    window_end: new Date(),
+    cost_usd: 0.05,
+    created_at: new Date(),
+  }),
   mockFindSimilarPatterns: vi.fn().mockResolvedValue([]),
   mockGetLastCompactionTime: vi.fn().mockResolvedValue(null),
   mockCountStaleEventPatterns: vi.fn().mockResolvedValue(0),
@@ -111,6 +124,9 @@ vi.mock("../../src/db/queries.js", () => ({
   markMessagesCompacted: mockMarkMessagesCompacted,
   logApiUsage: mockLogApiUsage,
   logMemoryRetrieval: mockLogMemoryRetrieval,
+  getLastCostNotificationTime: mockGetLastCostNotificationTime,
+  getTotalApiCostSince: mockGetTotalApiCostSince,
+  insertCostNotification: mockInsertCostNotification,
   findSimilarPatterns: mockFindSimilarPatterns,
   getLastCompactionTime: mockGetLastCompactionTime,
   countStaleEventPatterns: mockCountStaleEventPatterns,
@@ -173,6 +189,16 @@ beforeEach(() => {
   mockMarkMessagesCompacted.mockReset().mockResolvedValue(undefined);
   mockLogApiUsage.mockReset().mockResolvedValue(undefined);
   mockLogMemoryRetrieval.mockReset().mockResolvedValue(undefined);
+  mockGetLastCostNotificationTime.mockReset().mockResolvedValue(null);
+  mockGetTotalApiCostSince.mockReset().mockResolvedValue(0);
+  mockInsertCostNotification.mockReset().mockResolvedValue({
+    id: 1,
+    chat_id: "100",
+    window_start: new Date(),
+    window_end: new Date(),
+    cost_usd: 0.05,
+    created_at: new Date(),
+  });
   mockFindSimilarPatterns.mockReset().mockResolvedValue([]);
   mockCountStaleEventPatterns.mockReset().mockResolvedValue(0);
   mockGenerateEmbedding.mockReset().mockResolvedValue(new Array(1536).fill(0));
@@ -284,6 +310,34 @@ describe("runAgent", () => {
         purpose: "agent",
         inputTokens: 90,
         outputTokens: 25,
+      })
+    );
+  });
+
+  it("adds a 12-hour throttled cost note when accrued cost is available", async () => {
+    mockGetLastCostNotificationTime.mockResolvedValueOnce(
+      new Date(Date.now() - 13 * 60 * 60 * 1000)
+    );
+    mockGetTotalApiCostSince.mockResolvedValueOnce(0.127);
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Quick reply." }],
+      usage: { input_tokens: 100, output_tokens: 20 },
+    });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "status?",
+      externalMessageId: "update:cost-1",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("Quick reply.");
+    expect(result.activity).toContain("cost ~$0.13 since last note");
+    expect(mockInsertCostNotification).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        chatId: "100",
+        costUsd: 0.127,
       })
     );
   });

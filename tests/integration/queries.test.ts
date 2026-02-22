@@ -34,6 +34,9 @@ import {
   linkPatternToEntry,
   logApiUsage,
   logMemoryRetrieval,
+  getTotalApiCostSince,
+  getLastCostNotificationTime,
+  insertCostNotification,
   getUsageSummary,
   getLastCompactionTime,
 } from "../../src/db/queries.js";
@@ -958,6 +961,48 @@ describe("getUsageSummary", () => {
     expect(agentSummary!.total_calls).toBe(2);
     expect(agentSummary!.total_input_tokens).toBe(3000);
     expect(agentSummary!.total_output_tokens).toBe(1300);
+  });
+});
+
+describe("cost notifications", () => {
+  it("sums api usage cost within a time window", async () => {
+    const now = new Date();
+    await logApiUsage(pool, {
+      provider: "anthropic",
+      model: "claude-sonnet-4-5-20250514",
+      purpose: "agent",
+      inputTokens: 1000,
+      outputTokens: 500,
+      costUsd: 0.02,
+    });
+    await logApiUsage(pool, {
+      provider: "openai",
+      model: "gpt-5-mini",
+      purpose: "agent",
+      inputTokens: 500,
+      outputTokens: 250,
+      costUsd: 0.03,
+    });
+
+    const total = await getTotalApiCostSince(
+      pool,
+      new Date(now.getTime() - 60 * 60 * 1000),
+      new Date(now.getTime() + 60 * 1000)
+    );
+    expect(total).toBeGreaterThanOrEqual(0.05);
+  });
+
+  it("records and returns latest cost notification time by chat", async () => {
+    const inserted = await insertCostNotification(pool, {
+      chatId: "12345",
+      windowStart: new Date(Date.now() - 12 * 60 * 60 * 1000),
+      windowEnd: new Date(),
+      costUsd: 0.11,
+    });
+    expect(inserted.cost_usd).toBe(0.11);
+
+    const latest = await getLastCostNotificationTime(pool, "12345");
+    expect(latest).toBeInstanceOf(Date);
   });
 });
 

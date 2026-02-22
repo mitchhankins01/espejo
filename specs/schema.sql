@@ -224,3 +224,16 @@ CREATE TABLE IF NOT EXISTS memory_retrieval_logs (
 
 CREATE INDEX IF NOT EXISTS idx_memory_retrieval_logs_chat_created ON memory_retrieval_logs(chat_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memory_retrieval_logs_query_hash ON memory_retrieval_logs(query_hash);
+
+-- Cost notification ledger for 12-hour Telegram spend summaries
+CREATE TABLE IF NOT EXISTS cost_notifications (
+    id SERIAL PRIMARY KEY,
+    chat_id BIGINT NOT NULL,
+    window_start TIMESTAMPTZ NOT NULL,
+    window_end TIMESTAMPTZ NOT NULL,
+    cost_usd DOUBLE PRECISION NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_cost_notifications_chat_created
+    ON cost_notifications(chat_id, created_at DESC);
