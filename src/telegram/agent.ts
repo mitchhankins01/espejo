@@ -38,6 +38,7 @@ import {
   evolveSoulState,
   type SoulStateSnapshot,
 } from "./soul.js";
+import { getModePrompt, type AgentMode } from "./evening-review.js";
 import {
   allToolNames,
   toAnthropicToolDefinition,
@@ -97,7 +98,8 @@ const COST_NOTIFICATION_INTERVAL_HOURS = 12;
 function buildSystemPrompt(
   patterns: PatternSearchRow[],
   memoryDegraded: boolean,
-  soulState: SoulStateSnapshot | null
+  soulState: SoulStateSnapshot | null,
+  mode: AgentMode
 ): string {
   const today = new Intl.DateTimeFormat("en-US", {
     timeZone: config.timezone,
@@ -121,6 +123,11 @@ Your memory works automatically: patterns are extracted from conversations and s
  - log_weight: log daily weight measurements`;
 
   prompt += `\n\n${buildSoulPromptSection(soulState)}`;
+
+  const modePrompt = getModePrompt(mode);
+  if (modePrompt) {
+    prompt += `\n\n${modePrompt}`;
+  }
 
   if (patterns.length > 0) {
     prompt += `\n\nRelevant patterns from past conversations:\n`;
@@ -1208,9 +1215,16 @@ export async function runAgent(params: {
   message: string;
   externalMessageId: string;
   messageDate: number;
+  mode?: AgentMode;
   onCompacted?: (summary: string) => Promise<void>;
 }): Promise<AgentResult> {
-  const { chatId, message, externalMessageId, onCompacted } = params;
+  const {
+    chatId,
+    message,
+    externalMessageId,
+    mode = "default",
+    onCompacted,
+  } = params;
 
   // 1. Store user message
   await insertChatMessage(pool, {
@@ -1239,7 +1253,8 @@ export async function runAgent(params: {
   const systemPrompt = buildSystemPrompt(
     patterns,
     degraded,
-    toSoulSnapshot(persistedSoulState)
+    toSoulSnapshot(persistedSoulState),
+    mode
   );
   const recentMessages = await getRecentMessages(pool, chatId, RECENT_MESSAGES_LIMIT);
   const messages = reconstructMessages(recentMessages);

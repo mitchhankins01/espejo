@@ -14,12 +14,42 @@ import {
 import { extractTextFromDocument, extractTextFromImage } from "./media.js";
 import { setMessageHandler, processUpdate } from "./updates.js";
 import type { AssembledMessage, TelegramUpdate } from "./updates.js";
+import {
+  buildEveningKickoffMessage,
+  type AgentMode,
+} from "./evening-review.js";
 
 // ---------------------------------------------------------------------------
 // Message handler — wires updates → agent → client
 // ---------------------------------------------------------------------------
 
 const MAX_TEXT_MESSAGE_VOICE_CHARS = 260;
+const chatModes = new Map<string, AgentMode>();
+const EVENING_DISABLE_TOKENS = new Set(["off", "stop", "end", "done", "exit"]);
+
+function parseSlashCommand(
+  text: string
+): { name: string; argText: string } | null {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("/")) return null;
+
+  const spaceIdx = trimmed.indexOf(" ");
+  const commandPart = spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx);
+  const argText = spaceIdx === -1 ? "" : trimmed.slice(spaceIdx + 1).trim();
+  const name = commandPart.slice(1).split("@")[0].toLowerCase();
+  if (!name) return null;
+
+  return { name, argText };
+}
+
+function getChatMode(chatId: string): AgentMode {
+  return chatModes.get(chatId) ?? "default";
+}
+
+/** Visible for testing only. */
+export function clearWebhookChatModes(): void {
+  chatModes.clear();
+}
 
 function isVoiceFriendlyResponse(response: string): boolean {
   const plainText = normalizeVoiceText(response);
@@ -107,12 +137,27 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
 
     if (!text) return;
 
+    const command = parseSlashCommand(text);
+
     // Handle /compact command
-    if (text === "/compact") {
+    if (command?.name === "compact") {
       await forceCompact(chatId, async (summary) => {
         await sendTelegramMessage(chatId, `<i>Memory note: ${summary}</i>`);
       });
       return;
+    }
+
+    // Handle /evening command
+    if (command?.name === "evening") {
+      const firstArg = command.argText.split(/\s+/)[0].toLowerCase();
+      if (EVENING_DISABLE_TOKENS.has(firstArg)) {
+        chatModes.delete(chatId);
+        await sendTelegramMessage(chatId, "<i>Evening review mode off.</i>");
+        return;
+      }
+
+      chatModes.set(chatId, "evening_review");
+      text = buildEveningKickoffMessage(command.argText || null);
     }
 
     const { response, activity } = await runAgent({
@@ -120,6 +165,7 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
       message: text,
       externalMessageId: String(msg.messageId),
       messageDate: msg.date,
+      mode: getChatMode(chatId),
       /* v8 ignore next 3 -- async callback tested via agent compaction tests */
       onCompacted: async (summary) => {
         await sendTelegramMessage(chatId, `<i>Memory note: ${summary}</i>`);

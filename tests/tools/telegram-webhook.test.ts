@@ -83,7 +83,10 @@ vi.mock("../../src/telegram/updates.js", () => ({
 
 vi.mock("../../src/config.js", () => mockConfig);
 
-import { registerTelegramRoutes } from "../../src/telegram/webhook.js";
+import {
+  registerTelegramRoutes,
+  clearWebhookChatModes,
+} from "../../src/telegram/webhook.js";
 
 // ---------------------------------------------------------------------------
 // Helpers — minimal Express-like mock
@@ -164,6 +167,7 @@ beforeEach(() => {
   mockConfig.config.telegram.voiceReplyEvery = 3;
   mockConfig.config.telegram.voiceReplyMinChars = 1;
   mockConfig.config.telegram.voiceReplyMaxChars = 450;
+  clearWebhookChatModes();
   errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -798,5 +802,79 @@ describe("error handling", () => {
       "100",
       "<i>Memory note: saved 2 memories (behavior, event) · reinforced 1</i>"
     );
+  });
+
+  it("treats bare slash text as a normal message", async () => {
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/", messageId: 1, date: 1000 });
+
+    expect(mockRunAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "/",
+        mode: "default",
+      })
+    );
+  });
+
+  it("handles /compact command with bot mention", async () => {
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/compact@test_bot", messageId: 1, date: 1000 });
+
+    expect(mockForceCompact).toHaveBeenCalledWith("100", expect.any(Function));
+    expect(mockRunAgent).not.toHaveBeenCalled();
+  });
+
+  it("activates evening review mode with /evening", async () => {
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/evening", messageId: 1, date: 1000 });
+
+    expect(mockRunAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "evening_review",
+      })
+    );
+    const firstCall = mockRunAgent.mock.calls[0][0];
+    expect(firstCall.message).toContain("Start my evening review now.");
+  });
+
+  it("passes optional focus seed through /evening arguments", async () => {
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "/evening work boundaries and escalera",
+      messageId: 1,
+      date: 1000,
+    });
+
+    const firstCall = mockRunAgent.mock.calls[0][0];
+    expect(firstCall.mode).toBe("evening_review");
+    expect(firstCall.message).toContain(
+      "Focus tonight: work boundaries and escalera"
+    );
+  });
+
+  it("keeps evening mode active for subsequent messages", async () => {
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/evening", messageId: 1, date: 1000 });
+    await handler({ chatId: 100, text: "today was intense", messageId: 2, date: 1001 });
+
+    expect(mockRunAgent).toHaveBeenCalledTimes(2);
+    const secondCall = mockRunAgent.mock.calls[1][0];
+    expect(secondCall.mode).toBe("evening_review");
+    expect(secondCall.message).toBe("today was intense");
+  });
+
+  it("deactivates evening mode with /evening off", async () => {
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/evening", messageId: 1, date: 1000 });
+    await handler({ chatId: 100, text: "/evening off", messageId: 2, date: 1001 });
+    await handler({ chatId: 100, text: "back to normal", messageId: 3, date: 1002 });
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      "<i>Evening review mode off.</i>"
+    );
+    const thirdCall = mockRunAgent.mock.calls[1][0];
+    expect(thirdCall.mode).toBe("default");
   });
 });

@@ -1006,6 +1006,27 @@ describe("runAgent", () => {
     expect(call.system).toContain("Soul state version: v2");
   });
 
+  it("injects evening review mode instructions when requested", async () => {
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Starting your evening review." }],
+      usage: { input_tokens: 120, output_tokens: 20 },
+    });
+
+    await runAgent({
+      chatId: "100",
+      message: "Start evening review now",
+      externalMessageId: "update:evening-1",
+      messageDate: 1000,
+      mode: "evening_review",
+    });
+
+    const call = mockAnthropicCreate.mock.calls[0][0];
+    expect(call.system).toContain("Evening Review mode is ON.");
+    expect(call.system).toContain(
+      "Every question should appear in both English and Spanish."
+    );
+  });
+
   it("skips soul-state lookup when TELEGRAM_SOUL_ENABLED is false", async () => {
     mockConfig.telegram.soulEnabled = false;
     mockAnthropicCreate.mockResolvedValueOnce({
