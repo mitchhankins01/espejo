@@ -32,7 +32,7 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
     // Handle /compact command
     if (text === "/compact") {
       await forceCompact(chatId, async (summary) => {
-        await sendTelegramMessage(chatId, `<i>${summary}</i>`);
+        await sendTelegramMessage(chatId, `<i>Memory note: ${summary}</i>`);
       });
       return;
     }
@@ -44,7 +44,7 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
       messageDate: msg.date,
       /* v8 ignore next 3 -- async callback tested via agent compaction tests */
       onCompacted: async (summary) => {
-        await sendTelegramMessage(chatId, `<i>Compacted: ${summary}</i>`);
+        await sendTelegramMessage(chatId, `<i>Memory note: ${summary}</i>`);
       },
     });
 

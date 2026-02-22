@@ -141,6 +141,56 @@ const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_api_usage_purpose ON api_usage(purpose);
     `,
   },
+  {
+    name: "004-memory-hardening",
+    getSql: () => `
+      ALTER TABLE patterns
+        ADD COLUMN IF NOT EXISTS source_type TEXT NOT NULL DEFAULT 'compaction',
+        ADD COLUMN IF NOT EXISTS source_id TEXT,
+        ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+
+      ALTER TABLE pattern_observations
+        ADD COLUMN IF NOT EXISTS source_type TEXT NOT NULL DEFAULT 'chat_compaction',
+        ADD COLUMN IF NOT EXISTS source_id TEXT;
+
+      ALTER TABLE patterns
+        DROP CONSTRAINT IF EXISTS patterns_kind_check;
+      ALTER TABLE patterns
+        ADD CONSTRAINT patterns_kind_check CHECK (
+          kind IN (
+            'behavior', 'emotion', 'belief', 'goal', 'preference',
+            'temporal', 'causal', 'fact', 'event'
+          )
+        );
+
+      ALTER TABLE patterns
+        DROP CONSTRAINT IF EXISTS patterns_status_check;
+      ALTER TABLE patterns
+        ADD CONSTRAINT patterns_status_check CHECK (
+          status IN ('active', 'disputed', 'superseded', 'deprecated')
+        );
+
+      CREATE INDEX IF NOT EXISTS idx_patterns_expires_active
+        ON patterns(expires_at)
+        WHERE status = 'active' AND expires_at IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS memory_retrieval_logs (
+        id SERIAL PRIMARY KEY,
+        chat_id BIGINT NOT NULL,
+        query_text TEXT NOT NULL,
+        query_hash TEXT NOT NULL,
+        degraded BOOLEAN NOT NULL DEFAULT FALSE,
+        pattern_ids INT[] NOT NULL DEFAULT '{}',
+        pattern_kinds TEXT[] NOT NULL DEFAULT '{}',
+        top_score DOUBLE PRECISION,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_retrieval_logs_chat_created
+        ON memory_retrieval_logs(chat_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_retrieval_logs_query_hash
+        ON memory_retrieval_logs(query_hash);
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

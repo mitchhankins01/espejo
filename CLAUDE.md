@@ -86,7 +86,7 @@ specs/
   schema.sql        — Canonical DB schema.
   tools.spec.ts     — Tool contracts: params, types, descriptions, examples.
   telegram-chatbot-plan.md — Original design for Telegram chatbot with pattern memory.
-  episodic-memory.md — Episodic memory extension plan (fact + event pattern kinds).
+  episodic-memory.md — Implemented episodic memory + hardening notes (fact + event).
   ltm-research.md   — Evidence-based research on long-term memory architecture.
   fixtures/
     seed.ts         — Test data with pre-computed embeddings for determinism.
@@ -441,13 +441,15 @@ A Telegram chatbot with pattern-based long-term memory. Deployed to Railway, opt
 - `/compact` — Force pattern extraction from recent conversation (useful for testing, or when you want the bot to learn from a short conversation without waiting)
 
 **Pattern memory:**
-- 7 pattern kinds with typed decay scoring: behavior, emotion, belief, goal, preference, temporal, causal
+- 9 pattern kinds with typed decay scoring: behavior, emotion, belief, goal, preference, temporal, causal, fact, event
 - Compaction triggers: size-based (>48k chars) OR time-based (12+ hours since last, 10+ messages)
 - Dedup: canonical hash (exact match) + ANN embedding similarity (0.82+ threshold)
 - Retrieval: semantic search → MMR reranking → budget cap (2000 tokens) → injected into system prompt
-- DB tables: `chat_messages`, `patterns`, `pattern_observations`, `pattern_relations`, `pattern_aliases`, `pattern_entries`, `api_usage`
+- Stale event handling: notify-only during compaction (`Memory note`) — no automatic pruning/deletion
+- DB tables: `chat_messages`, `patterns`, `pattern_observations`, `pattern_relations`, `pattern_aliases`, `pattern_entries`, `api_usage`, `memory_retrieval_logs`
+- Provenance fields: `patterns.source_type/source_id`, `pattern_observations.source_type/source_id`
 
-**Planned improvement:** Episodic memory — adding `fact` and `event` pattern kinds so the bot remembers specific details, not just behavioral themes. See `specs/episodic-memory.md`.
+Episodic memory (`fact` and `event`) is implemented. See `specs/episodic-memory.md`.
 
 ## What's Out of Scope
 

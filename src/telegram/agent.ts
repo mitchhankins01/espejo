@@ -17,7 +17,9 @@ import {
   findSimilarPatterns,
   linkPatternToEntry,
   logApiUsage,
+  logMemoryRetrieval,
   markMessagesCompacted,
+  countStaleEventPatterns,
   reinforcePattern,
   searchPatterns,
   updatePatternStatus,
@@ -73,7 +75,7 @@ const COMPACTION_TOKEN_BUDGET = 12_000;
 const COMPACTION_INTERVAL_HOURS = 12;
 const MIN_MESSAGES_FOR_TIME_COMPACT = 10;
 const MIN_MESSAGES_FOR_FORCE_COMPACT = 4;
-const MAX_NEW_PATTERNS_PER_COMPACTION = 5;
+const MAX_NEW_PATTERNS_PER_COMPACTION = 7;
 const RECENT_MESSAGES_LIMIT = 50;
 
 // ---------------------------------------------------------------------------
@@ -671,7 +673,7 @@ function extractTextFromOpenAIMessages(messages: OpenAIChatMessage[]): string {
 const compactionExtractionSchema = z.object({
   new_patterns: z.array(z.object({
     content: z.string(),
-    kind: z.enum(["behavior", "emotion", "belief", "goal", "preference", "temporal", "causal"]),
+    kind: z.enum(["behavior", "emotion", "belief", "goal", "preference", "temporal", "causal", "fact", "event"]),
     confidence: z.number().min(0).max(1),
     signal: z.enum(["explicit", "implicit"]),
     evidence_message_ids: z.array(z.number()),
@@ -753,7 +755,7 @@ async function extractPatterns(
     ? existingPatterns.map((p) => `[id:${p.id}] ${p.content}`).join("\n")
     : "None";
 
-  const prompt = `Analyze these conversation messages and extract behavioral patterns.
+  const prompt = `Analyze these conversation messages and extract patterns, facts, and events.
 
 Existing patterns (for reference, to reinforce or contradict):
 ${existingText}
@@ -770,10 +772,15 @@ Extract patterns following these rules:
 - Resolve entity references to canonical names
 - Only cite user or tool_result messages as evidence (never assistant messages)
 - signal: "explicit" for direct user statements, "implicit" for inferred patterns
+- Choose kinds carefully:
+  - fact: durable biographical detail (name, city, role, allergies, relationships)
+  - event: specific one-time occurrence (trip, appointment, move, launch)
+  - temporal: recurring timing pattern (e.g. "usually Sundays")
+  - belief: opinion/value stance rather than concrete biography
 
 Return JSON matching this schema:
 {
-  "new_patterns": [{ "content": "...", "kind": "behavior|emotion|belief|goal|preference|temporal|causal", "confidence": 0.0-1.0, "signal": "explicit|implicit", "evidence_message_ids": [...], "entry_uuids": [...], "temporal": {} }],
+  "new_patterns": [{ "content": "...", "kind": "behavior|emotion|belief|goal|preference|temporal|causal|fact|event", "confidence": 0.0-1.0, "signal": "explicit|implicit", "evidence_message_ids": [...], "entry_uuids": [...], "temporal": {} }],
   "reinforcements": [{ "pattern_id": N, "confidence": 0.0-1.0, "signal": "explicit|implicit", "evidence_message_ids": [...], "entry_uuids": [...] }],
   "contradictions": [{ "pattern_id": N, "reason": "...", "evidence_message_ids": [...] }],
   "supersedes": [{ "old_pattern_id": N, "reason": "...", "new_pattern_content": "...", "evidence_message_ids": [...] }]
@@ -848,6 +855,7 @@ Return JSON matching this schema:
 
 async function deduplicateAndInsertPattern(
   p: pg.Pool,
+  chatId: string,
   content: string,
   kind: string,
   confidence: number,
@@ -861,7 +869,7 @@ async function deduplicateAndInsertPattern(
 
   // Tier 1: Hash check
   const existing = await p.query<{ id: number }>(
-    "SELECT id FROM patterns WHERE canonical_hash = $1 AND status = 'active' LIMIT 1",
+    "SELECT id FROM patterns WHERE canonical_hash = $1 AND status = 'active' AND (expires_at IS NULL OR expires_at > NOW()) LIMIT 1",
     [hash]
   );
   /* v8 ignore next -- hash duplicate: tested via pool.query mock */
@@ -898,6 +906,14 @@ async function deduplicateAndInsertPattern(
 
   // Insert as new pattern
   const now = new Date();
+  const expiresAt =
+    kind === "event"
+      ? new Date(now.getTime() + 540 * 24 * 60 * 60 * 1000)
+      : null;
+  const sourceId =
+    evidenceMessageIds.length > 0
+      ? `chat:${chatId}:msg:${[...new Set(evidenceMessageIds)].sort((a, b) => a - b).join(",").slice(0, 150)}`
+      : `chat:${chatId}`;
   const pattern = await insertPattern(p, {
     content,
     kind,
@@ -906,6 +922,9 @@ async function deduplicateAndInsertPattern(
     /* v8 ignore next -- temporal is always empty object in v1 */
     temporal: Object.keys(temporal).length > 0 ? temporal : null,
     canonicalHash: hash,
+    sourceType: "chat_compaction",
+    sourceId,
+    expiresAt,
     timestamp: now,
   });
 
@@ -925,6 +944,8 @@ async function deduplicateAndInsertPattern(
       evidenceRoles: roles,
       /* v8 ignore next -- implicit signal half-weight */
       confidence: signal === "explicit" ? confidence : confidence * 0.5,
+      sourceType: "chat_compaction",
+      sourceId,
     });
   }
 
@@ -935,6 +956,7 @@ async function deduplicateAndInsertPattern(
 }
 
 async function runCompaction(
+  chatId: string,
   messages: ChatMessageRow[],
   onCompacted?: (summary: string) => Promise<void>
 ): Promise<void> {
@@ -960,10 +982,13 @@ async function runCompaction(
     return;
   }
 
+  const staleEventCount = await countStaleEventPatterns(pool);
+
   // Process new patterns
   for (const np of extraction.new_patterns) {
     await deduplicateAndInsertPattern(
       pool,
+      chatId,
       np.content,
       np.kind,
       np.confidence,
@@ -992,6 +1017,8 @@ async function runCompaction(
         evidenceRoles: roles,
         /* v8 ignore next -- implicit signal half-weight */
         confidence: r.signal === "explicit" ? r.confidence : r.confidence * 0.5,
+        sourceType: "chat_compaction",
+        sourceId: `chat:${chatId}:reinforcement:${r.pattern_id}`,
       });
     }
     /* v8 ignore next -- entry_uuids always present from Zod default */
@@ -1012,6 +1039,7 @@ async function runCompaction(
     // Insert the replacement pattern
     await deduplicateAndInsertPattern(
       pool,
+      chatId,
       s.new_pattern_content,
       "behavior",
       0.8,
@@ -1028,24 +1056,26 @@ async function runCompaction(
 
   // Notify caller of compaction results
   if (onCompacted) {
-    const lines: string[] = [];
+    const saved = extraction.new_patterns.length;
+    const reinforced = extraction.reinforcements.length;
+    const challenged = extraction.contradictions.length;
+    const replaced = extraction.supersedes.length;
+    const notes: string[] = [];
 
-    if (extraction.new_patterns.length > 0) {
-      lines.push(`<b>${extraction.new_patterns.length} new patterns:</b>`);
-      for (const p of extraction.new_patterns) {
-        lines.push(`  [${p.kind}] ${p.content}`);
-      }
+    if (saved > 0) {
+      const kindSet = new Set(extraction.new_patterns.map((p) => p.kind));
+      notes.push(`saved ${saved} memory${saved === 1 ? "" : "ies"} (${[...kindSet].join(", ")})`);
     }
-    if (extraction.reinforcements.length > 0)
-      lines.push(`${extraction.reinforcements.length} reinforced`);
-    if (extraction.contradictions.length > 0)
-      lines.push(`${extraction.contradictions.length} contradictions`);
-    if (extraction.supersedes.length > 0)
-      lines.push(`${extraction.supersedes.length} superseded`);
+    if (reinforced > 0) notes.push(`reinforced ${reinforced}`);
+    if (challenged > 0) notes.push(`flagged ${challenged} as disputed`);
+    if (replaced > 0) notes.push(`superseded ${replaced}`);
+    if (staleEventCount > 0) {
+      notes.push(
+        `${staleEventCount} stale event ${staleEventCount === 1 ? "memory" : "memories"} pending review`
+      );
+    }
 
-    if (lines.length > 0) {
-      await onCompacted(lines.join("\n"));
-    }
+    if (notes.length > 0) await onCompacted(notes.join(" · "));
   }
 }
 
@@ -1076,7 +1106,7 @@ export async function compactIfNeeded(
   try {
     // Re-check after acquiring lock
     const messages = await getRecentMessages(pool, chatId, RECENT_MESSAGES_LIMIT);
-    await runCompaction(messages, onCompacted);
+    await runCompaction(chatId, messages, onCompacted);
   } finally {
     await releaseLock(pool);
   }
@@ -1099,7 +1129,7 @@ export async function forceCompact(
   }
 
   try {
-    await runCompaction(messages, onCompacted);
+    await runCompaction(chatId, messages, onCompacted);
   } finally {
     await releaseLock(pool);
   }
@@ -1133,6 +1163,15 @@ export async function runAgent(params: {
 
   // 2. Retrieve patterns
   const { patterns, degraded } = await retrievePatterns(message);
+  await logMemoryRetrieval(pool, {
+    chatId,
+    queryText: message,
+    queryHash: crypto.createHash("sha256").update(normalizeContent(message)).digest("hex"),
+    degraded,
+    patternIds: patterns.map((p) => p.id),
+    patternKinds: [...new Set(patterns.map((p) => p.kind))],
+    topScore: patterns[0]?.score ?? null,
+  });
 
   // 3. Build context
   const systemPrompt = buildSystemPrompt(patterns, degraded);
@@ -1144,7 +1183,10 @@ export async function runAgent(params: {
 
   // 5. Build activity summary
   const activityParts: string[] = [];
-  if (patterns.length > 0) activityParts.push(`${patterns.length} patterns`);
+  if (patterns.length > 0) {
+    const topKinds = [...new Set(patterns.map((p) => p.kind))].slice(0, 3).join(", ");
+    activityParts.push(`used ${patterns.length} memories${topKinds ? ` (${topKinds})` : ""}`);
+  }
   if (degraded) activityParts.push("memory degraded");
   if (toolCallCount > 0) activityParts.push(`${toolCallCount} tools (${toolNames.join(", ")})`);
   const activity = activityParts.join(" | ");

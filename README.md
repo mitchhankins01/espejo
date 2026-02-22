@@ -327,7 +327,21 @@ Deployed to Railway with the same patterns as [oura-ring-mcp](https://github.com
 # - OPENAI_API_KEY (for query-time embedding)
 ```
 
+Apply DB migrations before validating new memory features:
+
+```bash
+pnpm migrate:prod
+```
+
 Supports both stdio transport (for Claude Desktop) and HTTP/SSE transport (for remote/Railway deployment).
+
+Quick post-deploy smoke check:
+
+```bash
+pnpm deploy:smoke https://your-app.railway.app
+```
+
+This verifies `/health`, and if `TELEGRAM_BOT_TOKEN` is set locally, it also checks Telegram webhook status via `getWebhookInfo`.
 
 ## License
 

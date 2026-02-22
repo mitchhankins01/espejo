@@ -27,11 +27,13 @@ import {
   findSimilarPatterns,
   searchPatterns,
   getTopPatterns,
+  pruneExpiredEventPatterns,
   insertPatternObservation,
   insertPatternRelation,
   insertPatternAlias,
   linkPatternToEntry,
   logApiUsage,
+  logMemoryRetrieval,
   getUsageSummary,
   getLastCompactionTime,
 } from "../../src/db/queries.js";
@@ -748,6 +750,26 @@ describe("searchPatterns", () => {
 
     expect(results.every((r) => r.id !== 1)).toBe(true);
   });
+
+  it("supports episodic kinds (fact and event)", async () => {
+    const factResults = await searchPatterns(
+      pool,
+      fixturePatterns[3].embedding,
+      10,
+      0.0
+    );
+    const eventResults = await searchPatterns(
+      pool,
+      fixturePatterns[4].embedding,
+      10,
+      0.0
+    );
+
+    expect(factResults.some((r) => r.kind === "fact")).toBe(true);
+    expect(eventResults.some((r) => r.kind === "event")).toBe(true);
+    expect(factResults.every((r) => Number.isFinite(r.score))).toBe(true);
+    expect(eventResults.every((r) => Number.isFinite(r.score))).toBe(true);
+  });
 });
 
 describe("getTopPatterns", () => {
@@ -760,6 +782,30 @@ describe("getTopPatterns", () => {
         results[i - 1].strength
       );
     }
+  });
+});
+
+describe("pruneExpiredEventPatterns", () => {
+  it("deprecates expired active event memories", async () => {
+    const pattern = await insertPattern(pool, {
+      content: "User attended a meetup last year.",
+      kind: "event",
+      confidence: 0.7,
+      embedding: fixturePatterns[4].embedding,
+      temporal: null,
+      canonicalHash: "expired-event-001",
+      expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      timestamp: new Date(),
+    });
+
+    const changed = await pruneExpiredEventPatterns(pool);
+    expect(changed).toBeGreaterThanOrEqual(1);
+
+    const row = await pool.query(
+      "SELECT status FROM patterns WHERE id = $1",
+      [pattern.id]
+    );
+    expect(row.rows[0].status).toBe("deprecated");
   });
 });
 
@@ -912,6 +958,28 @@ describe("getUsageSummary", () => {
     expect(agentSummary!.total_calls).toBe(2);
     expect(agentSummary!.total_input_tokens).toBe(3000);
     expect(agentSummary!.total_output_tokens).toBe(1300);
+  });
+});
+
+describe("logMemoryRetrieval", () => {
+  it("stores memory retrieval telemetry", async () => {
+    await logMemoryRetrieval(pool, {
+      chatId: "12345",
+      queryText: "remember when i moved to barcelona",
+      queryHash: "hash-abc",
+      degraded: false,
+      patternIds: [1, 2],
+      patternKinds: ["fact", "event"],
+      topScore: 0.77,
+    });
+
+    const result = await pool.query(
+      "SELECT * FROM memory_retrieval_logs WHERE query_hash = $1 LIMIT 1",
+      ["hash-abc"]
+    );
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].chat_id).toBe("12345");
+    expect(result.rows[0].pattern_kinds).toEqual(["fact", "event"]);
   });
 });
 

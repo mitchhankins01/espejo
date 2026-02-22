@@ -291,7 +291,7 @@ describe("message handler", () => {
   it("appends activity line when present", async () => {
     mockRunAgent.mockResolvedValueOnce({
       response: "Found it!",
-      activity: "3 patterns | 2 tools (search_entries, get_entry)",
+      activity: "used 3 memories (behavior, fact) | 2 tools (search_entries, get_entry)",
     });
 
     const handler = getHandler();
@@ -299,7 +299,7 @@ describe("message handler", () => {
 
     expect(mockSendTelegramMessage).toHaveBeenCalledWith(
       "100",
-      "Found it!\n\n<i>3 patterns | 2 tools (search_entries, get_entry)</i>"
+      "Found it!\n\n<i>used 3 memories (behavior, fact) | 2 tools (search_entries, get_entry)</i>"
     );
   });
 
@@ -420,7 +420,7 @@ describe("error handling", () => {
 
   it("/compact sends compaction summary to chat", async () => {
     mockForceCompact.mockImplementationOnce(async (_chatId: string, onCompacted: (s: string) => Promise<void>) => {
-      await onCompacted("<b>2 new patterns:</b>\n  [behavior] pat1\n  [behavior] pat2\n1 reinforced");
+      await onCompacted("saved 2 memories (behavior, event) · reinforced 1");
     });
 
     const handler = getHandler();
@@ -428,7 +428,7 @@ describe("error handling", () => {
 
     expect(mockSendTelegramMessage).toHaveBeenCalledWith(
       "100",
-      "<i><b>2 new patterns:</b>\n  [behavior] pat1\n  [behavior] pat2\n1 reinforced</i>"
+      "<i>Memory note: saved 2 memories (behavior, event) · reinforced 1</i>"
     );
   });
 });
