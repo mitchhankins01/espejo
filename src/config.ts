@@ -9,6 +9,17 @@ if (process.env.NODE_ENV === "production") {
 }
 
 const env = process.env.NODE_ENV || "development";
+const telegramLlmProvider =
+  process.env.TELEGRAM_LLM_PROVIDER?.toLowerCase() || "anthropic";
+
+if (
+  telegramLlmProvider !== "anthropic" &&
+  telegramLlmProvider !== "openai"
+) {
+  throw new Error(
+    `Invalid TELEGRAM_LLM_PROVIDER "${telegramLlmProvider}". Use "anthropic" or "openai".`
+  );
+}
 
 const databaseUrl =
   process.env.DATABASE_URL ||
@@ -35,9 +46,11 @@ if (env === "production" && process.env.TELEGRAM_BOT_TOKEN) {
   const required: Record<string, string | undefined> = {
     TELEGRAM_SECRET_TOKEN: process.env.TELEGRAM_SECRET_TOKEN,
     TELEGRAM_ALLOWED_CHAT_ID: process.env.TELEGRAM_ALLOWED_CHAT_ID,
-    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
   };
+  if (telegramLlmProvider === "anthropic") {
+    required.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+  }
   const missing = Object.entries(required)
     .filter(([, v]) => !v)
     .map(([k]) => k);
@@ -56,6 +69,7 @@ export const config = {
   },
   openai: {
     apiKey: /* v8 ignore next -- env var fallback */ process.env.OPENAI_API_KEY || "",
+    chatModel: process.env.OPENAI_CHAT_MODEL || "gpt-5-mini",
     embeddingModel: "text-embedding-3-small" as const,
     embeddingDimensions: 1536,
   },
@@ -79,6 +93,7 @@ export const config = {
     botToken: process.env.TELEGRAM_BOT_TOKEN || "",
     secretToken: process.env.TELEGRAM_SECRET_TOKEN || "",
     allowedChatId: process.env.TELEGRAM_ALLOWED_CHAT_ID || "",
+    llmProvider: telegramLlmProvider,
   },
   anthropic: {
     apiKey: process.env.ANTHROPIC_API_KEY || "",

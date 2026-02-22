@@ -1,9 +1,9 @@
 TODOs
 
-test run
+
 send pics, extraction
 receive voice messages
-migrate to AWS/EU using sst
+migrate to AWS/EU using sst and usage alerts + cloudwatch
 integrate Oura
 integrate messaging apps and social contacts (social db?)
 integrate with calander and email (get/create events or reminders and work with email)

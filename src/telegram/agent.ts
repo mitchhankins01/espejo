@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import crypto from "crypto";
+import OpenAI from "openai";
 import type pg from "pg";
 import { z } from "zod";
 import { config } from "../config.js";
@@ -30,16 +31,32 @@ import {
 } from "../../specs/tools.spec.js";
 
 // ---------------------------------------------------------------------------
-// Anthropic client (lazy singleton)
+// LLM clients (lazy singletons)
 // ---------------------------------------------------------------------------
 
 let anthropicClient: Anthropic | null = null;
+let openaiClient: OpenAI | null = null;
 
 function getAnthropic(): Anthropic {
   if (!anthropicClient) {
     anthropicClient = new Anthropic({ apiKey: config.anthropic.apiKey });
   }
   return anthropicClient;
+}
+
+function getOpenAI(): OpenAI {
+  if (!openaiClient) {
+    openaiClient = new OpenAI({ apiKey: config.openai.apiKey });
+  }
+  return openaiClient;
+}
+
+function getLlmProvider(): "anthropic" | "openai" {
+  return config.telegram.llmProvider === "openai" ? "openai" : "anthropic";
+}
+
+function getLlmModel(provider: "anthropic" | "openai"): string {
+  return provider === "openai" ? config.openai.chatModel : config.anthropic.model;
 }
 
 // ---------------------------------------------------------------------------
@@ -112,18 +129,33 @@ Important guidelines:
 }
 
 // ---------------------------------------------------------------------------
-// Tool definitions for Anthropic API
+// Tool definitions
 // ---------------------------------------------------------------------------
 
+type OpenAIChatTool = OpenAI.Chat.Completions.ChatCompletionTool;
+type OpenAIChatMessage = OpenAI.Chat.Completions.ChatCompletionMessageParam;
+
+const toolDefinitions = allToolNames.map((name) => toAnthropicToolDefinition(name));
+
 function getAnthropicTools(): Anthropic.Tool[] {
-  return allToolNames.map((name) => {
-    const def = toAnthropicToolDefinition(name);
+  return toolDefinitions.map((def) => {
     return {
       name: def.name,
       description: def.description,
       input_schema: def.input_schema as Anthropic.Tool.InputSchema,
     };
   });
+}
+
+function getOpenAITools(): OpenAIChatTool[] {
+  return toolDefinitions.map((def) => ({
+    type: "function",
+    function: {
+      name: def.name,
+      description: def.description,
+      parameters: def.input_schema,
+    },
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -209,18 +241,18 @@ async function retrievePatterns(
 }
 
 // ---------------------------------------------------------------------------
-// Message reconstruction for Anthropic API
+// Message reconstruction
 // ---------------------------------------------------------------------------
 
-interface AnthropicMessage {
+interface ChatHistoryMessage {
   role: "user" | "assistant";
-  content: string | Anthropic.ContentBlockParam[];
+  content: string;
 }
 
 function reconstructMessages(
   rows: ChatMessageRow[]
-): AnthropicMessage[] {
-  const messages: AnthropicMessage[] = [];
+): ChatHistoryMessage[] {
+  const messages: ChatHistoryMessage[] = [];
 
   for (const row of rows) {
     if (row.role === "user") {
@@ -228,9 +260,8 @@ function reconstructMessages(
     } else if (row.role === "assistant") {
       messages.push({ role: "assistant", content: row.content });
     }
-    // tool_result rows are handled by the Anthropic API through
-    // the tool loop — stored messages don't need them for context
-    // since we only store the final assistant text
+    // tool_result rows are fed during the live tool loop; stored context
+    // only needs user/assistant turns.
   }
 
   return messages;
@@ -287,19 +318,46 @@ function computeCost(
 // Tool loop
 // ---------------------------------------------------------------------------
 
+interface AnthropicMessage {
+  role: "user" | "assistant";
+  content: string | Anthropic.ContentBlockParam[];
+}
+
+function toAnthropicMessages(
+  messages: ChatHistoryMessage[]
+): AnthropicMessage[] {
+  return messages.map((msg) => ({
+    role: msg.role,
+    content: msg.content,
+  }));
+}
+
 async function runToolLoop(
   systemPrompt: string,
-  messages: AnthropicMessage[],
-  tools: Anthropic.Tool[],
+  messages: ChatHistoryMessage[],
+  chatId: string
+): Promise<{ text: string; toolCallCount: number; toolNames: string[] }> {
+  const provider = getLlmProvider();
+  if (provider === "openai") {
+    return runOpenAIToolLoop(systemPrompt, messages, chatId);
+  }
+  return runAnthropicToolLoop(systemPrompt, messages, chatId);
+}
+
+async function runAnthropicToolLoop(
+  systemPrompt: string,
+  messages: ChatHistoryMessage[],
   chatId: string
 ): Promise<{ text: string; toolCallCount: number; toolNames: string[] }> {
   const anthropic = getAnthropic();
+  const model = getLlmModel("anthropic");
+  const tools = getAnthropicTools();
   const startMs = Date.now();
   let toolCallCount = 0;
   let lastToolKey = "";
   const toolNamesUsed = new Set<string>();
 
-  const loopMessages = [...messages];
+  const loopMessages = toAnthropicMessages(messages);
 
   while (true) {
     const elapsed = Date.now() - startMs;
@@ -308,7 +366,7 @@ async function runToolLoop(
 
     const apiStartMs = Date.now();
     const response = await anthropic.messages.create({
-      model: config.anthropic.model,
+      model,
       max_tokens: 4096,
       system: systemPrompt,
       messages: loopMessages as Anthropic.MessageParam[],
@@ -317,14 +375,14 @@ async function runToolLoop(
 
     const latencyMs = Date.now() - apiStartMs;
     const costUsd = computeCost(
-      config.anthropic.model,
+      model,
       response.usage.input_tokens,
       response.usage.output_tokens
     );
 
     await logApiUsage(pool, {
       provider: "anthropic",
-      model: config.anthropic.model,
+      model,
       purpose: "agent",
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
@@ -367,7 +425,7 @@ async function runToolLoop(
       const toolKey = `${toolUse.name}:${JSON.stringify(toolUse.input)}`;
       if (toolKey === lastToolKey) {
         return {
-          text: extractTextFromMessages(loopMessages),
+          text: extractTextFromAnthropicMessages(loopMessages),
           toolCallCount,
           toolNames: [...toolNamesUsed],
         };
@@ -402,7 +460,7 @@ async function runToolLoop(
       toolResults.push({
         type: "tool_result",
         tool_use_id: toolUse.id,
-        content: result, // full result for Claude
+        content: result, // full result for the model
       });
     }
 
@@ -419,13 +477,162 @@ async function runToolLoop(
   }
 
   return {
-    text: extractTextFromMessages(loopMessages),
+    text: extractTextFromAnthropicMessages(loopMessages),
     toolCallCount,
     toolNames: [...toolNamesUsed],
   };
 }
 
-function extractTextFromMessages(messages: AnthropicMessage[]): string {
+async function runOpenAIToolLoop(
+  systemPrompt: string,
+  messages: ChatHistoryMessage[],
+  chatId: string
+): Promise<{ text: string; toolCallCount: number; toolNames: string[] }> {
+  const openai = getOpenAI();
+  const model = getLlmModel("openai");
+  const tools = getOpenAITools();
+  const startMs = Date.now();
+  let toolCallCount = 0;
+  let lastToolKey = "";
+  const toolNamesUsed = new Set<string>();
+
+  const loopMessages: OpenAIChatMessage[] = messages.map((msg) => ({
+    role: msg.role,
+    content: msg.content,
+  }));
+
+  while (true) {
+    const elapsed = Date.now() - startMs;
+    /* v8 ignore next -- wall clock timeout requires real timing */
+    if (elapsed >= WALL_CLOCK_TIMEOUT_MS) break;
+
+    const apiStartMs = Date.now();
+    const response = await openai.chat.completions.create({
+      model,
+      max_tokens: 4096,
+      messages: [
+        { role: "system", content: systemPrompt },
+        ...loopMessages,
+      ],
+      tools,
+      tool_choice: "auto",
+    });
+
+    const latencyMs = Date.now() - apiStartMs;
+    const inputTokens = response.usage?.prompt_tokens ?? 0;
+    const outputTokens = response.usage?.completion_tokens ?? 0;
+    await logApiUsage(pool, {
+      provider: "openai",
+      model,
+      purpose: "agent",
+      inputTokens,
+      outputTokens,
+      costUsd: computeCost(model, inputTokens, outputTokens),
+      latencyMs,
+    });
+
+    const choice = response.choices[0];
+    if (!choice) break;
+    const assistantMessage = choice.message;
+    const toolCalls = assistantMessage.tool_calls ?? [];
+    const assistantContent = assistantMessage.content ?? "";
+
+    if (toolCalls.length === 0) {
+      return {
+        text: assistantContent,
+        toolCallCount,
+        toolNames: [...toolNamesUsed],
+      };
+    }
+
+    loopMessages.push({
+      role: "assistant",
+      content: assistantContent || null,
+      tool_calls: toolCalls,
+    });
+
+    for (const toolCall of toolCalls) {
+      toolCallCount++;
+      /* v8 ignore next -- inner break: outer check handles this */
+      if (toolCallCount > MAX_TOOL_CALLS) break;
+
+      const toolName = toolCall.function.name;
+      const toolArgs = toolCall.function.arguments;
+      const toolKey = `${toolName}:${toolArgs}`;
+      if (toolKey === lastToolKey) {
+        return {
+          text: extractTextFromOpenAIMessages(loopMessages),
+          toolCallCount,
+          toolNames: [...toolNamesUsed],
+        };
+      }
+      lastToolKey = toolKey;
+      toolNamesUsed.add(toolName);
+
+      let result: string;
+      let parsedArgs: unknown = {};
+      try {
+        parsedArgs = toolArgs ? JSON.parse(toolArgs) : {};
+      } catch {
+        result = `Error: Invalid JSON arguments for tool "${toolName}"`;
+        await insertChatMessage(pool, {
+          chatId,
+          externalMessageId: null,
+          role: "tool_result",
+          content: truncateToolResult(toolName, result),
+          toolCallId: toolCall.id,
+        });
+        loopMessages.push({
+          role: "tool",
+          tool_call_id: toolCall.id,
+          content: result,
+        });
+        continue;
+      }
+
+      const handler = toolHandlers[toolName];
+      if (handler) {
+        try {
+          result = await handler(pool, parsedArgs);
+        } catch (err) {
+          /* v8 ignore next -- errors are always Error instances in practice */
+          result = `Error: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      } /* v8 ignore next 2 -- defensive: all registered tools have handlers */ else {
+        result = `Error: Unknown tool "${toolName}"`;
+      }
+
+      const truncated = truncateToolResult(toolName, result);
+      await insertChatMessage(pool, {
+        chatId,
+        externalMessageId: null,
+        role: "tool_result",
+        content: truncated,
+        toolCallId: toolCall.id,
+      });
+
+      loopMessages.push({
+        role: "tool",
+        tool_call_id: toolCall.id,
+        content: result,
+      });
+    }
+
+    if (toolCallCount >= MAX_TOOL_CALLS) break;
+
+    // Check timeout again
+    /* v8 ignore next -- wall clock timeout requires real timing */
+    if (Date.now() - startMs >= WALL_CLOCK_TIMEOUT_MS) break;
+  }
+
+  return {
+    text: extractTextFromOpenAIMessages(loopMessages),
+    toolCallCount,
+    toolNames: [...toolNamesUsed],
+  };
+}
+
+function extractTextFromAnthropicMessages(messages: AnthropicMessage[]): string {
   // Find last assistant message with text
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
@@ -444,6 +651,16 @@ function extractTextFromMessages(messages: AnthropicMessage[]): string {
     }
   }
   /* v8 ignore next -- defensive: loop always finds assistant message from tool loop */
+  return "";
+}
+
+function extractTextFromOpenAIMessages(messages: OpenAIChatMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role === "assistant" && typeof msg.content === "string") {
+      return msg.content;
+    }
+  }
   return "";
 }
 
@@ -525,8 +742,6 @@ async function extractPatterns(
   messages: ChatMessageRow[],
   existingPatterns: { id: number; content: string }[]
 ): Promise<CompactionExtraction | null> {
-  const anthropic = getAnthropic();
-
   const messagesText = messages
     .map((m) => {
       const prefix = m.role === "user" ? "User" : m.role === "tool_result" ? "Tool Result" : "Assistant";
@@ -564,32 +779,60 @@ Return JSON matching this schema:
   "supersedes": [{ "old_pattern_id": N, "reason": "...", "new_pattern_content": "...", "evidence_message_ids": [...] }]
 }`;
 
+  const provider = getLlmProvider();
+  const model = getLlmModel(provider);
   const apiStartMs = Date.now();
-  const response = await anthropic.messages.create({
-    model: config.anthropic.model,
-    max_tokens: 2048,
-    messages: [{ role: "user", content: prompt }],
-  });
+  let text: string | null = null;
+  let inputTokens = 0;
+  let outputTokens = 0;
+
+  if (provider === "openai") {
+    const openai = getOpenAI();
+    const response = await openai.chat.completions.create({
+      model,
+      max_tokens: 2048,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content: "Return valid JSON only. Do not include markdown fences.",
+        },
+        { role: "user", content: prompt },
+      ],
+    });
+    text = response.choices[0]?.message?.content ?? null;
+    inputTokens = response.usage?.prompt_tokens ?? 0;
+    outputTokens = response.usage?.completion_tokens ?? 0;
+  } else {
+    const anthropic = getAnthropic();
+    const response = await anthropic.messages.create({
+      model,
+      max_tokens: 2048,
+      messages: [{ role: "user", content: prompt }],
+    });
+    const textBlock = response.content.find(
+      (b): b is Anthropic.TextBlock => b.type === "text"
+    );
+    text = textBlock?.text ?? null;
+    inputTokens = response.usage.input_tokens;
+    outputTokens = response.usage.output_tokens;
+  }
 
   const latencyMs = Date.now() - apiStartMs;
   await logApiUsage(pool, {
-    provider: "anthropic",
-    model: config.anthropic.model,
+    provider,
+    model,
     purpose: "compaction",
-    inputTokens: response.usage.input_tokens,
-    outputTokens: response.usage.output_tokens,
-    costUsd: computeCost(config.anthropic.model, response.usage.input_tokens, response.usage.output_tokens),
+    inputTokens,
+    outputTokens,
+    costUsd: computeCost(model, inputTokens, outputTokens),
     latencyMs,
   });
 
-  const textBlock = response.content.find(
-    (b): b is Anthropic.TextBlock => b.type === "text"
-  );
-  /* v8 ignore next -- defensive: Claude always returns text */
-  if (!textBlock) return null;
+  if (!text) return null;
 
   // Extract JSON from response (may be wrapped in ```json ... ```)
-  let jsonStr = textBlock.text;
+  let jsonStr = text;
   const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (jsonMatch) {
     jsonStr = jsonMatch[1];
@@ -895,10 +1138,9 @@ export async function runAgent(params: {
   const systemPrompt = buildSystemPrompt(patterns, degraded);
   const recentMessages = await getRecentMessages(pool, chatId, RECENT_MESSAGES_LIMIT);
   const messages = reconstructMessages(recentMessages);
-  const tools = getAnthropicTools();
 
   // 4. Run tool loop
-  const { text, toolCallCount, toolNames } = await runToolLoop(systemPrompt, messages, tools, chatId);
+  const { text, toolCallCount, toolNames } = await runToolLoop(systemPrompt, messages, chatId);
 
   // 5. Build activity summary
   const activityParts: string[] = [];

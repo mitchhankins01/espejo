@@ -119,6 +119,22 @@ describe("config", () => {
     expect(config.openai.apiKey).toBe("sk-test-key-123");
   });
 
+  it("reads OPENAI_CHAT_MODEL from env", async () => {
+    process.env.NODE_ENV = "development";
+    process.env.OPENAI_CHAT_MODEL = "gpt-4.1-mini";
+
+    const { config } = await import("../../src/config.js");
+    expect(config.openai.chatModel).toBe("gpt-4.1-mini");
+  });
+
+  it("defaults OPENAI_CHAT_MODEL when env var is missing", async () => {
+    process.env.NODE_ENV = "development";
+    delete process.env.OPENAI_CHAT_MODEL;
+
+    const { config } = await import("../../src/config.js");
+    expect(config.openai.chatModel).toBe("gpt-5-mini");
+  });
+
   it("falls back to empty string for unknown NODE_ENV", async () => {
     process.env.NODE_ENV = "staging";
     delete process.env.DATABASE_URL;
@@ -142,11 +158,13 @@ describe("config", () => {
     process.env.TELEGRAM_BOT_TOKEN = "123:ABC";
     process.env.TELEGRAM_SECRET_TOKEN = "secret123";
     process.env.TELEGRAM_ALLOWED_CHAT_ID = "456789";
+    process.env.TELEGRAM_LLM_PROVIDER = "openai";
 
     const { config } = await import("../../src/config.js");
     expect(config.telegram.botToken).toBe("123:ABC");
     expect(config.telegram.secretToken).toBe("secret123");
     expect(config.telegram.allowedChatId).toBe("456789");
+    expect(config.telegram.llmProvider).toBe("openai");
   });
 
   it("uses telegram defaults when env vars are missing", async () => {
@@ -154,11 +172,22 @@ describe("config", () => {
     delete process.env.TELEGRAM_BOT_TOKEN;
     delete process.env.TELEGRAM_SECRET_TOKEN;
     delete process.env.TELEGRAM_ALLOWED_CHAT_ID;
+    delete process.env.TELEGRAM_LLM_PROVIDER;
 
     const { config } = await import("../../src/config.js");
     expect(config.telegram.botToken).toBe("");
     expect(config.telegram.secretToken).toBe("");
     expect(config.telegram.allowedChatId).toBe("");
+    expect(config.telegram.llmProvider).toBe("anthropic");
+  });
+
+  it("throws for invalid TELEGRAM_LLM_PROVIDER", async () => {
+    process.env.NODE_ENV = "development";
+    process.env.TELEGRAM_LLM_PROVIDER = "invalid";
+
+    await expect(() => import("../../src/config.js")).rejects.toThrow(
+      "Invalid TELEGRAM_LLM_PROVIDER"
+    );
   });
 
   it("reads anthropic config from env vars", async () => {
@@ -224,6 +253,22 @@ describe("config", () => {
 
     const { config } = await import("../../src/config.js");
     expect(config.telegram.botToken).toBe("123:ABC");
+  });
+
+  it("succeeds in production with openai provider without anthropic key", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.DATABASE_URL = "postgresql://prod:prod@db/journal";
+    process.env.R2_PUBLIC_URL = "https://media.example.com";
+    process.env.TELEGRAM_BOT_TOKEN = "123:ABC";
+    process.env.TELEGRAM_SECRET_TOKEN = "secret123";
+    process.env.TELEGRAM_ALLOWED_CHAT_ID = "456789";
+    process.env.TELEGRAM_LLM_PROVIDER = "openai";
+    process.env.OPENAI_API_KEY = "sk-openai-test";
+    delete process.env.ANTHROPIC_API_KEY;
+
+    const { config } = await import("../../src/config.js");
+    expect(config.telegram.botToken).toBe("123:ABC");
+    expect(config.telegram.llmProvider).toBe("openai");
   });
 
   it("succeeds in production without Telegram when bot token is not set", async () => {

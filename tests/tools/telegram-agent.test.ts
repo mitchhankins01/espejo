@@ -21,7 +21,9 @@ const {
   mockGetLastCompactionTime,
   mockGenerateEmbedding,
   mockAnthropicCreate,
+  mockOpenAIChatCreate,
   mockToolHandler,
+  mockConfig,
 } = vi.hoisted(() => ({
   mockInsertChatMessage: vi.fn().mockResolvedValue({ inserted: true, id: 1 }),
   mockGetRecentMessages: vi.fn().mockResolvedValue([]),
@@ -39,17 +41,21 @@ const {
   mockGetLastCompactionTime: vi.fn().mockResolvedValue(null),
   mockGenerateEmbedding: vi.fn().mockResolvedValue(new Array(1536).fill(0)),
   mockAnthropicCreate: vi.fn(),
+  mockOpenAIChatCreate: vi.fn(),
   mockToolHandler: vi.fn().mockResolvedValue("tool result text"),
-}));
-
-// ---------------------------------------------------------------------------
-// Module mocks
-// ---------------------------------------------------------------------------
-
-vi.mock("../../src/config.js", () => ({
-  config: {
-    telegram: { botToken: "123:ABC", secretToken: "", allowedChatId: "100" },
-    openai: { apiKey: "sk-test", embeddingModel: "text-embedding-3-small", embeddingDimensions: 1536 },
+  mockConfig: {
+    telegram: {
+      botToken: "123:ABC",
+      secretToken: "",
+      allowedChatId: "100",
+      llmProvider: "anthropic",
+    },
+    openai: {
+      apiKey: "sk-test",
+      chatModel: "gpt-5-mini",
+      embeddingModel: "text-embedding-3-small",
+      embeddingDimensions: 1536,
+    },
     anthropic: { apiKey: "sk-ant-test", model: "claude-sonnet-4-6" },
     timezone: "Europe/Madrid",
     apiRates: {
@@ -57,6 +63,14 @@ vi.mock("../../src/config.js", () => ({
       "text-embedding-3-small": { input: 0.02, output: 0 },
     } as Record<string, { input: number; output: number }>,
   },
+}));
+
+// ---------------------------------------------------------------------------
+// Module mocks
+// ---------------------------------------------------------------------------
+
+vi.mock("../../src/config.js", () => ({
+  config: mockConfig,
 }));
 
 const { mockPoolQuery } = vi.hoisted(() => ({
@@ -120,6 +134,16 @@ vi.mock("@anthropic-ai/sdk", () => ({
   })),
 }));
 
+vi.mock("openai", () => ({
+  default: vi.fn().mockImplementation(() => ({
+    chat: {
+      completions: {
+        create: mockOpenAIChatCreate,
+      },
+    },
+  })),
+}));
+
 import { runAgent, truncateToolResult, compactIfNeeded, forceCompact } from "../../src/telegram/agent.js";
 
 // ---------------------------------------------------------------------------
@@ -145,7 +169,10 @@ beforeEach(() => {
   mockFindSimilarPatterns.mockReset().mockResolvedValue([]);
   mockGenerateEmbedding.mockReset().mockResolvedValue(new Array(1536).fill(0));
   mockAnthropicCreate.mockReset();
+  mockOpenAIChatCreate.mockReset();
   mockToolHandler.mockReset().mockResolvedValue("tool result text");
+  mockConfig.telegram.llmProvider = "anthropic";
+  mockConfig.openai.chatModel = "gpt-5-mini";
   mockPoolQuery.mockReset().mockImplementation((sql: string) => {
     if (typeof sql === "string" && sql.includes("pg_try_advisory_lock")) {
       return Promise.resolve({ rows: [{ pg_try_advisory_lock: true }] });
@@ -212,6 +239,35 @@ describe("runAgent", () => {
         purpose: "agent",
         inputTokens: 100,
         outputTokens: 20,
+      })
+    );
+  });
+
+  it("supports openai provider for chat responses", async () => {
+    mockConfig.telegram.llmProvider = "openai";
+    mockOpenAIChatCreate.mockResolvedValueOnce({
+      choices: [{ message: { role: "assistant", content: "Hello from ChatGPT" } }],
+      usage: { prompt_tokens: 90, completion_tokens: 25 },
+    });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "Hi",
+      externalMessageId: "update:1b",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("Hello from ChatGPT");
+    expect(mockAnthropicCreate).not.toHaveBeenCalled();
+    expect(mockOpenAIChatCreate).toHaveBeenCalledTimes(1);
+    expect(mockLogApiUsage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        provider: "openai",
+        model: "gpt-5-mini",
+        purpose: "agent",
+        inputTokens: 90,
+        outputTokens: 25,
       })
     );
   });
@@ -494,6 +550,61 @@ describe("runAgent", () => {
 });
 
 describe("compactIfNeeded — additional coverage", () => {
+  it("uses openai provider for compaction extraction", async () => {
+    mockConfig.telegram.llmProvider = "openai";
+    const longContent = "x".repeat(10_000);
+    const messages = Array.from({ length: 20 }, (_, i) => ({
+      id: i + 1,
+      role: "user",
+      content: longContent,
+      chat_id: "100",
+      external_message_id: null,
+      tool_call_id: null,
+      compacted_at: null,
+      created_at: new Date(),
+    }));
+
+    mockGetRecentMessages
+      .mockResolvedValueOnce(messages)
+      .mockResolvedValueOnce(messages);
+
+    mockOpenAIChatCreate.mockResolvedValueOnce({
+      choices: [{
+        message: {
+          role: "assistant",
+          content: JSON.stringify({
+            new_patterns: [{
+              content: "OpenAI extracted pattern",
+              kind: "behavior",
+              confidence: 0.8,
+              signal: "explicit",
+              evidence_message_ids: [1],
+              entry_uuids: [],
+              temporal: {},
+            }],
+            reinforcements: [],
+            contradictions: [],
+            supersedes: [],
+          }),
+        },
+      }],
+      usage: { prompt_tokens: 500, completion_tokens: 100 },
+    });
+
+    await compactIfNeeded("100");
+
+    expect(mockOpenAIChatCreate).toHaveBeenCalledTimes(1);
+    expect(mockAnthropicCreate).not.toHaveBeenCalled();
+    expect(mockInsertPattern).toHaveBeenCalled();
+    expect(mockLogApiUsage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        provider: "openai",
+        purpose: "compaction",
+      })
+    );
+  });
+
   it("includes existing patterns in extraction prompt", async () => {
     mockGetRecentMessages.mockResolvedValueOnce([]);
     mockSearchPatterns.mockResolvedValueOnce([]);
