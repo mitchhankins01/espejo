@@ -410,6 +410,26 @@ describe("message handler", () => {
     expect(mockSendTelegramMessage).toHaveBeenCalledWith("100", "agent response");
   });
 
+  it("falls back to text when voice synthesis throws", async () => {
+    mockConfig.config.telegram.voiceReplyMode = "adaptive";
+    mockSynthesizeVoiceReply.mockRejectedValueOnce(new Error("tts down"));
+
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "",
+      messageId: 1,
+      date: 1000,
+      voice: { fileId: "voice-123", durationSeconds: 5 },
+    });
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Telegram voice reply failed [chat:100]:",
+      expect.any(Error)
+    );
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith("100", "agent response");
+  });
+
   it("uses voice for short conversational text replies in adaptive mode", async () => {
     mockConfig.config.telegram.voiceReplyMode = "adaptive";
     mockConfig.config.telegram.voiceReplyEvery = 1;
@@ -419,6 +439,129 @@ describe("message handler", () => {
 
     expect(mockSynthesizeVoiceReply).toHaveBeenCalledWith("agent response");
     expect(mockSendTelegramVoice).toHaveBeenCalled();
+  });
+
+  it("uses voice for friendly responses in always mode", async () => {
+    mockConfig.config.telegram.voiceReplyMode = "always";
+    mockRunAgent.mockResolvedValueOnce({ response: "Short natural response", activity: "" });
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
+
+    expect(mockSynthesizeVoiceReply).toHaveBeenCalledWith("Short natural response");
+    expect(mockSendTelegramVoice).toHaveBeenCalled();
+  });
+
+  it("keeps text when normalized response is empty", async () => {
+    mockConfig.config.telegram.voiceReplyMode = "adaptive";
+    mockConfig.config.telegram.voiceReplyEvery = 1;
+    mockRunAgent.mockResolvedValueOnce({ response: "<b> </b>", activity: "" });
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
+
+    expect(mockSynthesizeVoiceReply).not.toHaveBeenCalled();
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith("100", "<b> </b>");
+  });
+
+  it("keeps text when response is below voice min chars", async () => {
+    mockConfig.config.telegram.voiceReplyMode = "adaptive";
+    mockConfig.config.telegram.voiceReplyEvery = 1;
+    mockConfig.config.telegram.voiceReplyMinChars = 30;
+    mockRunAgent.mockResolvedValueOnce({ response: "too short", activity: "" });
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
+
+    expect(mockSynthesizeVoiceReply).not.toHaveBeenCalled();
+  });
+
+  it("keeps text when response is above voice max chars", async () => {
+    mockConfig.config.telegram.voiceReplyMode = "adaptive";
+    mockConfig.config.telegram.voiceReplyEvery = 1;
+    mockConfig.config.telegram.voiceReplyMaxChars = 20;
+    mockRunAgent.mockResolvedValueOnce({
+      response: "this response is definitely too long for voice",
+      activity: "",
+    });
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
+
+    expect(mockSynthesizeVoiceReply).not.toHaveBeenCalled();
+  });
+
+  it("keeps text for markdown/code style responses", async () => {
+    mockConfig.config.telegram.voiceReplyMode = "adaptive";
+    mockConfig.config.telegram.voiceReplyEvery = 1;
+    mockRunAgent.mockResolvedValueOnce({
+      response: "Use `pnpm check` before deploy.",
+      activity: "",
+    });
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
+
+    expect(mockSynthesizeVoiceReply).not.toHaveBeenCalled();
+  });
+
+  it("keeps text for bulleted list responses", async () => {
+    mockConfig.config.telegram.voiceReplyMode = "adaptive";
+    mockConfig.config.telegram.voiceReplyEvery = 1;
+    mockRunAgent.mockResolvedValueOnce({
+      response: "- first\n- second",
+      activity: "",
+    });
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
+
+    expect(mockSynthesizeVoiceReply).not.toHaveBeenCalled();
+  });
+
+  it("keeps text for numbered list responses", async () => {
+    mockConfig.config.telegram.voiceReplyMode = "adaptive";
+    mockConfig.config.telegram.voiceReplyEvery = 1;
+    mockRunAgent.mockResolvedValueOnce({
+      response: "1. first\n2. second",
+      activity: "",
+    });
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
+
+    expect(mockSynthesizeVoiceReply).not.toHaveBeenCalled();
+  });
+
+  it("keeps text for long structured lists", async () => {
+    mockConfig.config.telegram.voiceReplyMode = "adaptive";
+    mockConfig.config.telegram.voiceReplyEvery = 1;
+    mockRunAgent.mockResolvedValueOnce({
+      response: "1. one\n2. two\n3. three\n4. four\n5. five\n6. six",
+      activity: "",
+    });
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
+
+    expect(mockSynthesizeVoiceReply).not.toHaveBeenCalled();
+  });
+
+  it("keeps text when adaptive text reply exceeds cadence max length", async () => {
+    mockConfig.config.telegram.voiceReplyMode = "adaptive";
+    mockConfig.config.telegram.voiceReplyEvery = 1;
+    mockConfig.config.telegram.voiceReplyMaxChars = 500;
+    mockRunAgent.mockResolvedValueOnce({
+      response: "x".repeat(300),
+      activity: "",
+    });
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
+
+    expect(mockSynthesizeVoiceReply).not.toHaveBeenCalled();
+    expect(mockSendTelegramVoice).not.toHaveBeenCalled();
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith("100", "x".repeat(300));
   });
 
   it("keeps text output when response is not voice-friendly", async () => {

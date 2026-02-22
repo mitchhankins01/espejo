@@ -233,6 +233,20 @@ describe("sendTelegramVoice", () => {
     expect(form.get("voice")).toBeTruthy();
   });
 
+  it("includes caption when provided for voice replies", async () => {
+    fetchSpy.mockResolvedValueOnce(okResponse());
+
+    const ok = await sendTelegramVoice(
+      "12345",
+      Buffer.from("voice-bytes"),
+      "quick note"
+    );
+
+    expect(ok).toBe(true);
+    const form = fetchSpy.mock.calls[0][1]!.body as FormData;
+    expect(form.get("caption")).toBe("quick note");
+  });
+
   it("returns false when Telegram API rejects voice send", async () => {
     fetchSpy.mockResolvedValueOnce(otherErrorResponse());
 
@@ -241,6 +255,55 @@ describe("sendTelegramVoice", () => {
     expect(ok).toBe(false);
     expect(errorSpy).toHaveBeenCalledWith(
       "Telegram voice API error [chat:12345]: Bad Request: chat not found"
+    );
+  });
+
+  it("logs status code when voice API error has no description", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: false }), { status: 502 })
+    );
+
+    const ok = await sendTelegramVoice("12345", Buffer.from("voice-bytes"));
+
+    expect(ok).toBe(false);
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Telegram voice API error [chat:12345]: 502"
+    );
+  });
+
+  it("retries voice send on recoverable network errors", async () => {
+    const recoverable = new Error("fetch failed");
+    (recoverable as NodeJS.ErrnoException).code = "ECONNRESET";
+    fetchSpy
+      .mockRejectedValueOnce(recoverable)
+      .mockResolvedValueOnce(okResponse());
+
+    const promise = sendTelegramVoice("12345", Buffer.from("voice-bytes"));
+    await vi.advanceTimersByTimeAsync(1100);
+    const ok = await promise;
+
+    expect(ok).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns false after max retries on recoverable network errors", async () => {
+    const recoverable = new Error("fetch failed");
+    (recoverable as NodeJS.ErrnoException).code = "ECONNRESET";
+    fetchSpy
+      .mockRejectedValueOnce(recoverable)
+      .mockRejectedValueOnce(recoverable)
+      .mockRejectedValueOnce(recoverable)
+      .mockRejectedValueOnce(recoverable);
+
+    const promise = sendTelegramVoice("12345", Buffer.from("voice-bytes"));
+    await vi.advanceTimersByTimeAsync(8000);
+    const ok = await promise;
+
+    expect(ok).toBe(false);
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Telegram voice send failed [chat:12345]:",
+      expect.any(Error)
     );
   });
 });

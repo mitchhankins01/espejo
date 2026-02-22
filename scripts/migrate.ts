@@ -141,6 +141,22 @@ const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_api_usage_purpose ON api_usage(purpose);
     `,
   },
+  {
+    name: "004-chat-soul-state",
+    getSql: () => `
+      CREATE TABLE IF NOT EXISTS chat_soul_state (
+          chat_id BIGINT PRIMARY KEY,
+          identity_summary TEXT NOT NULL,
+          relational_commitments TEXT[] NOT NULL DEFAULT '{}',
+          tone_signature TEXT[] NOT NULL DEFAULT '{}',
+          growth_notes TEXT[] NOT NULL DEFAULT '{}',
+          version INT NOT NULL DEFAULT 1,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_chat_soul_state_updated ON chat_soul_state(updated_at);
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

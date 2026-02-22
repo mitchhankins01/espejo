@@ -9,6 +9,7 @@ const {
   mockGetRecentMessages,
   mockSearchPatterns,
   mockGetTopPatterns,
+  mockGetSoulState,
   mockInsertPattern,
   mockReinforcePattern,
   mockInsertPatternAlias,
@@ -29,6 +30,7 @@ const {
   mockGetRecentMessages: vi.fn().mockResolvedValue([]),
   mockSearchPatterns: vi.fn().mockResolvedValue([]),
   mockGetTopPatterns: vi.fn().mockResolvedValue([]),
+  mockGetSoulState: vi.fn().mockResolvedValue(null),
   mockInsertPattern: vi.fn().mockResolvedValue({ id: 1, content: "", kind: "behavior", confidence: 0.8, strength: 1, times_seen: 1, status: "active", temporal: null, canonical_hash: "abc", first_seen: new Date(), last_seen: new Date(), created_at: new Date() }),
   mockReinforcePattern: vi.fn().mockResolvedValue({ id: 1, content: "", kind: "behavior", confidence: 0.8, strength: 2, times_seen: 2, status: "active", temporal: null, canonical_hash: "abc", first_seen: new Date(), last_seen: new Date(), created_at: new Date() }),
   mockInsertPatternAlias: vi.fn().mockResolvedValue(undefined),
@@ -49,6 +51,7 @@ const {
       secretToken: "",
       allowedChatId: "100",
       llmProvider: "anthropic",
+      soulEnabled: true,
     },
     openai: {
       apiKey: "sk-test",
@@ -98,6 +101,7 @@ vi.mock("../../src/db/queries.js", () => ({
   getRecentMessages: mockGetRecentMessages,
   searchPatterns: mockSearchPatterns,
   getTopPatterns: mockGetTopPatterns,
+  getSoulState: mockGetSoulState,
   insertPattern: mockInsertPattern,
   reinforcePattern: mockReinforcePattern,
   insertPatternAlias: mockInsertPatternAlias,
@@ -158,6 +162,7 @@ beforeEach(() => {
   mockGetRecentMessages.mockReset().mockResolvedValue([]);
   mockSearchPatterns.mockReset().mockResolvedValue([]);
   mockGetTopPatterns.mockReset().mockResolvedValue([]);
+  mockGetSoulState.mockReset().mockResolvedValue(null);
   mockInsertPattern.mockReset().mockResolvedValue({ id: 1, content: "", kind: "behavior", confidence: 0.8, strength: 1, times_seen: 1, status: "active", temporal: null, canonical_hash: "abc", first_seen: new Date(), last_seen: new Date(), created_at: new Date() });
   mockReinforcePattern.mockReset().mockResolvedValue({ id: 1, content: "", kind: "behavior", confidence: 0.8, strength: 2, times_seen: 2, status: "active", temporal: null, canonical_hash: "abc", first_seen: new Date(), last_seen: new Date(), created_at: new Date() });
   mockInsertPatternAlias.mockReset().mockResolvedValue(undefined);
@@ -172,6 +177,7 @@ beforeEach(() => {
   mockOpenAIChatCreate.mockReset();
   mockToolHandler.mockReset().mockResolvedValue("tool result text");
   mockConfig.telegram.llmProvider = "anthropic";
+  mockConfig.telegram.soulEnabled = true;
   mockConfig.openai.chatModel = "gpt-5-mini";
   mockPoolQuery.mockReset().mockImplementation((sql: string) => {
     if (typeof sql === "string" && sql.includes("pg_try_advisory_lock")) {
@@ -746,7 +752,58 @@ describe("runAgent", () => {
     // Verify system prompt contains the pattern
     const call = mockAnthropicCreate.mock.calls[0][0];
     expect(call.system).toContain("User feels stressed about deadlines");
+    expect(call.system).toContain("Steady Companion charter:");
     expect(call.system).toContain("Telegram HTML");
+  });
+
+  it("includes persisted soul state in the system prompt", async () => {
+    mockGetSoulState.mockResolvedValueOnce({
+      chat_id: "100",
+      identity_summary: "Becoming a steady, grounded thinking partner.",
+      relational_commitments: ["stay direct", "ask one useful follow-up"],
+      tone_signature: ["calm", "clear"],
+      growth_notes: ["user asked for less generic phrasing"],
+      version: 2,
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "I'm here with you." }],
+      usage: { input_tokens: 140, output_tokens: 20 },
+    });
+
+    await runAgent({
+      chatId: "100",
+      message: "Need you to be more real",
+      externalMessageId: "update:soul-1",
+      messageDate: 1000,
+    });
+
+    expect(mockGetSoulState).toHaveBeenCalledWith(expect.anything(), "100");
+    const call = mockAnthropicCreate.mock.calls[0][0];
+    expect(call.system).toContain(
+      "Soul identity summary: Becoming a steady, grounded thinking partner."
+    );
+    expect(call.system).toContain("Relational commitments:");
+    expect(call.system).toContain("Soul state version: v2");
+  });
+
+  it("skips soul-state lookup when TELEGRAM_SOUL_ENABLED is false", async () => {
+    mockConfig.telegram.soulEnabled = false;
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Understood." }],
+      usage: { input_tokens: 90, output_tokens: 10 },
+    });
+
+    await runAgent({
+      chatId: "100",
+      message: "hello",
+      externalMessageId: "update:soul-2",
+      messageDate: 1000,
+    });
+
+    expect(mockGetSoulState).not.toHaveBeenCalled();
   });
 
   it("handles pattern retrieval failure gracefully", async () => {

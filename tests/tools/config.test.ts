@@ -163,6 +163,7 @@ describe("config", () => {
     process.env.TELEGRAM_VOICE_REPLY_EVERY = "2";
     process.env.TELEGRAM_VOICE_REPLY_MIN_CHARS = "10";
     process.env.TELEGRAM_VOICE_REPLY_MAX_CHARS = "200";
+    process.env.TELEGRAM_SOUL_ENABLED = "false";
     process.env.OPENAI_TTS_MODEL = "gpt-4o-mini-tts";
     process.env.OPENAI_TTS_VOICE = "alloy";
 
@@ -175,6 +176,7 @@ describe("config", () => {
     expect(config.telegram.voiceReplyEvery).toBe(2);
     expect(config.telegram.voiceReplyMinChars).toBe(10);
     expect(config.telegram.voiceReplyMaxChars).toBe(200);
+    expect(config.telegram.soulEnabled).toBe(false);
     expect(config.telegram.voiceModel).toBe("gpt-4o-mini-tts");
     expect(config.telegram.voiceName).toBe("alloy");
   });
@@ -189,6 +191,7 @@ describe("config", () => {
     delete process.env.TELEGRAM_VOICE_REPLY_EVERY;
     delete process.env.TELEGRAM_VOICE_REPLY_MIN_CHARS;
     delete process.env.TELEGRAM_VOICE_REPLY_MAX_CHARS;
+    delete process.env.TELEGRAM_SOUL_ENABLED;
     delete process.env.OPENAI_TTS_MODEL;
     delete process.env.OPENAI_TTS_VOICE;
 
@@ -201,6 +204,7 @@ describe("config", () => {
     expect(config.telegram.voiceReplyEvery).toBe(3);
     expect(config.telegram.voiceReplyMinChars).toBe(16);
     expect(config.telegram.voiceReplyMaxChars).toBe(450);
+    expect(config.telegram.soulEnabled).toBe(true);
     expect(config.telegram.voiceModel).toBe("gpt-4o-mini-tts");
     expect(config.telegram.voiceName).toBe("alloy");
   });
@@ -220,6 +224,32 @@ describe("config", () => {
 
     await expect(() => import("../../src/config.js")).rejects.toThrow(
       "Invalid TELEGRAM_VOICE_REPLY_MODE"
+    );
+  });
+
+  it("throws for non-integer TELEGRAM_VOICE_REPLY_EVERY", async () => {
+    process.env.NODE_ENV = "development";
+    process.env.TELEGRAM_VOICE_REPLY_EVERY = "abc";
+
+    await expect(() => import("../../src/config.js")).rejects.toThrow(
+      "TELEGRAM_VOICE_REPLY_EVERY must be an integer"
+    );
+  });
+
+  it("accepts TELEGRAM_SOUL_ENABLED=true", async () => {
+    process.env.NODE_ENV = "development";
+    process.env.TELEGRAM_SOUL_ENABLED = "true";
+
+    const { config } = await import("../../src/config.js");
+    expect(config.telegram.soulEnabled).toBe(true);
+  });
+
+  it("throws for invalid TELEGRAM_SOUL_ENABLED", async () => {
+    process.env.NODE_ENV = "development";
+    process.env.TELEGRAM_SOUL_ENABLED = "maybe";
+
+    await expect(() => import("../../src/config.js")).rejects.toThrow(
+      "TELEGRAM_SOUL_ENABLED must be a boolean"
     );
   });
 

@@ -43,6 +43,17 @@ function parseIntegerEnv(name: string, fallback: number, min: number): number {
   return value;
 }
 
+function parseBooleanEnv(name: string, fallback: boolean): boolean {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const normalized = raw.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  throw new Error(
+    `${name} must be a boolean (true/false). Received "${raw}".`
+  );
+}
+
 const telegramVoiceReplyEvery = parseIntegerEnv(
   "TELEGRAM_VOICE_REPLY_EVERY",
   3,
@@ -58,6 +69,7 @@ const telegramVoiceReplyMaxChars = parseIntegerEnv(
   450,
   16
 );
+const telegramSoulEnabled = parseBooleanEnv("TELEGRAM_SOUL_ENABLED", true);
 
 if (telegramVoiceReplyMinChars > telegramVoiceReplyMaxChars) {
   throw new Error(
@@ -142,6 +154,7 @@ export const config = {
     voiceReplyEvery: telegramVoiceReplyEvery,
     voiceReplyMinChars: telegramVoiceReplyMinChars,
     voiceReplyMaxChars: telegramVoiceReplyMaxChars,
+    soulEnabled: telegramSoulEnabled,
     voiceModel: process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts",
     voiceName: process.env.OPENAI_TTS_VOICE || "alloy",
   },

@@ -9,6 +9,7 @@ import { generateEmbedding } from "../db/embeddings.js";
 import {
   getLastCompactionTime,
   getRecentMessages,
+  getSoulState,
   getTopPatterns,
   insertChatMessage,
   insertPattern,
@@ -22,9 +23,11 @@ import {
   searchPatterns,
   updatePatternStatus,
   type ChatMessageRow,
+  type ChatSoulStateRow,
   type PatternSearchRow,
 } from "../db/queries.js";
 import { toolHandlers } from "../server.js";
+import { buildSoulPromptSection, type SoulStateSnapshot } from "./soul.js";
 import {
   allToolNames,
   toAnthropicToolDefinition,
@@ -82,7 +85,8 @@ const RECENT_MESSAGES_LIMIT = 50;
 
 function buildSystemPrompt(
   patterns: PatternSearchRow[],
-  memoryDegraded: boolean
+  memoryDegraded: boolean,
+  soulState: SoulStateSnapshot | null
 ): string {
   const today = new Intl.DateTimeFormat("en-US", {
     timeZone: config.timezone,
@@ -101,9 +105,11 @@ You are a personal chatbot with long-term memory. Your role:
 
 Your memory works automatically: patterns are extracted from conversations and stored for future reference. You do not need a special tool to "save" patterns — it happens behind the scenes. If the user asks about your memory, explain that you learn patterns over time from conversations.
 
-You have access to 8 tools:
-- 7 journal tools: search_entries, get_entry, get_entries_by_date, on_this_day, find_similar, list_tags, entry_stats
-- log_weight: log daily weight measurements`;
+ You have access to 8 tools:
+ - 7 journal tools: search_entries, get_entry, get_entries_by_date, on_this_day, find_similar, list_tags, entry_stats
+ - log_weight: log daily weight measurements`;
+
+  prompt += `\n\n${buildSoulPromptSection(soulState)}`;
 
   if (patterns.length > 0) {
     prompt += `\n\nRelevant patterns from past conversations:\n`;
@@ -126,6 +132,19 @@ Important guidelines:
 - Format responses for Telegram HTML: use <b>bold</b> for emphasis, <i>italic</i> for asides, and plain line breaks for separation. Never use markdown formatting (**bold**, *italic*, ---, ###, etc).`;
 
   return prompt;
+}
+
+function toSoulSnapshot(
+  soulState: ChatSoulStateRow | null
+): SoulStateSnapshot | null {
+  if (!soulState) return null;
+  return {
+    identitySummary: soulState.identity_summary,
+    relationalCommitments: soulState.relational_commitments,
+    toneSignature: soulState.tone_signature,
+    growthNotes: soulState.growth_notes,
+    version: soulState.version,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1135,7 +1154,14 @@ export async function runAgent(params: {
   const { patterns, degraded } = await retrievePatterns(message);
 
   // 3. Build context
-  const systemPrompt = buildSystemPrompt(patterns, degraded);
+  const persistedSoulState = config.telegram.soulEnabled
+    ? await getSoulState(pool, chatId)
+    : null;
+  const systemPrompt = buildSystemPrompt(
+    patterns,
+    degraded,
+    toSoulSnapshot(persistedSoulState)
+  );
   const recentMessages = await getRecentMessages(pool, chatId, RECENT_MESSAGES_LIMIT);
   const messages = reconstructMessages(recentMessages);
 
