@@ -11,6 +11,8 @@ if (process.env.NODE_ENV === "production") {
 const env = process.env.NODE_ENV || "development";
 const telegramLlmProvider =
   process.env.TELEGRAM_LLM_PROVIDER?.toLowerCase() || "anthropic";
+const telegramVoiceReplyMode =
+  process.env.TELEGRAM_VOICE_REPLY_MODE?.toLowerCase() || "adaptive";
 
 if (
   telegramLlmProvider !== "anthropic" &&
@@ -18,6 +20,48 @@ if (
 ) {
   throw new Error(
     `Invalid TELEGRAM_LLM_PROVIDER "${telegramLlmProvider}". Use "anthropic" or "openai".`
+  );
+}
+
+if (
+  telegramVoiceReplyMode !== "off" &&
+  telegramVoiceReplyMode !== "adaptive" &&
+  telegramVoiceReplyMode !== "always"
+) {
+  throw new Error(
+    `Invalid TELEGRAM_VOICE_REPLY_MODE "${telegramVoiceReplyMode}". Use "off", "adaptive", or "always".`
+  );
+}
+
+function parseIntegerEnv(name: string, fallback: number, min: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isFinite(value) || Number.isNaN(value) || value < min) {
+    throw new Error(`${name} must be an integer >= ${min}. Received "${raw}".`);
+  }
+  return value;
+}
+
+const telegramVoiceReplyEvery = parseIntegerEnv(
+  "TELEGRAM_VOICE_REPLY_EVERY",
+  3,
+  1
+);
+const telegramVoiceReplyMinChars = parseIntegerEnv(
+  "TELEGRAM_VOICE_REPLY_MIN_CHARS",
+  16,
+  1
+);
+const telegramVoiceReplyMaxChars = parseIntegerEnv(
+  "TELEGRAM_VOICE_REPLY_MAX_CHARS",
+  450,
+  16
+);
+
+if (telegramVoiceReplyMinChars > telegramVoiceReplyMaxChars) {
+  throw new Error(
+    "TELEGRAM_VOICE_REPLY_MIN_CHARS must be less than or equal to TELEGRAM_VOICE_REPLY_MAX_CHARS."
   );
 }
 
@@ -94,6 +138,12 @@ export const config = {
     secretToken: process.env.TELEGRAM_SECRET_TOKEN || "",
     allowedChatId: process.env.TELEGRAM_ALLOWED_CHAT_ID || "",
     llmProvider: telegramLlmProvider,
+    voiceReplyMode: telegramVoiceReplyMode,
+    voiceReplyEvery: telegramVoiceReplyEvery,
+    voiceReplyMinChars: telegramVoiceReplyMinChars,
+    voiceReplyMaxChars: telegramVoiceReplyMaxChars,
+    voiceModel: process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts",
+    voiceName: process.env.OPENAI_TTS_VOICE || "alloy",
   },
   anthropic: {
     apiKey: process.env.ANTHROPIC_API_KEY || "",

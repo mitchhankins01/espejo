@@ -12,6 +12,7 @@ vi.mock("../../src/config.js", () => mockConfig);
 
 import {
   sendTelegramMessage,
+  sendTelegramVoice,
   sendChatAction,
   answerCallbackQuery,
 } from "../../src/telegram/client.js";
@@ -214,6 +215,33 @@ describe("sendChatAction", () => {
     const body = JSON.parse(opts!.body as string);
     expect(body.chat_id).toBe("12345");
     expect(body.action).toBe("typing");
+  });
+});
+
+describe("sendTelegramVoice", () => {
+  it("posts voice payload to sendVoice endpoint", async () => {
+    fetchSpy.mockResolvedValueOnce(okResponse());
+
+    const ok = await sendTelegramVoice("12345", Buffer.from("voice-bytes"));
+
+    expect(ok).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [url, opts] = fetchSpy.mock.calls[0];
+    expect(url).toContain("/bot123:ABC/sendVoice");
+    const form = opts!.body as FormData;
+    expect(form.get("chat_id")).toBe("12345");
+    expect(form.get("voice")).toBeTruthy();
+  });
+
+  it("returns false when Telegram API rejects voice send", async () => {
+    fetchSpy.mockResolvedValueOnce(otherErrorResponse());
+
+    const ok = await sendTelegramVoice("12345", Buffer.from("voice-bytes"));
+
+    expect(ok).toBe(false);
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Telegram voice API error [chat:12345]: Bad Request: chat not found"
+    );
   });
 });
 

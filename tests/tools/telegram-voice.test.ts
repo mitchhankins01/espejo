@@ -1,14 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const { mockLogApiUsage, mockTranscriptionCreate, mockToFile } = vi.hoisted(() => ({
+const { mockLogApiUsage, mockTranscriptionCreate, mockSpeechCreate, mockToFile } = vi.hoisted(() => ({
   mockLogApiUsage: vi.fn(),
   mockTranscriptionCreate: vi.fn(),
+  mockSpeechCreate: vi.fn(),
   mockToFile: vi.fn().mockResolvedValue({ name: "voice.ogg" }),
 }));
 
 vi.mock("../../src/config.js", () => ({
   config: {
-    telegram: { botToken: "123:ABC" },
+    telegram: {
+      botToken: "123:ABC",
+      voiceModel: "gpt-4o-mini-tts",
+      voiceName: "alloy",
+    },
     openai: { apiKey: "sk-test" },
     apiRates: { "whisper-1": { input: 0.006, output: 0 } },
   },
@@ -28,12 +33,19 @@ vi.mock("openai", () => ({
       transcriptions: {
         create: mockTranscriptionCreate,
       },
+      speech: {
+        create: mockSpeechCreate,
+      },
     },
   })),
   toFile: mockToFile,
 }));
 
-import { transcribeVoiceMessage } from "../../src/telegram/voice.js";
+import {
+  transcribeVoiceMessage,
+  synthesizeVoiceReply,
+  normalizeVoiceText,
+} from "../../src/telegram/voice.js";
 
 let fetchSpy: ReturnType<typeof vi.spyOn>;
 
@@ -41,6 +53,7 @@ beforeEach(() => {
   fetchSpy = vi.spyOn(globalThis, "fetch");
   mockLogApiUsage.mockReset();
   mockTranscriptionCreate.mockReset();
+  mockSpeechCreate.mockReset();
   mockToFile.mockReset().mockResolvedValue({ name: "voice.ogg" });
 });
 
@@ -112,6 +125,45 @@ describe("transcribeVoiceMessage", () => {
 
     await expect(transcribeVoiceMessage("bad_file", 3)).rejects.toThrow(
       "Failed to get file path"
+    );
+  });
+});
+
+describe("normalizeVoiceText", () => {
+  it("strips Telegram HTML and normalizes whitespace", () => {
+    const text = normalizeVoiceText("<b>Hello</b>\n\n&nbsp;world &amp; friends");
+    expect(text).toBe("Hello world & friends");
+  });
+});
+
+describe("synthesizeVoiceReply", () => {
+  it("calls OpenAI speech API and returns audio bytes", async () => {
+    mockSpeechCreate.mockResolvedValueOnce({
+      arrayBuffer: vi.fn().mockResolvedValue(Buffer.from("mp3-bytes")),
+    });
+
+    const audio = await synthesizeVoiceReply("<b>Hello there</b>");
+
+    expect(Buffer.isBuffer(audio)).toBe(true);
+    expect(mockSpeechCreate).toHaveBeenCalledWith({
+      model: "gpt-4o-mini-tts",
+      voice: "alloy",
+      input: "Hello there",
+      response_format: "mp3",
+    });
+    expect(mockLogApiUsage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        provider: "openai",
+        model: "gpt-4o-mini-tts",
+        purpose: "tts",
+      })
+    );
+  });
+
+  it("throws for empty text after normalization", async () => {
+    await expect(synthesizeVoiceReply("<b> </b>")).rejects.toThrow(
+      "Cannot synthesize an empty voice reply."
     );
   });
 });
