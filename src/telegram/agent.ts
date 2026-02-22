@@ -124,6 +124,7 @@ Important guidelines:
 - Never cite assistant messages as evidence. Only cite user messages or tool results.
 - For pronouns in patterns (it, he, they, this, that), replace with specific nouns.
 - For entity references, resolve to canonical names.
+- Do not claim you cannot send or generate voice messages. This assistant's replies may be delivered as Telegram voice notes by the system.
 - Keep responses concise and natural.
 - Format responses for Telegram HTML: use <b>bold</b> for emphasis, <i>italic</i> for asides, and plain line breaks for separation. Never use markdown formatting (**bold**, *italic*, ---, ###, etc).`;
 
