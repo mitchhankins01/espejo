@@ -3,6 +3,7 @@ import { config } from "../config.js";
 import { runAgent, forceCompact } from "./agent.js";
 import { sendTelegramMessage, sendChatAction } from "./client.js";
 import { transcribeVoiceMessage } from "./voice.js";
+import { extractTextFromDocument, extractTextFromImage } from "./media.js";
 import { setMessageHandler, processUpdate } from "./updates.js";
 import type { AssembledMessage, TelegramUpdate } from "./updates.js";
 
@@ -19,8 +20,37 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
   let text = msg.text;
 
   try {
+    // OCR photo messages
+    if (msg.photo) {
+      text = await extractTextFromImage(msg.photo.fileId, msg.photo.caption);
+      if (!text) {
+        await sendTelegramMessage(
+          chatId,
+          "I couldn't extract any text from that image. Try a clearer image or add a caption."
+        );
+        return;
+      }
+    }
+
+    // Extract text from supported documents
+    if (msg.document) {
+      text = await extractTextFromDocument({
+        fileId: msg.document.fileId,
+        fileName: msg.document.fileName,
+        mimeType: msg.document.mimeType,
+        caption: msg.document.caption,
+      });
+      if (!text) {
+        await sendTelegramMessage(
+          chatId,
+          "I couldn't extract any text from that document."
+        );
+        return;
+      }
+    }
+
     // Transcribe voice messages
-    if (msg.voice) {
+    if (msg.voice && !msg.photo && !msg.document) {
       text = await transcribeVoiceMessage(
         msg.voice.fileId,
         msg.voice.durationSeconds

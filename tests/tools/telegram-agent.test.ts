@@ -272,6 +272,314 @@ describe("runAgent", () => {
     );
   });
 
+  it("handles openai agent responses without usage metadata", async () => {
+    mockConfig.telegram.llmProvider = "openai";
+    mockOpenAIChatCreate.mockResolvedValueOnce({
+      choices: [{ message: { role: "assistant", content: "No usage payload" } }],
+    });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "Hi",
+      externalMessageId: "update:1b-usage",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("No usage payload");
+    expect(mockLogApiUsage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        provider: "openai",
+        inputTokens: 0,
+        outputTokens: 0,
+      })
+    );
+  });
+
+  it("supports openai tool calls and returns final text", async () => {
+    mockConfig.telegram.llmProvider = "openai";
+    mockOpenAIChatCreate
+      .mockResolvedValueOnce({
+        choices: [{
+          message: {
+            role: "assistant",
+            content: "Checking your journal...",
+            tool_calls: [{
+              id: "tc-1",
+              type: "function",
+              function: {
+                name: "search_entries",
+                arguments: JSON.stringify({ query: "stress" }),
+              },
+            }],
+          },
+        }],
+        usage: { prompt_tokens: 100, completion_tokens: 20 },
+      })
+      .mockResolvedValueOnce({
+        choices: [{ message: { role: "assistant", content: "You mentioned stress 3 times this week." } }],
+        usage: { prompt_tokens: 120, completion_tokens: 30 },
+      });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "When did I mention stress?",
+      externalMessageId: "update:1c",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("You mentioned stress 3 times this week.");
+    expect(mockToolHandler).toHaveBeenCalledWith(expect.anything(), { query: "stress" });
+    expect(mockInsertChatMessage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        role: "tool_result",
+        toolCallId: "tc-1",
+      })
+    );
+  });
+
+  it("handles openai tool execution errors gracefully", async () => {
+    mockConfig.telegram.llmProvider = "openai";
+    mockToolHandler.mockRejectedValueOnce(new Error("openai tool failed"));
+    mockOpenAIChatCreate
+      .mockResolvedValueOnce({
+        choices: [{
+          message: {
+            role: "assistant",
+            content: "Calling tool...",
+            tool_calls: [{
+              id: "tc-err",
+              type: "function",
+              function: {
+                name: "search_entries",
+                arguments: JSON.stringify({ query: "x" }),
+              },
+            }],
+          },
+        }],
+        usage: { prompt_tokens: 70, completion_tokens: 10 },
+      })
+      .mockResolvedValueOnce({
+        choices: [{ message: { role: "assistant", content: "Tool error handled." } }],
+        usage: { prompt_tokens: 80, completion_tokens: 15 },
+      });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "trigger error",
+      externalMessageId: "update:1c-err",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("Tool error handled.");
+    expect(mockInsertChatMessage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        role: "tool_result",
+        toolCallId: "tc-err",
+      })
+    );
+  });
+
+  it("handles openai tool calls with invalid JSON arguments", async () => {
+    mockConfig.telegram.llmProvider = "openai";
+    mockOpenAIChatCreate
+      .mockResolvedValueOnce({
+        choices: [{
+          message: {
+            role: "assistant",
+            content: "Let me try.",
+            tool_calls: [{
+              id: "tc-bad",
+              type: "function",
+              function: {
+                name: "search_entries",
+                arguments: "{bad-json",
+              },
+            }],
+          },
+        }],
+        usage: { prompt_tokens: 80, completion_tokens: 10 },
+      })
+      .mockResolvedValueOnce({
+        choices: [{ message: { role: "assistant", content: "I couldn't parse the tool input." } }],
+        usage: { prompt_tokens: 90, completion_tokens: 20 },
+      });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "test invalid tool args",
+      externalMessageId: "update:1d",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("I couldn't parse the tool input.");
+    expect(mockToolHandler).not.toHaveBeenCalled();
+    expect(mockInsertChatMessage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        role: "tool_result",
+        toolCallId: "tc-bad",
+        content: expect.stringContaining("Invalid JSON arguments"),
+      })
+    );
+  });
+
+  it("handles openai tool calls with empty argument string", async () => {
+    mockConfig.telegram.llmProvider = "openai";
+    mockOpenAIChatCreate
+      .mockResolvedValueOnce({
+        choices: [{
+          message: {
+            role: "assistant",
+            tool_calls: [{
+              id: "tc-empty-args",
+              type: "function",
+              function: {
+                name: "list_tags",
+                arguments: "",
+              },
+            }],
+          },
+        }],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      })
+      .mockResolvedValueOnce({
+        choices: [{ message: { role: "assistant", content: "ok" } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      });
+
+    await runAgent({
+      chatId: "100",
+      message: "empty args",
+      externalMessageId: "update:1d-empty",
+      messageDate: 1000,
+    });
+
+    expect(mockToolHandler).toHaveBeenCalledWith(expect.anything(), {});
+  });
+
+  it("stops openai tool loop on no-progress duplicate call", async () => {
+    mockConfig.telegram.llmProvider = "openai";
+    mockOpenAIChatCreate
+      .mockResolvedValueOnce({
+        choices: [{
+          message: {
+            role: "assistant",
+            content: "Step 1",
+            tool_calls: [{
+              id: "tc-dup-1",
+              type: "function",
+              function: {
+                name: "list_tags",
+                arguments: JSON.stringify({}),
+              },
+            }],
+          },
+        }],
+        usage: { prompt_tokens: 50, completion_tokens: 10 },
+      })
+      .mockResolvedValueOnce({
+        choices: [{
+          message: {
+            role: "assistant",
+            content: "Step 2",
+            tool_calls: [{
+              id: "tc-dup-2",
+              type: "function",
+              function: {
+                name: "list_tags",
+                arguments: JSON.stringify({}),
+              },
+            }],
+          },
+        }],
+        usage: { prompt_tokens: 60, completion_tokens: 10 },
+      });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "show tags repeatedly",
+      externalMessageId: "update:1e",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("Step 2");
+    expect(mockToolHandler).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns null when openai returns no choices", async () => {
+    mockConfig.telegram.llmProvider = "openai";
+    mockOpenAIChatCreate.mockResolvedValueOnce({
+      choices: [],
+      usage: { prompt_tokens: 10, completion_tokens: 0 },
+    });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "hello",
+      externalMessageId: "update:1f",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBeNull();
+  });
+
+  it("stops openai tool loop at MAX_TOOL_CALLS", async () => {
+    mockConfig.telegram.llmProvider = "openai";
+    const toolCalls = Array.from({ length: 16 }, (_, i) => ({
+      id: `tc-max-${i}`,
+      type: "function" as const,
+      function: {
+        name: "list_tags",
+        arguments: JSON.stringify({ i }),
+      },
+    }));
+
+    mockOpenAIChatCreate.mockResolvedValueOnce({
+      choices: [{ message: { role: "assistant", content: "Batch tools", tool_calls: toolCalls } }],
+      usage: { prompt_tokens: 100, completion_tokens: 10 },
+    });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "many tools",
+      externalMessageId: "update:1max",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("Batch tools");
+    expect(mockToolHandler.mock.calls.length).toBeLessThanOrEqual(15);
+  });
+
+  it("reconstructs recent messages for openai context", async () => {
+    mockConfig.telegram.llmProvider = "openai";
+    mockGetRecentMessages.mockResolvedValueOnce([
+      { id: 1, chat_id: "100", external_message_id: null, role: "user", content: "Earlier user note", tool_call_id: null, compacted_at: null, created_at: new Date() },
+      { id: 2, chat_id: "100", external_message_id: null, role: "assistant", content: "Earlier assistant reply", tool_call_id: null, compacted_at: null, created_at: new Date() },
+    ]);
+    mockOpenAIChatCreate.mockResolvedValueOnce({
+      choices: [{ message: { role: "assistant", content: "Continuing..." } }],
+      usage: { prompt_tokens: 20, completion_tokens: 5 },
+    });
+
+    await runAgent({
+      chatId: "100",
+      message: "continue",
+      externalMessageId: "update:1g",
+      messageDate: 1000,
+    });
+
+    const call = mockOpenAIChatCreate.mock.calls[0][0];
+    expect(call.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: "user", content: "Earlier user note" }),
+        expect.objectContaining({ role: "assistant", content: "Earlier assistant reply" }),
+      ])
+    );
+  });
+
   it("executes tool calls and returns final text", async () => {
     // First call: tool_use
     mockAnthropicCreate.mockResolvedValueOnce({
@@ -605,6 +913,41 @@ describe("compactIfNeeded — additional coverage", () => {
     );
   });
 
+  it("handles openai compaction responses without content/usage", async () => {
+    mockConfig.telegram.llmProvider = "openai";
+    const longContent = "x".repeat(10_000);
+    const messages = Array.from({ length: 20 }, (_, i) => ({
+      id: i + 1,
+      role: "user",
+      content: longContent,
+      chat_id: "100",
+      external_message_id: null,
+      tool_call_id: null,
+      compacted_at: null,
+      created_at: new Date(),
+    }));
+
+    mockGetRecentMessages
+      .mockResolvedValueOnce(messages)
+      .mockResolvedValueOnce(messages);
+
+    mockOpenAIChatCreate.mockResolvedValueOnce({
+      choices: [{ message: {} }],
+    });
+
+    await compactIfNeeded("100");
+
+    expect(mockMarkMessagesCompacted).toHaveBeenCalled();
+    expect(mockLogApiUsage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        provider: "openai",
+        inputTokens: 0,
+        outputTokens: 0,
+      })
+    );
+  });
+
   it("includes existing patterns in extraction prompt", async () => {
     mockGetRecentMessages.mockResolvedValueOnce([]);
     mockSearchPatterns.mockResolvedValueOnce([]);
@@ -918,6 +1261,33 @@ describe("compactIfNeeded", () => {
     mockAnthropicCreate.mockResolvedValueOnce({
       content: [{ type: "text", text: "not valid json" }],
       usage: { input_tokens: 500, output_tokens: 100 },
+    });
+
+    await compactIfNeeded("100");
+
+    expect(mockMarkMessagesCompacted).toHaveBeenCalled();
+  });
+
+  it("marks messages compacted when anthropic returns no text block", async () => {
+    const longContent = "x".repeat(10_000);
+    const messages = Array.from({ length: 20 }, (_, i) => ({
+      id: i + 1,
+      role: "user",
+      content: longContent,
+      chat_id: "100",
+      external_message_id: null,
+      tool_call_id: null,
+      compacted_at: null,
+      created_at: new Date(),
+    }));
+
+    mockGetRecentMessages
+      .mockResolvedValueOnce(messages)
+      .mockResolvedValueOnce(messages);
+
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "tool_use", id: "t1", name: "search_entries", input: {} }],
+      usage: { input_tokens: 100, output_tokens: 20 },
     });
 
     await compactIfNeeded("100");

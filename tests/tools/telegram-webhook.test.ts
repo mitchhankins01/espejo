@@ -4,12 +4,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // Mocks
 // ---------------------------------------------------------------------------
 
-const { mockRunAgent, mockForceCompact, mockSendTelegramMessage, mockSendChatAction, mockTranscribeVoiceMessage, mockSetMessageHandler, mockProcessUpdate } = vi.hoisted(() => ({
+const { mockRunAgent, mockForceCompact, mockSendTelegramMessage, mockSendChatAction, mockTranscribeVoiceMessage, mockExtractTextFromImage, mockExtractTextFromDocument, mockSetMessageHandler, mockProcessUpdate } = vi.hoisted(() => ({
   mockRunAgent: vi.fn().mockResolvedValue({ response: "agent response", activity: "" }),
   mockForceCompact: vi.fn().mockResolvedValue(undefined),
   mockSendTelegramMessage: vi.fn().mockResolvedValue(undefined),
   mockSendChatAction: vi.fn().mockResolvedValue(undefined),
   mockTranscribeVoiceMessage: vi.fn().mockResolvedValue("transcribed text"),
+  mockExtractTextFromImage: vi.fn().mockResolvedValue("image text"),
+  mockExtractTextFromDocument: vi.fn().mockResolvedValue("document text"),
   mockSetMessageHandler: vi.fn(),
   mockProcessUpdate: vi.fn(),
 }));
@@ -26,6 +28,11 @@ vi.mock("../../src/telegram/client.js", () => ({
 
 vi.mock("../../src/telegram/voice.js", () => ({
   transcribeVoiceMessage: mockTranscribeVoiceMessage,
+}));
+
+vi.mock("../../src/telegram/media.js", () => ({
+  extractTextFromImage: mockExtractTextFromImage,
+  extractTextFromDocument: mockExtractTextFromDocument,
 }));
 
 vi.mock("../../src/telegram/updates.js", () => ({
@@ -114,6 +121,8 @@ beforeEach(() => {
   mockSendTelegramMessage.mockReset().mockResolvedValue(undefined);
   mockSendChatAction.mockReset().mockResolvedValue(undefined);
   mockTranscribeVoiceMessage.mockReset().mockResolvedValue("transcribed text");
+  mockExtractTextFromImage.mockReset().mockResolvedValue("image text");
+  mockExtractTextFromDocument.mockReset().mockResolvedValue("document text");
   mockSetMessageHandler.mockReset();
   mockProcessUpdate.mockReset();
   errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -325,6 +334,91 @@ describe("message handler", () => {
     expect(mockTranscribeVoiceMessage).toHaveBeenCalledWith("voice-123", 5);
     expect(mockRunAgent).toHaveBeenCalledWith(
       expect.objectContaining({ message: "transcribed text" })
+    );
+  });
+
+  it("extracts text from photo messages before sending to agent", async () => {
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "",
+      messageId: 2,
+      date: 1000,
+      photo: { fileId: "photo-123", caption: "read this" },
+    });
+
+    expect(mockExtractTextFromImage).toHaveBeenCalledWith("photo-123", "read this");
+    expect(mockRunAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "image text" })
+    );
+  });
+
+  it("returns helpful message when photo OCR returns empty text", async () => {
+    mockExtractTextFromImage.mockResolvedValueOnce("");
+
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "",
+      messageId: 20,
+      date: 1000,
+      photo: { fileId: "photo-124", caption: "" },
+    });
+
+    expect(mockRunAgent).not.toHaveBeenCalled();
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      "I couldn't extract any text from that image. Try a clearer image or add a caption."
+    );
+  });
+
+  it("extracts text from document messages before sending to agent", async () => {
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "",
+      messageId: 3,
+      date: 1000,
+      document: {
+        fileId: "doc-123",
+        fileName: "notes.txt",
+        mimeType: "text/plain",
+        caption: "",
+      },
+    });
+
+    expect(mockExtractTextFromDocument).toHaveBeenCalledWith({
+      fileId: "doc-123",
+      fileName: "notes.txt",
+      mimeType: "text/plain",
+      caption: "",
+    });
+    expect(mockRunAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "document text" })
+    );
+  });
+
+  it("returns helpful message when document extraction returns empty text", async () => {
+    mockExtractTextFromDocument.mockResolvedValueOnce("");
+
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "",
+      messageId: 21,
+      date: 1000,
+      document: {
+        fileId: "doc-empty",
+        fileName: "empty.pdf",
+        mimeType: "application/pdf",
+        caption: "",
+      },
+    });
+
+    expect(mockRunAgent).not.toHaveBeenCalled();
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      "I couldn't extract any text from that document."
     );
   });
 

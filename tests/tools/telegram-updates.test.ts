@@ -252,6 +252,114 @@ describe("processUpdate", () => {
     );
   });
 
+  it("processes photo messages directly", async () => {
+    const update = makeUpdate({
+      message: {
+        message_id: 2,
+        chat: { id: 100 },
+        from: { id: 42 },
+        photo: [{ file_id: "small" }, { file_id: "large" }],
+        caption: "read this sign",
+        date: 1000,
+      },
+    });
+
+    processUpdate(update);
+    await getQueuePromise("100");
+
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: 100,
+        text: "read this sign",
+        messageId: 2,
+        photo: { fileId: "large", caption: "read this sign" },
+      })
+    );
+  });
+
+  it("processes document messages directly", async () => {
+    const update = makeUpdate({
+      message: {
+        message_id: 3,
+        chat: { id: 100 },
+        from: { id: 42 },
+        document: {
+          file_id: "doc-1",
+          file_name: "notes.txt",
+          mime_type: "text/plain",
+        },
+        caption: "important",
+        date: 1000,
+      },
+    });
+
+    processUpdate(update);
+    await getQueuePromise("100");
+
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: 100,
+        text: "important",
+        messageId: 3,
+        document: {
+          fileId: "doc-1",
+          fileName: "notes.txt",
+          mimeType: "text/plain",
+          caption: "important",
+        },
+      })
+    );
+  });
+
+  it("processes photo messages without caption", async () => {
+    const update = makeUpdate({
+      message: {
+        message_id: 4,
+        chat: { id: 100 },
+        from: { id: 42 },
+        photo: [{ file_id: "only-size" }],
+        date: 1000,
+      },
+    });
+
+    processUpdate(update);
+    await getQueuePromise("100");
+
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "",
+        photo: { fileId: "only-size", caption: "" },
+      })
+    );
+  });
+
+  it("processes document messages without caption", async () => {
+    const update = makeUpdate({
+      message: {
+        message_id: 5,
+        chat: { id: 100 },
+        from: { id: 42 },
+        document: { file_id: "doc-2" },
+        date: 1000,
+      },
+    });
+
+    processUpdate(update);
+    await getQueuePromise("100");
+
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "",
+        document: {
+          fileId: "doc-2",
+          fileName: undefined,
+          mimeType: undefined,
+          caption: "",
+        },
+      })
+    );
+  });
+
   it("handles voice message without caption", async () => {
     const update = makeUpdate({
       message: {
