@@ -379,6 +379,7 @@ describe("runAgent", () => {
     // Verify system prompt contains the pattern
     const call = mockAnthropicCreate.mock.calls[0][0];
     expect(call.system).toContain("User feels stressed about deadlines");
+    expect(call.system).toContain("Telegram HTML");
   });
 
   it("handles pattern retrieval failure gracefully", async () => {
