@@ -26,6 +26,7 @@ import {
   updatePatternStatus,
   findSimilarPatterns,
   searchPatterns,
+  getLanguagePreferencePatterns,
   getTopPatterns,
   pruneExpiredEventPatterns,
   countStaleEventPatterns,
@@ -784,6 +785,73 @@ describe("searchPatterns", () => {
     expect(eventResults.some((r) => r.kind === "event")).toBe(true);
     expect(factResults.every((r) => Number.isFinite(r.score))).toBe(true);
     expect(eventResults.every((r) => Number.isFinite(r.score))).toBe(true);
+  });
+});
+
+describe("getLanguagePreferencePatterns", () => {
+  it("returns active language preference/fact patterns and excludes unrelated content", async () => {
+    await insertPattern(pool, {
+      content: "User prefers English and Dutch as base languages with gradual Spanish practice.",
+      kind: "preference",
+      confidence: 0.92,
+      embedding: fixturePatterns[0].embedding,
+      temporal: null,
+      canonicalHash: "lang-pref-active-001",
+      expiresAt: null,
+      timestamp: new Date(),
+    });
+
+    await insertPattern(pool, {
+      content: "User speaks Dutch and English fluently.",
+      kind: "fact",
+      confidence: 0.9,
+      embedding: fixturePatterns[3].embedding,
+      temporal: null,
+      canonicalHash: "lang-fact-active-001",
+      expiresAt: null,
+      timestamp: new Date(),
+    });
+
+    await insertPattern(pool, {
+      content: "User prefers short replies.",
+      kind: "preference",
+      confidence: 0.8,
+      embedding: fixturePatterns[1].embedding,
+      temporal: null,
+      canonicalHash: "non-lang-pref-001",
+      expiresAt: null,
+      timestamp: new Date(),
+    });
+
+    const results = await getLanguagePreferencePatterns(pool, 10);
+    const contents = results.map((row) => row.content);
+
+    expect(contents).toEqual(
+      expect.arrayContaining([
+        "User prefers English and Dutch as base languages with gradual Spanish practice.",
+        "User speaks Dutch and English fluently.",
+      ])
+    );
+    expect(contents).not.toContain("User prefers short replies.");
+    expect(results[0].kind).toBe("preference");
+  });
+
+  it("excludes expired language patterns", async () => {
+    await insertPattern(pool, {
+      content: "User prefers to practice Spanish every evening.",
+      kind: "preference",
+      confidence: 0.85,
+      embedding: fixturePatterns[0].embedding,
+      temporal: null,
+      canonicalHash: "lang-pref-expired-001",
+      expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      timestamp: new Date(),
+    });
+
+    const results = await getLanguagePreferencePatterns(pool, 10);
+    const contents = results.map((row) => row.content);
+
+    expect(contents).not.toContain("User prefers to practice Spanish every evening.");
   });
 });
 

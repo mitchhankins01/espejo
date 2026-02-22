@@ -11,6 +11,7 @@ import {
   getRecentMessages,
   getSoulState,
   upsertSoulState,
+  getLanguagePreferencePatterns,
   getTopPatterns,
   insertChatMessage,
   insertPattern,
@@ -105,6 +106,7 @@ const RETRIEVAL_BASE_MIN_SIMILARITY = 0.45;
 const RETRIEVAL_SHORT_QUERY_MIN_SIMILARITY = 0.52;
 const RETRIEVAL_SCORE_FLOOR_DEFAULT = 0.35;
 const RETRIEVAL_SCORE_FLOOR_SHORT_QUERY = 0.5;
+const LANGUAGE_ANCHOR_LIMIT = 3;
 const MAX_OBSERVATION_EVIDENCE_ITEMS = 8;
 const MAX_OBSERVATION_EVIDENCE_CHARS_PER_ITEM = 280;
 const WEIGHT_CHANGE_EPSILON_KG = 0.25;
@@ -173,6 +175,7 @@ Important guidelines:
 - Never cite assistant messages as evidence. Only cite user messages or tool results.
 - For pronouns in patterns (it, he, they, this, that), replace with specific nouns.
 - For entity references, resolve to canonical names.
+- Explicit language preference patterns are high-priority constraints. When they conflict with default style instructions, follow the user preference patterns.
 - Do not claim you cannot send or generate voice messages. This assistant's replies may be delivered as Telegram voice notes by the system.
 - Keep responses concise and natural.
 - Format responses for Telegram HTML: use <b>bold</b> for emphasis, <i>italic</i> for asides, and plain line breaks for separation. Never use markdown formatting (**bold**, *italic*, ---, ###, etc).`;
@@ -386,6 +389,37 @@ async function retrievePatterns(
     console.error("Telegram pattern retrieval error:", err);
     return { patterns: [], degraded: true };
   }
+}
+
+async function retrieveLanguagePreferenceAnchors(): Promise<PatternSearchRow[]> {
+  try {
+    const anchors = await getLanguagePreferencePatterns(pool, LANGUAGE_ANCHOR_LIMIT);
+    return anchors.map((pattern, idx) => ({
+      ...pattern,
+      // Synthetic retrieval metadata so anchors can share the same prompt path.
+      score: 1 - idx * 0.001,
+      similarity: 1,
+    }));
+  } catch (err) {
+    console.error("Telegram language preference retrieval error:", err);
+    return [];
+  }
+}
+
+function mergePromptPatterns(
+  retrieved: PatternSearchRow[],
+  anchors: PatternSearchRow[]
+): PatternSearchRow[] {
+  const deduped: PatternSearchRow[] = [];
+  const seen = new Set<number>();
+
+  for (const pattern of [...anchors, ...retrieved]) {
+    if (seen.has(pattern.id)) continue;
+    seen.add(pattern.id);
+    deduped.push(pattern);
+  }
+
+  return budgetCapPatterns(deduped, PATTERN_TOKEN_BUDGET);
 }
 
 // ---------------------------------------------------------------------------
@@ -1538,18 +1572,23 @@ export async function runAgent(params: {
   });
 
   // 2. Retrieve patterns (skip for trivial messages)
-  let patterns: PatternSearchRow[] = [];
+  let retrievedPatterns: PatternSearchRow[] = [];
   let degraded = false;
   if (shouldRetrievePatterns(message)) {
-    ({ patterns, degraded } = await retrievePatterns(message));
+    ({ patterns: retrievedPatterns, degraded } = await retrievePatterns(message));
+  }
+  const languageAnchors = await retrieveLanguagePreferenceAnchors();
+  const patterns = mergePromptPatterns(retrievedPatterns, languageAnchors);
+
+  if (shouldRetrievePatterns(message)) {
     await logMemoryRetrieval(pool, {
       chatId,
       queryText: message,
       queryHash: crypto.createHash("sha256").update(normalizeContent(message)).digest("hex"),
       degraded,
-      patternIds: patterns.map((p) => p.id),
-      patternKinds: patterns.map((p) => p.kind),
-      topScore: patterns[0]?.score ?? null,
+      patternIds: retrievedPatterns.map((p) => p.id),
+      patternKinds: retrievedPatterns.map((p) => p.kind),
+      topScore: retrievedPatterns[0]?.score ?? null,
     });
   }
 

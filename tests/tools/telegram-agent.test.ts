@@ -8,6 +8,7 @@ const {
   mockInsertChatMessage,
   mockGetRecentMessages,
   mockSearchPatterns,
+  mockGetLanguagePreferencePatterns,
   mockGetTopPatterns,
   mockGetSoulState,
   mockUpsertSoulState,
@@ -40,6 +41,7 @@ const {
   mockInsertChatMessage: vi.fn().mockResolvedValue({ inserted: true, id: 1 }),
   mockGetRecentMessages: vi.fn().mockResolvedValue([]),
   mockSearchPatterns: vi.fn().mockResolvedValue([]),
+  mockGetLanguagePreferencePatterns: vi.fn().mockResolvedValue([]),
   mockGetTopPatterns: vi.fn().mockResolvedValue([]),
   mockGetSoulState: vi.fn().mockResolvedValue(null),
   mockUpsertSoulState: vi.fn().mockResolvedValue({
@@ -167,6 +169,7 @@ vi.mock("../../src/db/queries.js", () => ({
   insertChatMessage: mockInsertChatMessage,
   getRecentMessages: mockGetRecentMessages,
   searchPatterns: mockSearchPatterns,
+  getLanguagePreferencePatterns: mockGetLanguagePreferencePatterns,
   getTopPatterns: mockGetTopPatterns,
   getSoulState: mockGetSoulState,
   upsertSoulState: mockUpsertSoulState,
@@ -243,6 +246,7 @@ beforeEach(() => {
   mockInsertChatMessage.mockReset().mockResolvedValue({ inserted: true, id: 1 });
   mockGetRecentMessages.mockReset().mockResolvedValue([]);
   mockSearchPatterns.mockReset().mockResolvedValue([]);
+  mockGetLanguagePreferencePatterns.mockReset().mockResolvedValue([]);
   mockGetTopPatterns.mockReset().mockResolvedValue([]);
   mockGetSoulState.mockReset().mockResolvedValue(null);
   mockUpsertSoulState.mockReset().mockResolvedValue({
@@ -1341,9 +1345,119 @@ describe("runAgent", () => {
 
     const call = mockAnthropicCreate.mock.calls[0][0];
     expect(call.system).toContain("Evening Review mode is ON.");
+    expect(call.system).toContain("Respect explicit language preference patterns from memory first");
+  });
+
+  it("includes language preference anchors when semantic retrieval is skipped", async () => {
+    mockGetLanguagePreferencePatterns.mockResolvedValueOnce([
+      {
+        id: 101,
+        content: "User prefers English and Dutch baseline with gradual Spanish.",
+        kind: "preference",
+        confidence: 0.95,
+        strength: 4,
+        times_seen: 6,
+        status: "active",
+        temporal: null,
+        canonical_hash: "lang-anchor-001",
+        first_seen: new Date(),
+        last_seen: new Date(),
+        created_at: new Date(),
+      },
+    ]);
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Starting review." }],
+      usage: { input_tokens: 110, output_tokens: 14 },
+    });
+
+    await runAgent({
+      chatId: "100",
+      message: "/evening",
+      externalMessageId: "update:evening-anchor",
+      messageDate: 1000,
+      mode: "evening_review",
+    });
+
+    expect(mockGenerateEmbedding).not.toHaveBeenCalled();
+    expect(mockLogMemoryRetrieval).not.toHaveBeenCalled();
+    const call = mockAnthropicCreate.mock.calls[0][0];
     expect(call.system).toContain(
-      "Every question should appear in both English and Spanish."
+      "User prefers English and Dutch baseline with gradual Spanish."
     );
+  });
+
+  it("continues when language preference anchor retrieval fails", async () => {
+    mockGetLanguagePreferencePatterns.mockRejectedValueOnce(
+      new Error("anchor query failed")
+    );
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Still here." }],
+      usage: { input_tokens: 80, output_tokens: 10 },
+    });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "/evening",
+      externalMessageId: "update:evening-anchor-fail",
+      messageDate: 1000,
+      mode: "evening_review",
+    });
+
+    expect(result.response).toBe("Still here.");
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Telegram language preference retrieval error:",
+      expect.any(Error)
+    );
+  });
+
+  it("deduplicates overlapping anchor and semantic patterns", async () => {
+    mockSearchPatterns.mockResolvedValueOnce([
+      {
+        id: 202,
+        content: "User prefers English and Dutch baseline with gradual Spanish.",
+        kind: "preference",
+        confidence: 0.9,
+        strength: 3,
+        times_seen: 4,
+        status: "active",
+        temporal: null,
+        canonical_hash: "dup-anchor-001",
+        first_seen: new Date(),
+        last_seen: new Date(),
+        created_at: new Date(),
+        score: 0.8,
+        similarity: 0.9,
+      },
+    ]);
+    mockGetLanguagePreferencePatterns.mockResolvedValueOnce([
+      {
+        id: 202,
+        content: "User prefers English and Dutch baseline with gradual Spanish.",
+        kind: "preference",
+        confidence: 0.9,
+        strength: 3,
+        times_seen: 4,
+        status: "active",
+        temporal: null,
+        canonical_hash: "dup-anchor-001",
+        first_seen: new Date(),
+        last_seen: new Date(),
+        created_at: new Date(),
+      },
+    ]);
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Integrated." }],
+      usage: { input_tokens: 120, output_tokens: 15 },
+    });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "Please remember and respect my language preferences every time we chat.",
+      externalMessageId: "update:anchor-dedupe",
+      messageDate: 1000,
+    });
+
+    expect(result.activity).toContain("used 1 memories");
   });
 
   it("stores raw user command but sends transformed prompt message when provided", async () => {

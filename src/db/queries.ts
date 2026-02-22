@@ -937,6 +937,40 @@ export async function searchPatterns(
 }
 
 /**
+ * Get active preference/fact patterns describing language preferences.
+ * These are used as always-on communication anchors in chat prompts.
+ */
+export async function getLanguagePreferencePatterns(
+  pool: pg.Pool,
+  limit: number
+): Promise<PatternRow[]> {
+  const result = await pool.query(
+    `SELECT * FROM patterns
+     WHERE status = 'active'
+       AND kind IN ('preference', 'fact')
+       AND (expires_at IS NULL OR expires_at > NOW())
+       AND (
+         content ILIKE '%language%'
+         OR content ILIKE '%english%'
+         OR content ILIKE '%dutch%'
+         OR content ILIKE '%nederlands%'
+         OR content ILIKE '%spanish%'
+         OR content ILIKE '%espanol%'
+         OR content ILIKE '%español%'
+         OR content ILIKE '%idioma%'
+       )
+     ORDER BY
+       CASE WHEN kind = 'preference' THEN 0 ELSE 1 END,
+       strength DESC,
+       confidence DESC,
+       last_seen DESC
+     LIMIT $1`,
+    [limit]
+  );
+  return result.rows.map(mapPatternRow);
+}
+
+/**
  * Get top patterns by strength (for compaction context, no embedding needed).
  */
 export async function getTopPatterns(
