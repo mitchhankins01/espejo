@@ -4,8 +4,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // Mocks
 // ---------------------------------------------------------------------------
 
-const { mockRunAgent, mockSendTelegramMessage, mockSendChatAction, mockTranscribeVoiceMessage, mockSetMessageHandler, mockProcessUpdate } = vi.hoisted(() => ({
+const { mockRunAgent, mockForceCompact, mockSendTelegramMessage, mockSendChatAction, mockTranscribeVoiceMessage, mockSetMessageHandler, mockProcessUpdate } = vi.hoisted(() => ({
   mockRunAgent: vi.fn().mockResolvedValue({ response: "agent response", activity: "" }),
+  mockForceCompact: vi.fn().mockResolvedValue(undefined),
   mockSendTelegramMessage: vi.fn().mockResolvedValue(undefined),
   mockSendChatAction: vi.fn().mockResolvedValue(undefined),
   mockTranscribeVoiceMessage: vi.fn().mockResolvedValue("transcribed text"),
@@ -15,6 +16,7 @@ const { mockRunAgent, mockSendTelegramMessage, mockSendChatAction, mockTranscrib
 
 vi.mock("../../src/telegram/agent.js", () => ({
   runAgent: mockRunAgent,
+  forceCompact: mockForceCompact,
 }));
 
 vi.mock("../../src/telegram/client.js", () => ({
@@ -405,6 +407,28 @@ describe("error handling", () => {
     expect(errorSpy).toHaveBeenCalledWith(
       "Telegram error [chat:100]:",
       expect.any(Error)
+    );
+  });
+
+  it("handles /compact command without calling runAgent", async () => {
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/compact", messageId: 1, date: 1000 });
+
+    expect(mockForceCompact).toHaveBeenCalledWith("100", expect.any(Function));
+    expect(mockRunAgent).not.toHaveBeenCalled();
+  });
+
+  it("/compact sends compaction summary to chat", async () => {
+    mockForceCompact.mockImplementationOnce(async (_chatId: string, onCompacted: (s: string) => Promise<void>) => {
+      await onCompacted("2 new patterns, 1 reinforced");
+    });
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/compact", messageId: 1, date: 1000 });
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      "<i>2 new patterns, 1 reinforced</i>"
     );
   });
 });

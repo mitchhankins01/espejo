@@ -33,6 +33,7 @@ import {
   linkPatternToEntry,
   logApiUsage,
   getUsageSummary,
+  getLastCompactionTime,
 } from "../../src/db/queries.js";
 import { fixturePatterns } from "../../specs/fixtures/seed.js";
 
@@ -911,5 +912,37 @@ describe("getUsageSummary", () => {
     expect(agentSummary!.total_calls).toBe(2);
     expect(agentSummary!.total_input_tokens).toBe(3000);
     expect(agentSummary!.total_output_tokens).toBe(1300);
+  });
+});
+
+// ============================================================================
+// getLastCompactionTime
+// ============================================================================
+
+describe("getLastCompactionTime", () => {
+  it("returns null when no compacted messages exist", async () => {
+    const result = await getLastCompactionTime(pool, "999");
+    expect(result).toBeNull();
+  });
+
+  it("returns the latest compacted_at timestamp", async () => {
+    await insertChatMessage(pool, {
+      chatId: "999",
+      externalMessageId: "ext-1",
+      role: "user",
+      content: "hello",
+    });
+    await insertChatMessage(pool, {
+      chatId: "999",
+      externalMessageId: "ext-2",
+      role: "assistant",
+      content: "hi",
+    });
+
+    const messages = await getRecentMessages(pool, "999", 10);
+    await markMessagesCompacted(pool, messages.map((m) => m.id));
+
+    const result = await getLastCompactionTime(pool, "999");
+    expect(result).toBeInstanceOf(Date);
   });
 });

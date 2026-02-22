@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { config } from "../config.js";
-import { runAgent } from "./agent.js";
+import { runAgent, forceCompact } from "./agent.js";
 import { sendTelegramMessage, sendChatAction } from "./client.js";
 import { transcribeVoiceMessage } from "./voice.js";
 import { setMessageHandler, processUpdate } from "./updates.js";
@@ -28,6 +28,14 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
     }
 
     if (!text) return;
+
+    // Handle /compact command
+    if (text === "/compact") {
+      await forceCompact(chatId, async (summary) => {
+        await sendTelegramMessage(chatId, `<i>${summary}</i>`);
+      });
+      return;
+    }
 
     const { response, activity } = await runAgent({
       chatId,

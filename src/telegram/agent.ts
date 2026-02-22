@@ -6,6 +6,7 @@ import { config } from "../config.js";
 import { pool } from "../db/client.js";
 import { generateEmbedding } from "../db/embeddings.js";
 import {
+  getLastCompactionTime,
   getRecentMessages,
   getTopPatterns,
   insertChatMessage,
@@ -52,6 +53,9 @@ const CHARS_PER_TOKEN = 4;
 const TOOL_RESULT_MAX_CHARS = 500;
 const SEARCH_RESULT_ENTRY_MAX_CHARS = 100;
 const COMPACTION_TOKEN_BUDGET = 12_000;
+const COMPACTION_INTERVAL_HOURS = 12;
+const MIN_MESSAGES_FOR_TIME_COMPACT = 10;
+const MIN_MESSAGES_FOR_FORCE_COMPACT = 4;
 const MAX_NEW_PATTERNS_PER_COMPACTION = 5;
 const RECENT_MESSAGES_LIMIT = 50;
 
@@ -687,6 +691,115 @@ async function deduplicateAndInsertPattern(
   }
 }
 
+async function runCompaction(
+  messages: ChatMessageRow[],
+  onCompacted?: (summary: string) => Promise<void>
+): Promise<void> {
+  // Take oldest half for compaction
+  const compactionCount = Math.floor(messages.length / 2);
+  const toCompact = messages.slice(0, compactionCount);
+
+  /* v8 ignore next -- defensive: messages.length > 0 guaranteed by caller */
+  if (toCompact.length === 0) return;
+
+  // Get existing patterns for context
+  const existingPatterns = await getTopPatterns(pool, 20);
+  const existingForExtraction = existingPatterns.map((p) => ({
+    id: p.id,
+    content: p.content,
+  }));
+
+  // Extract patterns
+  const extraction = await extractPatterns(toCompact, existingForExtraction);
+  if (!extraction) {
+    // Extraction failed — still mark as compacted to prevent retry loop
+    await markMessagesCompacted(pool, toCompact.map((m) => m.id));
+    return;
+  }
+
+  // Process new patterns
+  for (const np of extraction.new_patterns) {
+    await deduplicateAndInsertPattern(
+      pool,
+      np.content,
+      np.kind,
+      np.confidence,
+      np.signal,
+      np.evidence_message_ids,
+      np.entry_uuids,
+      np.temporal,
+      toCompact
+    );
+  }
+
+  // Process reinforcements
+  for (const r of extraction.reinforcements) {
+    await reinforcePattern(pool, r.pattern_id, r.confidence);
+    const { filteredIds, roles } = filterEvidenceRoles(r.evidence_message_ids, toCompact);
+    if (filteredIds.length > 0) {
+      const evidenceText = toCompact
+        .filter((m) => filteredIds.includes(m.id))
+        .map((m) => m.content)
+        .join(" | ")
+        .slice(0, 500);
+      await insertPatternObservation(pool, {
+        patternId: r.pattern_id,
+        chatMessageIds: filteredIds,
+        evidence: evidenceText,
+        evidenceRoles: roles,
+        /* v8 ignore next -- implicit signal half-weight */
+        confidence: r.signal === "explicit" ? r.confidence : r.confidence * 0.5,
+      });
+    }
+    /* v8 ignore next -- entry_uuids always present from Zod default */
+    for (const uuid of r.entry_uuids ?? []) {
+      await linkPatternToEntry(pool, r.pattern_id, uuid, "compaction", r.confidence);
+    }
+  }
+
+  // Process contradictions
+  for (const c of extraction.contradictions) {
+    await updatePatternStatus(pool, c.pattern_id, "disputed");
+  }
+
+  // Process supersessions
+  for (const s of extraction.supersedes) {
+    await updatePatternStatus(pool, s.old_pattern_id, "superseded");
+
+    // Insert the replacement pattern
+    await deduplicateAndInsertPattern(
+      pool,
+      s.new_pattern_content,
+      "behavior",
+      0.8,
+      "explicit",
+      s.evidence_message_ids,
+      [],
+      {},
+      toCompact
+    );
+  }
+
+  // Mark messages as compacted
+  await markMessagesCompacted(pool, toCompact.map((m) => m.id));
+
+  // Notify caller of compaction results
+  if (onCompacted) {
+    const parts: string[] = [];
+    if (extraction.new_patterns.length > 0)
+      parts.push(`${extraction.new_patterns.length} new patterns`);
+    if (extraction.reinforcements.length > 0)
+      parts.push(`${extraction.reinforcements.length} reinforced`);
+    if (extraction.contradictions.length > 0)
+      parts.push(`${extraction.contradictions.length} contradictions`);
+    if (extraction.supersedes.length > 0)
+      parts.push(`${extraction.supersedes.length} superseded`);
+    if (parts.length > 0) {
+      await onCompacted(parts.join(", "));
+    }
+  }
+}
+
 export async function compactIfNeeded(
   chatId: string,
   onCompacted?: (summary: string) => Promise<void>
@@ -695,8 +808,17 @@ export async function compactIfNeeded(
   const recentMessages = await getRecentMessages(pool, chatId, RECENT_MESSAGES_LIMIT);
   const totalChars = recentMessages.reduce((sum, m) => sum + m.content.length, 0);
 
-  // Simple heuristic: compact if we have more than budget
-  if (totalChars / CHARS_PER_TOKEN < COMPACTION_TOKEN_BUDGET) return;
+  const overBudget = totalChars / CHARS_PER_TOKEN >= COMPACTION_TOKEN_BUDGET;
+
+  if (!overBudget) {
+    // Time-based trigger: compact if 12+ hours since last compaction and enough messages
+    if (recentMessages.length < MIN_MESSAGES_FOR_TIME_COMPACT) return;
+    const lastCompaction = await getLastCompactionTime(pool, chatId);
+    const hoursSince = lastCompaction
+      ? (Date.now() - lastCompaction.getTime()) / (1000 * 60 * 60)
+      : Infinity;
+    if (hoursSince < COMPACTION_INTERVAL_HOURS) return;
+  }
 
   // Try to acquire lock
   const acquired = await tryAcquireLock(pool);
@@ -705,113 +827,30 @@ export async function compactIfNeeded(
   try {
     // Re-check after acquiring lock
     const messages = await getRecentMessages(pool, chatId, RECENT_MESSAGES_LIMIT);
-    const chars = messages.reduce((sum, m) => sum + m.content.length, 0);
-    /* v8 ignore next -- race: another compaction may have cleaned up */
-    if (chars / CHARS_PER_TOKEN < COMPACTION_TOKEN_BUDGET) return;
+    await runCompaction(messages, onCompacted);
+  } finally {
+    await releaseLock(pool);
+  }
+}
 
-    // Take oldest half for compaction
-    const compactionCount = Math.floor(messages.length / 2);
-    const toCompact = messages.slice(0, compactionCount);
+export async function forceCompact(
+  chatId: string,
+  onCompacted?: (summary: string) => Promise<void>
+): Promise<void> {
+  const messages = await getRecentMessages(pool, chatId, RECENT_MESSAGES_LIMIT);
+  if (messages.length < MIN_MESSAGES_FOR_FORCE_COMPACT) {
+    if (onCompacted) await onCompacted("nothing to compact");
+    return;
+  }
 
-    /* v8 ignore next -- defensive: messages.length > 0 guaranteed by budget check */
-    if (toCompact.length === 0) return;
+  const acquired = await tryAcquireLock(pool);
+  if (!acquired) {
+    if (onCompacted) await onCompacted("compaction already in progress");
+    return;
+  }
 
-    // Get existing patterns for context
-    const existingPatterns = await getTopPatterns(pool, 20);
-    const existingForExtraction = existingPatterns.map((p) => ({
-      id: p.id,
-      content: p.content,
-    }));
-
-    // Extract patterns
-    const extraction = await extractPatterns(toCompact, existingForExtraction);
-    if (!extraction) {
-      // Extraction failed — still mark as compacted to prevent retry loop
-      await markMessagesCompacted(pool, toCompact.map((m) => m.id));
-      return;
-    }
-
-    // Process new patterns
-    for (const np of extraction.new_patterns) {
-      await deduplicateAndInsertPattern(
-        pool,
-        np.content,
-        np.kind,
-        np.confidence,
-        np.signal,
-        np.evidence_message_ids,
-        np.entry_uuids,
-        np.temporal,
-        toCompact
-      );
-    }
-
-    // Process reinforcements
-    for (const r of extraction.reinforcements) {
-      await reinforcePattern(pool, r.pattern_id, r.confidence);
-      const { filteredIds, roles } = filterEvidenceRoles(r.evidence_message_ids, toCompact);
-      if (filteredIds.length > 0) {
-        const evidenceText = toCompact
-          .filter((m) => filteredIds.includes(m.id))
-          .map((m) => m.content)
-          .join(" | ")
-          .slice(0, 500);
-        await insertPatternObservation(pool, {
-          patternId: r.pattern_id,
-          chatMessageIds: filteredIds,
-          evidence: evidenceText,
-          evidenceRoles: roles,
-          /* v8 ignore next -- implicit signal half-weight */
-          confidence: r.signal === "explicit" ? r.confidence : r.confidence * 0.5,
-        });
-      }
-      /* v8 ignore next -- entry_uuids always present from Zod default */
-      for (const uuid of r.entry_uuids ?? []) {
-        await linkPatternToEntry(pool, r.pattern_id, uuid, "compaction", r.confidence);
-      }
-    }
-
-    // Process contradictions
-    for (const c of extraction.contradictions) {
-      await updatePatternStatus(pool, c.pattern_id, "disputed");
-    }
-
-    // Process supersessions
-    for (const s of extraction.supersedes) {
-      await updatePatternStatus(pool, s.old_pattern_id, "superseded");
-
-      // Insert the replacement pattern
-      await deduplicateAndInsertPattern(
-        pool,
-        s.new_pattern_content,
-        "behavior",
-        0.8,
-        "explicit",
-        s.evidence_message_ids,
-        [],
-        {},
-        toCompact
-      );
-    }
-
-    // Mark messages as compacted
-    await markMessagesCompacted(pool, toCompact.map((m) => m.id));
-
-    // Notify caller of compaction results
-    if (onCompacted) {
-      const parts: string[] = [];
-      if (extraction.new_patterns.length > 0)
-        parts.push(`${extraction.new_patterns.length} new patterns`);
-      if (extraction.reinforcements.length > 0)
-        parts.push(`${extraction.reinforcements.length} reinforced`);
-      if (extraction.contradictions.length > 0)
-        parts.push(`${extraction.contradictions.length} contradictions`);
-      if (extraction.supersedes.length > 0)
-        parts.push(`${extraction.supersedes.length} superseded`);
-      if (parts.length > 0) {
-        await onCompacted(parts.join(", "));
-      }
-    }
+  try {
+    await runCompaction(messages, onCompacted);
   } finally {
     await releaseLock(pool);
   }

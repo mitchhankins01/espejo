@@ -18,6 +18,7 @@ const {
   mockMarkMessagesCompacted,
   mockLogApiUsage,
   mockFindSimilarPatterns,
+  mockGetLastCompactionTime,
   mockGenerateEmbedding,
   mockAnthropicCreate,
   mockToolHandler,
@@ -35,6 +36,7 @@ const {
   mockMarkMessagesCompacted: vi.fn().mockResolvedValue(undefined),
   mockLogApiUsage: vi.fn().mockResolvedValue(undefined),
   mockFindSimilarPatterns: vi.fn().mockResolvedValue([]),
+  mockGetLastCompactionTime: vi.fn().mockResolvedValue(null),
   mockGenerateEmbedding: vi.fn().mockResolvedValue(new Array(1536).fill(0)),
   mockAnthropicCreate: vi.fn(),
   mockToolHandler: vi.fn().mockResolvedValue("tool result text"),
@@ -91,6 +93,7 @@ vi.mock("../../src/db/queries.js", () => ({
   markMessagesCompacted: mockMarkMessagesCompacted,
   logApiUsage: mockLogApiUsage,
   findSimilarPatterns: mockFindSimilarPatterns,
+  getLastCompactionTime: mockGetLastCompactionTime,
 }));
 
 vi.mock("../../src/db/embeddings.js", () => ({
@@ -117,7 +120,7 @@ vi.mock("@anthropic-ai/sdk", () => ({
   })),
 }));
 
-import { runAgent, truncateToolResult, compactIfNeeded } from "../../src/telegram/agent.js";
+import { runAgent, truncateToolResult, compactIfNeeded, forceCompact } from "../../src/telegram/agent.js";
 
 // ---------------------------------------------------------------------------
 // Setup
@@ -1177,5 +1180,177 @@ describe("compactIfNeeded", () => {
     await compactIfNeeded("100");
 
     expect(mockMarkMessagesCompacted).toHaveBeenCalled();
+  });
+
+  it("triggers time-based compaction when 12+ hours since last compaction", async () => {
+    const messages = Array.from({ length: 12 }, (_, i) => ({
+      id: i + 1,
+      role: i % 2 === 0 ? "user" : "assistant",
+      content: "short message",
+      chat_id: "100",
+      external_message_id: null,
+      tool_call_id: null,
+      compacted_at: null,
+      created_at: new Date(),
+    }));
+
+    // Under token budget but enough messages
+    mockGetRecentMessages
+      .mockResolvedValueOnce(messages)
+      .mockResolvedValueOnce(messages);
+
+    // Last compaction was 13 hours ago
+    mockGetLastCompactionTime.mockResolvedValueOnce(
+      new Date(Date.now() - 13 * 60 * 60 * 1000)
+    );
+
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: JSON.stringify({ new_patterns: [], reinforcements: [], contradictions: [], supersedes: [] }) }],
+      usage: { input_tokens: 500, output_tokens: 100 },
+    });
+
+    await compactIfNeeded("100");
+
+    expect(mockMarkMessagesCompacted).toHaveBeenCalled();
+  });
+
+  it("triggers time-based compaction when never compacted before", async () => {
+    const messages = Array.from({ length: 12 }, (_, i) => ({
+      id: i + 1,
+      role: i % 2 === 0 ? "user" : "assistant",
+      content: "short message",
+      chat_id: "100",
+      external_message_id: null,
+      tool_call_id: null,
+      compacted_at: null,
+      created_at: new Date(),
+    }));
+
+    mockGetRecentMessages
+      .mockResolvedValueOnce(messages)
+      .mockResolvedValueOnce(messages);
+
+    // Never compacted — getLastCompactionTime returns null (default mock)
+
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: JSON.stringify({ new_patterns: [], reinforcements: [], contradictions: [], supersedes: [] }) }],
+      usage: { input_tokens: 500, output_tokens: 100 },
+    });
+
+    await compactIfNeeded("100");
+
+    expect(mockMarkMessagesCompacted).toHaveBeenCalled();
+  });
+
+  it("skips time-based compaction when last compaction was recent", async () => {
+    const messages = Array.from({ length: 12 }, (_, i) => ({
+      id: i + 1,
+      role: i % 2 === 0 ? "user" : "assistant",
+      content: "short message",
+      chat_id: "100",
+      external_message_id: null,
+      tool_call_id: null,
+      compacted_at: null,
+      created_at: new Date(),
+    }));
+
+    mockGetRecentMessages.mockResolvedValueOnce(messages);
+
+    // Last compaction was 2 hours ago
+    mockGetLastCompactionTime.mockResolvedValueOnce(
+      new Date(Date.now() - 2 * 60 * 60 * 1000)
+    );
+
+    await compactIfNeeded("100");
+
+    expect(mockMarkMessagesCompacted).not.toHaveBeenCalled();
+  });
+
+  it("skips time-based compaction with too few messages", async () => {
+    const messages = Array.from({ length: 5 }, (_, i) => ({
+      id: i + 1,
+      role: i % 2 === 0 ? "user" : "assistant",
+      content: "short message",
+      chat_id: "100",
+      external_message_id: null,
+      tool_call_id: null,
+      compacted_at: null,
+      created_at: new Date(),
+    }));
+
+    mockGetRecentMessages.mockResolvedValueOnce(messages);
+
+    await compactIfNeeded("100");
+
+    // Too few messages, should skip without checking time
+    expect(mockMarkMessagesCompacted).not.toHaveBeenCalled();
+  });
+});
+
+describe("forceCompact", () => {
+  it("runs compaction regardless of budget", async () => {
+    const messages = Array.from({ length: 8 }, (_, i) => ({
+      id: i + 1,
+      role: i % 2 === 0 ? "user" : "assistant",
+      content: "short message",
+      chat_id: "100",
+      external_message_id: null,
+      tool_call_id: null,
+      compacted_at: null,
+      created_at: new Date(),
+    }));
+
+    mockGetRecentMessages.mockResolvedValueOnce(messages);
+
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: JSON.stringify({ new_patterns: [{ content: "test pattern", kind: "behavior", confidence: 0.8, signal: "explicit", evidence_message_ids: [1], entry_uuids: [], temporal: {} }], reinforcements: [], contradictions: [], supersedes: [] }) }],
+      usage: { input_tokens: 500, output_tokens: 100 },
+    });
+
+    const onCompacted = vi.fn();
+    await forceCompact("100", onCompacted);
+
+    expect(mockMarkMessagesCompacted).toHaveBeenCalled();
+    expect(onCompacted).toHaveBeenCalledWith("1 new patterns");
+  });
+
+  it("reports nothing to compact with too few messages", async () => {
+    mockGetRecentMessages.mockResolvedValueOnce([
+      { id: 1, role: "user", content: "hi", chat_id: "100", external_message_id: null, tool_call_id: null, compacted_at: null, created_at: new Date() },
+    ]);
+
+    const onCompacted = vi.fn();
+    await forceCompact("100", onCompacted);
+
+    expect(onCompacted).toHaveBeenCalledWith("nothing to compact");
+    expect(mockMarkMessagesCompacted).not.toHaveBeenCalled();
+  });
+
+  it("reports lock contention", async () => {
+    const messages = Array.from({ length: 8 }, (_, i) => ({
+      id: i + 1,
+      role: i % 2 === 0 ? "user" : "assistant",
+      content: "short message",
+      chat_id: "100",
+      external_message_id: null,
+      tool_call_id: null,
+      compacted_at: null,
+      created_at: new Date(),
+    }));
+
+    mockGetRecentMessages.mockResolvedValueOnce(messages);
+
+    // Lock not acquired
+    mockPoolQuery.mockImplementationOnce((sql: string) => {
+      if (sql.includes("pg_try_advisory_lock")) {
+        return Promise.resolve({ rows: [{ pg_try_advisory_lock: false }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    const onCompacted = vi.fn();
+    await forceCompact("100", onCompacted);
+
+    expect(onCompacted).toHaveBeenCalledWith("compaction already in progress");
   });
 });

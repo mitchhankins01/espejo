@@ -630,6 +630,20 @@ export async function purgeCompactedMessages(
   return /* v8 ignore next -- defensive: rowCount is always set for DELETE */ result.rowCount ?? 0;
 }
 
+/**
+ * Get the most recent compaction timestamp for a chat.
+ */
+export async function getLastCompactionTime(
+  pool: pg.Pool,
+  chatId: string
+): Promise<Date | null> {
+  const result = await pool.query(
+    `SELECT MAX(compacted_at) AS last_compacted FROM chat_messages WHERE chat_id = $1 AND compacted_at IS NOT NULL`,
+    [chatId]
+  );
+  return result.rows[0]?.last_compacted ?? null;
+}
+
 // ============================================================================
 // Pattern queries
 // ============================================================================
