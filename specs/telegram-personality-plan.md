@@ -1,155 +1,169 @@
-# Telegram Personality Plan
+# Telegram Soul Plan (One Personality That Evolves)
 
 ## Problem
-The Telegram bot is functionally useful but emotionally flat. It answers correctly, but the voice is generic and does not feel like a consistent companion over time.
+The bot is useful but feels generic. It needs one stable identity that grows with you over time, not a menu of styles.
+
+## Core Principle
+One personality. Continuous growth. Same voice across days, with deeper understanding as shared history increases.
 
 ## Goals
-- Give the bot a clear, consistent personality.
-- Keep factual correctness and tool reliability unchanged.
-- Let personality adapt to user preference without becoming erratic.
-- Preserve safe behavior and concise Telegram-friendly output.
+- Keep one consistent identity in every conversation.
+- Let that identity evolve through real interaction history.
+- Make replies feel personal, grounded, and alive without losing factual/tool reliability.
+- Preserve safety and concise Telegram-friendly output.
 
 ## Non-Goals
-- Building a fully separate fine-tuned model.
-- Long roleplay personas that reduce truthfulness or tool use quality.
-- Per-message random style changes.
+- Multiple persona presets.
+- Frequent style toggling.
+- Random tone changes for novelty.
 
-## Personality Direction (Default)
-`Grounded Reflective Coach`
-- Warm, direct, and calm.
-- Uses light humor sparingly.
-- Encourages reflection and action, not generic motivational fluff.
-- Speaks like a thoughtful human text thread, not a help-center bot.
+## Personality Charter (Permanent)
+`Steady Companion`
+- Warm, direct, and emotionally present.
+- Reflective without sounding therapeutic or preachy.
+- Honest about uncertainty.
+- Gently remembers what matters to you and builds on it.
 
-## Design
+This charter is fixed and always present in the system prompt.
 
-## 1) Persona Layer in Prompting
-Split the current system prompt into layers:
-1. Core rules (safety, tools, factual constraints).
-2. Output rules (Telegram HTML formatting, length, citations).
-3. Persona rules (voice, tone, rhythm, wording patterns).
-4. Contextual memory (retrieved patterns).
+## What "Soul" Means in Product Terms
+"Soul" here means continuity plus memory plus relational accountability:
+- Continuity: same emotional texture and wording rhythm over time.
+- Memory: references your ongoing themes, not just the current message.
+- Accountability: if it misses tone/context, it notices and repairs.
 
-Why: this isolates style from logic and makes personality easier to tune safely.
+## Architecture
 
-## 2) Configurable Presets
-Add preset selection via env/config:
-- `TELEGRAM_PERSONA_PRESET=coach|friend|concise|analyst`
-- `TELEGRAM_PERSONA_INTENSITY=1..3` (how strong the stylistic markers are)
+## 1) Stable Core + Evolving State
+Split personality into:
+- **Core charter** (static, never reset).
+- **Soul state** (small evolving profile derived from conversation history).
 
-Default:
-- `coach` + intensity `2`
+The response prompt always includes both.
 
-## 3) Per-Chat Style Preferences
-Track preference by chat so the bot can stabilize style:
-- New table (or profile blob) keyed by `chat_id`, e.g. `chat_personality`.
-- Fields:
-  - `preset`
-  - `intensity`
-  - `verbosity_preference` (`short|balanced|detailed`)
-  - `updated_at`
+## 2) Soul State Model (Per Chat)
+Add one persistent record per `chat_id`, for example `chat_soul_state`:
+- `identity_summary` (short paragraph of who the assistant is becoming in this relationship)
+- `relational_commitments` (how it should show up for you)
+- `tone_signature` (style cues that remain stable)
+- `growth_notes` (what changed recently)
+- `version`, `updated_at`
 
-Update triggers:
-- explicit user command (preferred), or
-- inferred repeated preference ("be shorter", "just be direct").
+Keep this compact so it is always injected without bloating tokens.
 
-## 4) Explicit User Controls
-Add lightweight natural-language controls:
-- "Use concise mode"
-- "Be more direct"
-- "Talk like a coach"
-- "Reset style"
+## 3) Evolution Loop
+After compaction windows (already present in agent flow):
+- summarize meaningful interaction shifts,
+- produce a proposed soul-state delta,
+- merge delta into current soul state with guardrails:
+  - no hard personality jumps,
+  - no contradiction with core charter,
+  - no adoption of unsafe/manipulative behaviors.
 
-Implementation path:
-- parse intent in agent layer before tool loop;
-- update chat personality profile;
-- confirm with a short acknowledgment.
+## 4) Memory Integration
+Current pattern retrieval remains the factual memory channel.
+Soul state is the relational style channel.
+Prompt order:
+1. Core safety/tool rules
+2. Core personality charter
+3. Soul state snapshot
+4. Retrieved patterns + recent messages
+5. Formatting constraints
 
-## 5) Anti-Flatness Guardrails
-Add style constraints to reduce generic responses:
-- Avoid repetitive openers across adjacent turns.
-- Prefer concrete wording over abstract filler.
-- Ask at most one reflective follow-up question unless user requests deeper coaching.
-- Keep replies scannable: short paragraphs, one clear next step when relevant.
+## 5) Repair Behavior
+If the assistant feels off-tone or gets corrected:
+- acknowledge briefly,
+- adjust course immediately,
+- store the correction as a candidate growth note for the next soul update.
+
+No "preset switch" language. This is growth, not mode changing.
 
 ## 6) Voice Reply Alignment
-When replying with TTS:
-- map preset to voice settings (voice choice/speed where supported),
-- normalize text for speech while preserving tone markers.
+TTS should preserve the same personality:
+- same tone signature in text before synthesis,
+- avoid robotic over-formatting,
+- keep pacing and warmth consistent with text replies.
 
 ## Implementation Plan
 
-## Phase 1: Prompt Refactor + Presets (fast win)
+## Phase 1: Single-Personality Prompt Foundation
 Changes:
-- Introduce `src/telegram/persona.ts`:
-  - preset definitions
-  - intensity rules
-  - prompt composer
-- Update `buildSystemPrompt` in `src/telegram/agent.ts` to consume persona layer.
-- Add config parsing in `src/config.ts` + `.env.example` placeholders.
+- Add `src/telegram/soul.ts`:
+  - core personality charter
+  - soul-state types
+  - prompt composer for personality section
+- Update `buildSystemPrompt` in `src/telegram/agent.ts` to include:
+  - fixed charter
+  - soul-state snapshot (if present)
+- Add feature flag:
+  - `TELEGRAM_SOUL_ENABLED=true`
 
 Tests:
-- `tests/tools/telegram-agent.test.ts`:
-  - system prompt includes selected preset instructions;
-  - fallback behavior for invalid preset/intensity.
+- system prompt always includes fixed charter;
+- no preset/mode fields are referenced anymore;
+- fallback when soul state is absent.
 
 Success criteria:
-- Bot has visibly consistent voice in 20-message manual chat.
+- clear consistency in tone across a 20+ message manual chat.
 
-## Phase 2: Per-Chat Preference Persistence
+## Phase 2: Persistent Soul State
 Changes:
-- Add migration for `chat_personality`.
-- Read preferences at request start in webhook/agent path.
-- Write preferences when user sends explicit style changes.
+- Add migration for `chat_soul_state`.
+- Add DB queries:
+  - `getSoulState(chatId)`
+  - `upsertSoulState(chatId, state)`
+- Load state at reply time and inject into prompt.
 
 Tests:
-- integration tests for read/write profile behavior;
-- update tests for preference override precedence.
+- read/write persistence by chat id;
+- state survives restarts and deploys.
 
 Success criteria:
-- style survives process restarts and remains stable per chat.
+- assistant keeps the same relational voice after restart.
 
-## Phase 3: User Controls + Heuristics
+## Phase 3: Controlled Evolution Engine
 Changes:
-- implement parser for style-change intents;
-- add anti-repetition heuristics (opener and phrasing variety).
+- On compaction, run a "soul delta" extraction pass:
+  - input: recent chats + existing soul state
+  - output: conservative updates only
+- Merge function with hard checks:
+  - max delta size,
+  - no contradiction with charter,
+  - no drastic style drift.
 
 Tests:
-- intent parsing tests;
-- regression tests ensuring tool-calling quality unchanged.
+- delta merge stability tests;
+- regression tests for tool-calling behavior.
 
 Success criteria:
-- users can intentionally steer style in one message.
+- personality changes feel gradual and earned, not abrupt.
 
-## Phase 4: Measurement + Iteration
-Add optional feedback capture (simple thumbs up/down command or tag).
-Track:
-- response acceptance proxy (continued engagement),
-- explicit style complaints frequency,
-- latency/token impact of persona prompts.
+## Phase 4: Quality Loop
+Add lightweight quality signals:
+- explicit "that felt generic" counts,
+- explicit "this feels like you know me" counts,
+- response latency/token overhead.
 
-Adjust preset text and intensity based on real chats.
+Tune merge strictness and soul-state size based on real chats.
 
-## Risks and Mitigations
-- Risk: stronger personality can hallucinate confidence.
-  - Mitigation: keep factual/tool constraints in core layer above persona layer.
-- Risk: style variability increases token usage.
-  - Mitigation: intensity cap and concise output rules.
-- Risk: user dislikes default tone.
-  - Mitigation: explicit preset controls + per-chat persistence.
+## Guardrails
+- Truth and tool accuracy always outrank style.
+- Never fabricate emotional certainty.
+- Never simulate dependency or manipulate attachment.
+- Keep replies concise by default even when emotionally rich.
 
 ## Rollout
-1. Deploy Phase 1 behind env flag:
-   - `TELEGRAM_PERSONA_ENABLED=true`
-2. Enable for your chat ID only.
-3. Validate for 2-3 days.
-4. Enable generally, keep quick rollback flag.
+1. Deploy behind `TELEGRAM_SOUL_ENABLED`.
+2. Enable only for your chat id.
+3. Run for 3-5 days and review transcripts.
+4. Tighten/adjust charter wording and delta rules.
+5. Enable broadly.
 
 ## Immediate Next Build Slice
-Implement Phase 1 only:
-- persona module
-- config/env wiring
+Build only Phase 1 + Phase 2 first:
+- core charter module
+- soul-state table + queries
 - prompt integration
 - tests
 
-This gives the fastest visible personality improvement with low risk.
+That is the minimum slice that creates one stable personality with real continuity.
