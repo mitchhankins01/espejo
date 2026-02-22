@@ -1075,7 +1075,9 @@ describe("compactIfNeeded", () => {
     const onCompacted = vi.fn().mockResolvedValue(undefined);
     await compactIfNeeded("100", onCompacted);
 
-    expect(onCompacted).toHaveBeenCalledWith("1 new patterns, 1 reinforced");
+    expect(onCompacted).toHaveBeenCalledWith(
+      "<b>1 new patterns:</b>\n  [behavior] Test callback pattern\n1 reinforced"
+    );
   });
 
   it("includes contradictions and supersessions in onCompacted summary", async () => {
@@ -1111,7 +1113,7 @@ describe("compactIfNeeded", () => {
     const onCompacted = vi.fn().mockResolvedValue(undefined);
     await compactIfNeeded("100", onCompacted);
 
-    expect(onCompacted).toHaveBeenCalledWith("1 contradictions, 1 superseded");
+    expect(onCompacted).toHaveBeenCalledWith("1 contradictions\n1 superseded");
   });
 
   it("does not call onCompacted when extraction has no results", async () => {
@@ -1311,7 +1313,9 @@ describe("forceCompact", () => {
     await forceCompact("100", onCompacted);
 
     expect(mockMarkMessagesCompacted).toHaveBeenCalled();
-    expect(onCompacted).toHaveBeenCalledWith("1 new patterns");
+    expect(onCompacted).toHaveBeenCalledWith(
+      "<b>1 new patterns:</b>\n  [behavior] test pattern"
+    );
   });
 
   it("reports nothing to compact with too few messages", async () => {

@@ -1,0 +1,16 @@
+TODOs
+
+test run
+send pics, extraction
+receive voice messages
+migrate to AWS/EU using sst
+integrate Oura
+integrate messaging apps and social contacts (social db?)
+integrate with calander and email (get/create events or reminders and work with email)
+amy other gsuite integrations
+what other data can I collect
+automated agent -> codex reviewer -> iterative improvement (does research as it goes)
+research if 100% code coverage is actually helpful
+research other ways to harness the agent asie pnpm check script
+how to best replace DayOne? I'd like to reuse something, the less code I do the better and the svelte web impl is lacking
+document ingestor

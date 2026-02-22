@@ -1,6 +1,6 @@
 # espejo-mcp
 
-MCP server for semantic journal search over Day One exports in PostgreSQL + pgvector.
+MCP server + Telegram chatbot for semantic journal search over Day One exports in PostgreSQL + pgvector.
 
 ## Development Loop
 
@@ -66,6 +66,13 @@ src/
     find-similar.ts — Cosine similarity from a source entry.
     list-tags.ts    — All tags with counts.
     entry-stats.ts  — Writing frequency and trends.
+    log-weight.ts   — Daily weight logging (reuses upsertDailyMetric).
+  telegram/
+    webhook.ts      — Telegram webhook handler. Validates secret token, dispatches updates.
+    updates.ts      — Update deduplication, per-chat queue, fragment reassembly.
+    agent.ts        — Claude agent loop. Context building, tool dispatch, compaction, pattern extraction.
+    client.ts       — Telegram Bot API client. Retry, chunking, HTML parse fallback.
+    voice.ts        — Voice message download + Whisper transcription.
   storage/
     r2.ts           — Cloudflare R2 client. Upload, exists check, public URL.
   formatters/
@@ -78,7 +85,9 @@ scripts/
 specs/
   schema.sql        — Canonical DB schema.
   tools.spec.ts     — Tool contracts: params, types, descriptions, examples.
-  telegram-chatbot-plan.md — Implementation plan for Telegram chatbot with pattern memory.
+  telegram-chatbot-plan.md — Original design for Telegram chatbot with pattern memory.
+  episodic-memory.md — Episodic memory extension plan (fact + event pattern kinds).
+  ltm-research.md   — Evidence-based research on long-term memory architecture.
   fixtures/
     seed.ts         — Test data with pre-computed embeddings for determinism.
 ```
@@ -415,16 +424,30 @@ pnpm telegram:setup --delete
 | `dotenv` | Env file loading |
 | `@aws-sdk/client-s3` | Cloudflare R2 media storage (S3-compatible) |
 | `better-sqlite3` | Read DayOne.sqlite during sync |
+| `@anthropic-ai/sdk` | Claude agent for Telegram chatbot conversations |
 
-## Telegram Chatbot (Next Phase)
+## Telegram Chatbot
 
-The next major feature is a Telegram chatbot with pattern-based long-term memory. Full implementation plan: `specs/telegram-chatbot-plan.md`.
+A Telegram chatbot with pattern-based long-term memory. Deployed to Railway, opt-in via `TELEGRAM_BOT_TOKEN`. Original design: `specs/telegram-chatbot-plan.md`.
 
-Key additions:
-- `src/telegram/` — webhook, update processing, voice transcription, Claude agent, Telegram client
-- `src/tools/log-weight.ts` — weight logging tool (reuses `upsertDailyMetric`)
-- 7 new DB tables: `chat_messages`, `patterns`, `pattern_observations`, `pattern_relations`, `pattern_aliases`, `pattern_entries`, `api_usage`
-- New dependency: `@anthropic-ai/sdk`
+**What it does:**
+- Conversational interface via text or voice messages, powered by Claude
+- Queries the journal using the existing 7 MCP tools via tool_use loop
+- Logs weight via natural language ("I weighed in at 76.5 today")
+- Voice messages transcribed via OpenAI Whisper
+- Extracts patterns from conversations during compaction — the bot's long-term memory
+
+**Commands:**
+- `/compact` — Force pattern extraction from recent conversation (useful for testing, or when you want the bot to learn from a short conversation without waiting)
+
+**Pattern memory:**
+- 7 pattern kinds with typed decay scoring: behavior, emotion, belief, goal, preference, temporal, causal
+- Compaction triggers: size-based (>48k chars) OR time-based (12+ hours since last, 10+ messages)
+- Dedup: canonical hash (exact match) + ANN embedding similarity (0.82+ threshold)
+- Retrieval: semantic search → MMR reranking → budget cap (2000 tokens) → injected into system prompt
+- DB tables: `chat_messages`, `patterns`, `pattern_observations`, `pattern_relations`, `pattern_aliases`, `pattern_entries`, `api_usage`
+
+**Planned improvement:** Episodic memory — adding `fact` and `event` pattern kinds so the bot remembers specific details, not just behavioral themes. See `specs/episodic-memory.md`.
 
 ## What's Out of Scope
 
@@ -433,6 +456,7 @@ Do not implement these (they're planned future work, not part of the current bui
 - Clustering analysis (HDBSCAN/k-means over embeddings)
 - Oura Ring data correlation
 - Write/update/delete tools (this server is read-only for journal entries)
-- Web UI or dashboard
+- Web UI or dashboard (spec exists at `specs/web-app.spec.md`)
 - Multi-user support or auth beyond MCP SDK defaults
 - Chunking strategies (entries fit in single embeddings)
+- Auto-purge of compacted messages (function exists in `queries.ts`, not wired up)

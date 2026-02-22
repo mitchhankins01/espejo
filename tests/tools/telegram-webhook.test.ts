@@ -420,7 +420,7 @@ describe("error handling", () => {
 
   it("/compact sends compaction summary to chat", async () => {
     mockForceCompact.mockImplementationOnce(async (_chatId: string, onCompacted: (s: string) => Promise<void>) => {
-      await onCompacted("2 new patterns, 1 reinforced");
+      await onCompacted("<b>2 new patterns:</b>\n  [behavior] pat1\n  [behavior] pat2\n1 reinforced");
     });
 
     const handler = getHandler();
@@ -428,7 +428,7 @@ describe("error handling", () => {
 
     expect(mockSendTelegramMessage).toHaveBeenCalledWith(
       "100",
-      "<i>2 new patterns, 1 reinforced</i>"
+      "<i><b>2 new patterns:</b>\n  [behavior] pat1\n  [behavior] pat2\n1 reinforced</i>"
     );
   });
 });

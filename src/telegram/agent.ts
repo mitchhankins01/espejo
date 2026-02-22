@@ -785,17 +785,23 @@ async function runCompaction(
 
   // Notify caller of compaction results
   if (onCompacted) {
-    const parts: string[] = [];
-    if (extraction.new_patterns.length > 0)
-      parts.push(`${extraction.new_patterns.length} new patterns`);
+    const lines: string[] = [];
+
+    if (extraction.new_patterns.length > 0) {
+      lines.push(`<b>${extraction.new_patterns.length} new patterns:</b>`);
+      for (const p of extraction.new_patterns) {
+        lines.push(`  [${p.kind}] ${p.content}`);
+      }
+    }
     if (extraction.reinforcements.length > 0)
-      parts.push(`${extraction.reinforcements.length} reinforced`);
+      lines.push(`${extraction.reinforcements.length} reinforced`);
     if (extraction.contradictions.length > 0)
-      parts.push(`${extraction.contradictions.length} contradictions`);
+      lines.push(`${extraction.contradictions.length} contradictions`);
     if (extraction.supersedes.length > 0)
-      parts.push(`${extraction.supersedes.length} superseded`);
-    if (parts.length > 0) {
-      await onCompacted(parts.join(", "));
+      lines.push(`${extraction.supersedes.length} superseded`);
+
+    if (lines.length > 0) {
+      await onCompacted(lines.join("\n"));
     }
   }
 }
