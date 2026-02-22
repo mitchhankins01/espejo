@@ -329,6 +329,29 @@ Deployed to Railway with the same patterns as [oura-ring-mcp](https://github.com
 
 Supports both stdio transport (for Claude Desktop) and HTTP/SSE transport (for remote/Railway deployment).
 
+### Optional Telegram Bot
+
+The project includes an optional Telegram chatbot (single-user scoped by chat ID).
+
+Required env vars when enabling Telegram:
+
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_SECRET_TOKEN`
+- `TELEGRAM_ALLOWED_CHAT_ID`
+- `OPENAI_API_KEY` (embeddings + Whisper + voice reply TTS)
+
+Provider configuration:
+
+- `TELEGRAM_LLM_PROVIDER=anthropic|openai`
+- `ANTHROPIC_API_KEY` required when provider is `anthropic`
+
+Voice reply controls:
+
+- `TELEGRAM_VOICE_REPLY_MODE=off|adaptive|always`
+- `TELEGRAM_VOICE_REPLY_EVERY` (adaptive cadence for text-origin chats)
+- `TELEGRAM_VOICE_REPLY_MIN_CHARS` / `TELEGRAM_VOICE_REPLY_MAX_CHARS`
+- `OPENAI_TTS_MODEL` / `OPENAI_TTS_VOICE`
+
 ## License
 
 MIT
