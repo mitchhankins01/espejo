@@ -67,7 +67,8 @@ function parseSlashCommand(
   const spaceIdx = trimmed.indexOf(" ");
   const commandPart = spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx);
   const argText = spaceIdx === -1 ? "" : trimmed.slice(spaceIdx + 1).trim();
-  const name = commandPart.slice(1).split("@")[0].toLowerCase();
+  const rawName = commandPart.slice(1).split("@")[0].toLowerCase();
+  const name = rawName === "evenning" ? "evening" : rawName;
   if (!name) return null;
 
   return { name, argText };

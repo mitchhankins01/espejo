@@ -911,6 +911,19 @@ describe("error handling", () => {
     expect(firstCall.message).toContain("Start my evening review now.");
   });
 
+  it("activates evening review mode with /evenning typo alias", async () => {
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/evenning", messageId: 1, date: 1000 });
+
+    expect(mockRunAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "evening_review",
+      })
+    );
+    const firstCall = mockRunAgent.mock.calls[0][0];
+    expect(firstCall.message).toContain("Start my evening review now.");
+  });
+
   it("passes optional focus seed through /evening arguments", async () => {
     const handler = getHandler();
     await handler({
