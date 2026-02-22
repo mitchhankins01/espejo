@@ -14,6 +14,13 @@ export interface TelegramMessage {
   from?: TelegramUser;
   text?: string;
   caption?: string;
+  photo?: { file_id: string }[];
+  document?: {
+    file_id: string;
+    file_name?: string;
+    mime_type?: string;
+    file_size?: number;
+  };
   voice?: { file_id: string; duration: number };
   media_group_id?: string;
   date: number;
@@ -36,6 +43,13 @@ export interface AssembledMessage {
   text: string;
   messageId: number;
   date: number;
+  photo?: { fileId: string; caption: string };
+  document?: {
+    fileId: string;
+    fileName?: string;
+    mimeType?: string;
+    caption: string;
+  };
   voice?: { fileId: string; durationSeconds: number };
   callbackData?: string;
 }
@@ -367,6 +381,44 @@ export function processUpdate(update: TelegramUpdate): void {
         voice: {
           fileId: msg.voice!.file_id,
           durationSeconds: msg.voice!.duration,
+        },
+      })
+    );
+    return;
+  }
+
+  // Photo message (single) — OCR happens downstream
+  if (msg.photo && msg.photo.length > 0) {
+    const largest = msg.photo[msg.photo.length - 1];
+    enqueue(String(msg.chat.id), () =>
+      handler({
+        chatId: msg.chat.id,
+        text: msg.caption ?? "",
+        messageId: msg.message_id,
+        date: msg.date,
+        photo: {
+          fileId: largest.file_id,
+          caption: msg.caption ?? "",
+        },
+      })
+    );
+    return;
+  }
+
+  // Document message — text extraction happens downstream
+  if (msg.document) {
+    const doc = msg.document;
+    enqueue(String(msg.chat.id), () =>
+      handler({
+        chatId: msg.chat.id,
+        text: msg.caption ?? "",
+        messageId: msg.message_id,
+        date: msg.date,
+        document: {
+          fileId: doc.file_id,
+          fileName: doc.file_name,
+          mimeType: doc.mime_type,
+          caption: msg.caption ?? "",
         },
       })
     );
