@@ -48,10 +48,10 @@ vi.mock("../../src/config.js", () => ({
   config: {
     telegram: { botToken: "123:ABC", secretToken: "", allowedChatId: "100" },
     openai: { apiKey: "sk-test", embeddingModel: "text-embedding-3-small", embeddingDimensions: 1536 },
-    anthropic: { apiKey: "sk-ant-test", model: "claude-sonnet-4-5-20250514" },
+    anthropic: { apiKey: "sk-ant-test", model: "claude-sonnet-4-6" },
     timezone: "Europe/Madrid",
     apiRates: {
-      "claude-sonnet-4-5-20250514": { input: 3.0, output: 15.0 },
+      "claude-sonnet-4-6": { input: 3.0, output: 15.0 },
       "text-embedding-3-small": { input: 0.02, output: 0 },
     } as Record<string, { input: number; output: number }>,
   },

@@ -178,7 +178,7 @@ describe("config", () => {
 
     const { config } = await import("../../src/config.js");
     expect(config.anthropic.apiKey).toBe("");
-    expect(config.anthropic.model).toBe("claude-sonnet-4-5-20250514");
+    expect(config.anthropic.model).toBe("claude-sonnet-4-6");
   });
 
   it("reads TIMEZONE from env", async () => {
@@ -240,7 +240,7 @@ describe("config", () => {
     process.env.NODE_ENV = "development";
 
     const { config } = await import("../../src/config.js");
-    expect(config.apiRates["claude-sonnet-4-5-20250514"]).toEqual({
+    expect(config.apiRates["claude-sonnet-4-6"]).toEqual({
       input: 3.0,
       output: 15.0,
     });

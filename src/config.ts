@@ -82,11 +82,11 @@ export const config = {
   },
   anthropic: {
     apiKey: process.env.ANTHROPIC_API_KEY || "",
-    model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5-20250514",
+    model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6",
   },
   timezone: process.env.TIMEZONE || "Europe/Madrid",
   apiRates: {
-    "claude-sonnet-4-5-20250514": { input: 3.0, output: 15.0 },
+    "claude-sonnet-4-6": { input: 3.0, output: 15.0 },
     "text-embedding-3-small": { input: 0.02, output: 0 },
     "whisper-1": { input: 0.006, output: 0 },
   } as Record<string, { input: number; output: number }>,
