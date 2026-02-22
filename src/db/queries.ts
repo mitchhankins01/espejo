@@ -535,6 +535,9 @@ export interface PatternRow {
   status: string;
   temporal: Record<string, unknown> | null;
   canonical_hash: string | null;
+  source_type: string;
+  source_id: string | null;
+  expires_at: Date | null;
   first_seen: Date;
   last_seen: Date;
   created_at: Date;
@@ -660,6 +663,9 @@ export async function insertPattern(
     embedding: number[] | null;
     temporal: Record<string, unknown> | null;
     canonicalHash: string;
+    sourceType?: string;
+    sourceId?: string | null;
+    expiresAt?: Date | null;
     timestamp: Date;
   }
 ): Promise<PatternRow> {
@@ -667,8 +673,11 @@ export async function insertPattern(
     ? `[${params.embedding.join(",")}]`
     : null;
   const result = await pool.query(
-    `INSERT INTO patterns (content, kind, confidence, embedding, temporal, canonical_hash, first_seen, last_seen)
-     VALUES ($1, $2, $3, $4::vector, $5, $6, $7, $7)
+    `INSERT INTO patterns (
+      content, kind, confidence, embedding, temporal, canonical_hash,
+      source_type, source_id, expires_at, first_seen, last_seen
+    )
+     VALUES ($1, $2, $3, $4::vector, $5, $6, $7, $8, $9, $10, $10)
      RETURNING *`,
     [
       params.content,
@@ -677,6 +686,9 @@ export async function insertPattern(
       embeddingStr,
       params.temporal ? JSON.stringify(params.temporal) : null,
       params.canonicalHash,
+      params.sourceType ?? "compaction",
+      params.sourceId ?? null,
+      params.expiresAt ?? null,
       params.timestamp,
     ]
   );
@@ -750,6 +762,7 @@ export async function findSimilarPatterns(
     `SELECT *, 1 - (embedding <=> $1::vector) AS similarity
      FROM patterns
      WHERE status = 'active' AND embedding IS NOT NULL
+       AND (expires_at IS NULL OR expires_at > NOW())
        AND 1 - (embedding <=> $1::vector) >= $3
      ORDER BY embedding <=> $1::vector
      LIMIT $2`,
@@ -779,18 +792,21 @@ export async function searchPatterns(
         CASE kind
           WHEN 'behavior' THEN 90 WHEN 'belief' THEN 90 WHEN 'goal' THEN 60
           WHEN 'preference' THEN 90 WHEN 'emotion' THEN 14
-          WHEN 'temporal' THEN 365 WHEN 'causal' THEN 90 ELSE 90
+          WHEN 'temporal' THEN 365 WHEN 'causal' THEN 90
+          WHEN 'fact' THEN 3650 WHEN 'event' THEN 60 ELSE 90
         END AS half_life,
         CASE kind
           WHEN 'behavior' THEN 0.45 WHEN 'belief' THEN 0.45 WHEN 'goal' THEN 0.35
           WHEN 'preference' THEN 0.45 WHEN 'emotion' THEN 0.15
-          WHEN 'temporal' THEN 0.60 WHEN 'causal' THEN 0.45 ELSE 0.45
+          WHEN 'temporal' THEN 0.60 WHEN 'causal' THEN 0.45
+          WHEN 'fact' THEN 0.85 WHEN 'event' THEN 0.25 ELSE 0.45
         END AS floor_val,
         CASE status
           WHEN 'active' THEN 1.0 WHEN 'disputed' THEN 0.5 ELSE 0.0
         END AS validity
       FROM patterns
       WHERE embedding IS NOT NULL AND status IN ('active', 'disputed')
+        AND (expires_at IS NULL OR expires_at > NOW())
         AND 1 - (embedding <=> $1::vector) >= $3
     )
     SELECT *,
@@ -822,11 +838,46 @@ export async function getTopPatterns(
   const result = await pool.query(
     `SELECT * FROM patterns
      WHERE status = 'active'
+       AND (expires_at IS NULL OR expires_at > NOW())
      ORDER BY strength DESC
      LIMIT $1`,
     [limit]
   );
   return result.rows.map(mapPatternRow);
+}
+
+/**
+ * Mark expired event patterns as deprecated.
+ */
+export async function pruneExpiredEventPatterns(
+  pool: pg.Pool
+): Promise<number> {
+  const result = await pool.query(
+    `UPDATE patterns
+     SET status = 'deprecated'
+     WHERE kind = 'event'
+       AND status = 'active'
+       AND expires_at IS NOT NULL
+       AND expires_at <= NOW()`
+  );
+  return result.rowCount ?? 0;
+}
+
+/**
+ * Count active event patterns that are now stale (expired), without mutating.
+ */
+export async function countStaleEventPatterns(
+  pool: pg.Pool
+): Promise<number> {
+  const result = await pool.query(
+    `SELECT COUNT(*)::int AS count
+     FROM patterns
+     WHERE kind = 'event'
+       AND status = 'active'
+       AND expires_at IS NOT NULL
+       AND expires_at <= NOW()`
+  );
+  return result.rows[0]?.count ?? 0;
 }
 
 // ============================================================================
@@ -841,11 +892,15 @@ export async function insertPatternObservation(
     evidence: string;
     evidenceRoles: string[];
     confidence: number;
+    sourceType?: string;
+    sourceId?: string | null;
   }
 ): Promise<number> {
   const result = await pool.query(
-    `INSERT INTO pattern_observations (pattern_id, chat_message_ids, evidence, evidence_roles, confidence)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO pattern_observations (
+      pattern_id, chat_message_ids, evidence, evidence_roles, confidence, source_type, source_id
+    )
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING id`,
     [
       params.patternId,
@@ -853,6 +908,8 @@ export async function insertPatternObservation(
       params.evidence,
       params.evidenceRoles,
       params.confidence,
+      params.sourceType ?? "chat_compaction",
+      params.sourceId ?? null,
     ]
   );
   return result.rows[0].id as number;
@@ -956,6 +1013,34 @@ export async function getUsageSummary(
   return result.rows;
 }
 
+export async function logMemoryRetrieval(
+  pool: pg.Pool,
+  params: {
+    chatId: string;
+    queryText: string;
+    queryHash: string;
+    degraded: boolean;
+    patternIds: number[];
+    patternKinds: string[];
+    topScore: number | null;
+  }
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO memory_retrieval_logs (
+      chat_id, query_text, query_hash, degraded, pattern_ids, pattern_kinds, top_score
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [
+      params.chatId,
+      params.queryText,
+      params.queryHash,
+      params.degraded,
+      params.patternIds,
+      params.patternKinds,
+      params.topScore,
+    ]
+  );
+}
+
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -971,6 +1056,9 @@ function mapPatternRow(row: Record<string, unknown>): PatternRow {
     status: row.status as string,
     temporal: row.temporal as Record<string, unknown> | null,
     canonical_hash: row.canonical_hash as string | null,
+    source_type: (row.source_type as string) ?? "compaction",
+    source_id: (row.source_id as string | null) ?? null,
+    expires_at: (row.expires_at as Date | null) ?? null,
     first_seen: row.first_seen as Date,
     last_seen: row.last_seen as Date,
     created_at: row.created_at as Date,

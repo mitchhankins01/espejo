@@ -59,6 +59,8 @@ const healthBase = generateBaseEmbedding(300);
 const reflectionBase = generateBaseEmbedding(400);
 const patternNicotineBase = generateBaseEmbedding(500);
 const patternSleepBase = generateBaseEmbedding(600);
+const patternFactBase = generateBaseEmbedding(700);
+const patternEventBase = generateBaseEmbedding(800);
 
 // ---------------------------------------------------------------------------
 // Fixture entries
@@ -278,6 +280,28 @@ export const fixturePatterns: FixturePattern[] = [
     embedding: addNoise(patternNicotineBase, 10),
     first_seen: "2024-03-01T06:00:00Z",
     last_seen: "2025-02-01T07:00:00Z",
+  },
+  {
+    content: "User's partner is named Ana.",
+    kind: "fact",
+    confidence: 0.95,
+    strength: 2.5,
+    times_seen: 3,
+    status: "active",
+    embedding: patternFactBase,
+    first_seen: "2024-04-01T10:00:00Z",
+    last_seen: "2025-01-12T10:00:00Z",
+  },
+  {
+    content: "User moved to Barcelona in early 2024.",
+    kind: "event",
+    confidence: 0.88,
+    strength: 2.0,
+    times_seen: 2,
+    status: "active",
+    embedding: patternEventBase,
+    first_seen: "2024-02-15T10:00:00Z",
+    last_seen: "2024-12-31T23:00:00Z",
   },
 ];
 

@@ -17,8 +17,10 @@ const {
   mockUpdatePatternStatus,
   mockMarkMessagesCompacted,
   mockLogApiUsage,
+  mockLogMemoryRetrieval,
   mockFindSimilarPatterns,
   mockGetLastCompactionTime,
+  mockCountStaleEventPatterns,
   mockGenerateEmbedding,
   mockAnthropicCreate,
   mockOpenAIChatCreate,
@@ -37,8 +39,10 @@ const {
   mockUpdatePatternStatus: vi.fn().mockResolvedValue(undefined),
   mockMarkMessagesCompacted: vi.fn().mockResolvedValue(undefined),
   mockLogApiUsage: vi.fn().mockResolvedValue(undefined),
+  mockLogMemoryRetrieval: vi.fn().mockResolvedValue(undefined),
   mockFindSimilarPatterns: vi.fn().mockResolvedValue([]),
   mockGetLastCompactionTime: vi.fn().mockResolvedValue(null),
+  mockCountStaleEventPatterns: vi.fn().mockResolvedValue(0),
   mockGenerateEmbedding: vi.fn().mockResolvedValue(new Array(1536).fill(0)),
   mockAnthropicCreate: vi.fn(),
   mockOpenAIChatCreate: vi.fn(),
@@ -106,8 +110,10 @@ vi.mock("../../src/db/queries.js", () => ({
   updatePatternStatus: mockUpdatePatternStatus,
   markMessagesCompacted: mockMarkMessagesCompacted,
   logApiUsage: mockLogApiUsage,
+  logMemoryRetrieval: mockLogMemoryRetrieval,
   findSimilarPatterns: mockFindSimilarPatterns,
   getLastCompactionTime: mockGetLastCompactionTime,
+  countStaleEventPatterns: mockCountStaleEventPatterns,
 }));
 
 vi.mock("../../src/db/embeddings.js", () => ({
@@ -166,7 +172,9 @@ beforeEach(() => {
   mockUpdatePatternStatus.mockReset().mockResolvedValue(undefined);
   mockMarkMessagesCompacted.mockReset().mockResolvedValue(undefined);
   mockLogApiUsage.mockReset().mockResolvedValue(undefined);
+  mockLogMemoryRetrieval.mockReset().mockResolvedValue(undefined);
   mockFindSimilarPatterns.mockReset().mockResolvedValue([]);
+  mockCountStaleEventPatterns.mockReset().mockResolvedValue(0);
   mockGenerateEmbedding.mockReset().mockResolvedValue(new Array(1536).fill(0));
   mockAnthropicCreate.mockReset();
   mockOpenAIChatCreate.mockReset();
@@ -239,6 +247,14 @@ describe("runAgent", () => {
         purpose: "agent",
         inputTokens: 100,
         outputTokens: 20,
+      })
+    );
+    expect(mockLogMemoryRetrieval).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        chatId: "100",
+        queryText: "Hi",
+        degraded: false,
       })
     );
   });
@@ -729,6 +745,22 @@ describe("runAgent", () => {
         score: 0.8,
         similarity: 0.9,
       },
+      {
+        id: 2,
+        content: "User's partner is named Ana.",
+        kind: "fact",
+        confidence: 0.95,
+        strength: 2,
+        times_seen: 3,
+        status: "active",
+        temporal: null,
+        canonical_hash: "def",
+        first_seen: new Date(),
+        last_seen: new Date(),
+        created_at: new Date(),
+        score: 0.75,
+        similarity: 0.8,
+      },
     ]);
 
     mockAnthropicCreate.mockResolvedValueOnce({
@@ -746,6 +778,7 @@ describe("runAgent", () => {
     // Verify system prompt contains the pattern
     const call = mockAnthropicCreate.mock.calls[0][0];
     expect(call.system).toContain("User feels stressed about deadlines");
+    expect(call.system).toContain("[fact] User's partner is named Ana.");
     expect(call.system).toContain("Telegram HTML");
   });
 
@@ -849,7 +882,7 @@ describe("runAgent", () => {
     });
 
     expect(result.response).toBe("I see patterns.");
-    expect(result.activity).toContain("3 patterns");
+    expect(result.activity).toContain("used 3 memories");
     const call = mockAnthropicCreate.mock.calls[0][0];
     expect(call.system).toContain("Pattern A");
     expect(call.system).toContain("Pattern B");
@@ -1240,6 +1273,69 @@ describe("compactIfNeeded", () => {
     expect(mockMarkMessagesCompacted).toHaveBeenCalled();
   });
 
+  it("accepts fact and event kinds during compaction extraction", async () => {
+    const longContent = "x".repeat(10_000);
+    const messages = Array.from({ length: 20 }, (_, i) => ({
+      id: i + 1,
+      role: "user",
+      content: longContent,
+      chat_id: "100",
+      external_message_id: null,
+      tool_call_id: null,
+      compacted_at: null,
+      created_at: new Date(),
+    }));
+
+    mockGetRecentMessages
+      .mockResolvedValueOnce(messages)
+      .mockResolvedValueOnce(messages);
+
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            new_patterns: [
+              {
+                content: "User's partner is named Ana.",
+                kind: "fact",
+                confidence: 0.95,
+                signal: "explicit",
+                evidence_message_ids: [1],
+                entry_uuids: [],
+                temporal: {},
+              },
+              {
+                content: "User moved to Barcelona in early 2024.",
+                kind: "event",
+                confidence: 0.88,
+                signal: "explicit",
+                evidence_message_ids: [2],
+                entry_uuids: [],
+                temporal: { date: "2024-02-01" },
+              },
+            ],
+            reinforcements: [],
+            contradictions: [],
+            supersedes: [],
+          }),
+        },
+      ],
+      usage: { input_tokens: 500, output_tokens: 100 },
+    });
+
+    await compactIfNeeded("100");
+
+    expect(mockInsertPattern).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ kind: "fact" })
+    );
+    expect(mockInsertPattern).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ kind: "event" })
+    );
+  });
+
   it("marks messages compacted even when extraction returns null", async () => {
     const longContent = "x".repeat(10_000);
     const messages = Array.from({ length: 20 }, (_, i) => ({
@@ -1557,7 +1653,7 @@ describe("compactIfNeeded", () => {
     await compactIfNeeded("100", onCompacted);
 
     expect(onCompacted).toHaveBeenCalledWith(
-      "<b>1 new patterns:</b>\n  [behavior] Test callback pattern\n1 reinforced"
+      "saved 1 memory (behavior) · reinforced 1"
     );
   });
 
@@ -1594,7 +1690,49 @@ describe("compactIfNeeded", () => {
     const onCompacted = vi.fn().mockResolvedValue(undefined);
     await compactIfNeeded("100", onCompacted);
 
-    expect(onCompacted).toHaveBeenCalledWith("1 contradictions\n1 superseded");
+    expect(onCompacted).toHaveBeenCalledWith(
+      "flagged 1 as disputed · superseded 1"
+    );
+  });
+
+  it("reports stale event memories pending review (no auto-prune)", async () => {
+    const longContent = "x".repeat(10_000);
+    const messages = Array.from({ length: 20 }, (_, i) => ({
+      id: i + 1,
+      role: "user",
+      content: longContent,
+      chat_id: "100",
+      external_message_id: null,
+      tool_call_id: null,
+      compacted_at: null,
+      created_at: new Date(),
+    }));
+
+    mockGetRecentMessages
+      .mockResolvedValueOnce(messages)
+      .mockResolvedValueOnce(messages);
+
+    mockCountStaleEventPatterns.mockResolvedValueOnce(2);
+
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          new_patterns: [],
+          reinforcements: [],
+          contradictions: [],
+          supersedes: [],
+        }),
+      }],
+      usage: { input_tokens: 500, output_tokens: 100 },
+    });
+
+    const onCompacted = vi.fn().mockResolvedValue(undefined);
+    await compactIfNeeded("100", onCompacted);
+
+    expect(onCompacted).toHaveBeenCalledWith(
+      "2 stale event memories pending review"
+    );
   });
 
   it("does not call onCompacted when extraction has no results", async () => {
@@ -1794,9 +1932,7 @@ describe("forceCompact", () => {
     await forceCompact("100", onCompacted);
 
     expect(mockMarkMessagesCompacted).toHaveBeenCalled();
-    expect(onCompacted).toHaveBeenCalledWith(
-      "<b>1 new patterns:</b>\n  [behavior] test pattern"
-    );
+    expect(onCompacted).toHaveBeenCalledWith("saved 1 memory (behavior)");
   });
 
   it("reports nothing to compact with too few messages", async () => {

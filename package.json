@@ -36,6 +36,7 @@
     "sync:weight": "tsx scripts/sync-weight.ts",
     "sync:weight:prod": "NODE_ENV=production tsx scripts/sync-weight.ts",
     "telegram:setup": "tsx scripts/telegram-setup.ts",
+    "deploy:smoke": "tsx scripts/deploy-smoke.ts",
     "check:all": "pnpm -w check && pnpm --filter @espejo/web check"
   },
   "dependencies": {
