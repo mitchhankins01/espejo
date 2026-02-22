@@ -73,6 +73,55 @@ function parseSlashCommand(
   return { name, argText };
 }
 
+type EveningIntent =
+  | { type: "enable"; seed: string | null }
+  | { type: "disable" };
+
+function parseNaturalEveningIntent(text: string): EveningIntent | null {
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.startsWith("/")) return null;
+
+  const normalized = trimmed.toLowerCase();
+  const eveningPhrase =
+    /evening\s+(review|check[-\s]?in)/i;
+
+  if (
+    /\b(?:stop|end|disable|exit|turn off)\s+(?:the\s+)?evening\s+(?:review|check[-\s]?in)\b/i.test(
+      normalized
+    ) ||
+    /\bevening\s+(?:review|check[-\s]?in)\s+(?:off|stop|end|done|exit)\b/i.test(
+      normalized
+    )
+  ) {
+    return { type: "disable" };
+  }
+
+  const phraseMatch = eveningPhrase.exec(trimmed);
+  if (!phraseMatch) return null;
+
+  const isExact = /^(?:evening review|evening check[-\s]?in)$/i.test(trimmed);
+  const hasActivationHint =
+    /\b(?:let'?s|lets|start|begin|do|run|can we|time for|switch to|activate|now|ahora|por favor|please)\b/i.test(
+      normalized
+    );
+
+  if (!isExact && !hasActivationHint) return null;
+
+  let seed = trimmed
+    .slice(phraseMatch.index + phraseMatch[0].length)
+    .replace(/^[\s:,\-–—]+/, "")
+    .trim();
+
+  if (/^(now|ahora|please|pls)$/i.test(seed)) {
+    seed = "";
+  }
+
+  return {
+    type: "enable",
+    seed: seed || null,
+  };
+}
+
 function getChatMode(chatId: string): AgentMode {
   return chatModes.get(chatId) ?? "default";
 }
@@ -195,6 +244,7 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
     if (!text) return;
 
     const command = parseSlashCommand(text);
+    const naturalEveningIntent = parseNaturalEveningIntent(text);
 
     // Handle soul feedback callbacks (soul:personal, soul:generic)
     if (msg.callbackData?.startsWith("soul:")) {
@@ -303,6 +353,13 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
 
       chatModes.set(chatId, "evening_review");
       text = buildEveningKickoffMessage(command.argText || null);
+    } else if (naturalEveningIntent?.type === "disable") {
+      chatModes.delete(chatId);
+      await sendTelegramMessage(chatId, "<i>Evening review mode off.</i>");
+      return;
+    } else if (naturalEveningIntent?.type === "enable") {
+      chatModes.set(chatId, "evening_review");
+      text = buildEveningKickoffMessage(naturalEveningIntent.seed);
     }
 
     const { response, activity } = await runAgent({

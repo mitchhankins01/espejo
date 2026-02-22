@@ -951,6 +951,53 @@ describe("error handling", () => {
     const thirdCall = mockRunAgent.mock.calls[1][0];
     expect(thirdCall.mode).toBe("default");
   });
+
+  it("activates evening review mode from natural language request", async () => {
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "Let’s do evening review ahora",
+      messageId: 1,
+      date: 1000,
+    });
+
+    const firstCall = mockRunAgent.mock.calls[0][0];
+    expect(firstCall.mode).toBe("evening_review");
+    expect(firstCall.message).toContain("Start my evening review now.");
+  });
+
+  it("does not hijack plain mentions of evening review", async () => {
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "my evening review yesterday was pretty intense",
+      messageId: 1,
+      date: 1000,
+    });
+
+    const firstCall = mockRunAgent.mock.calls[0][0];
+    expect(firstCall.mode).toBe("default");
+    expect(firstCall.message).toBe("my evening review yesterday was pretty intense");
+  });
+
+  it("deactivates evening mode from natural-language stop phrase", async () => {
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/evening", messageId: 1, date: 1000 });
+    await handler({
+      chatId: 100,
+      text: "stop evening review",
+      messageId: 2,
+      date: 1001,
+    });
+    await handler({ chatId: 100, text: "back to normal", messageId: 3, date: 1002 });
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      "<i>Evening review mode off.</i>"
+    );
+    const thirdCall = mockRunAgent.mock.calls[1][0];
+    expect(thirdCall.mode).toBe("default");
+  });
 });
 
 describe("soul feedback buttons", () => {
