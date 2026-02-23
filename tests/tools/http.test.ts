@@ -31,11 +31,36 @@ vi.mock("../../src/transports/oauth.js", () => ({
   isValidOAuthToken: vi.fn(() => false),
 }));
 
-const { mockPool, mockUpsertDailyMetric, mockGetActivityLog, mockGetRecentActivityLogs } = vi.hoisted(() => ({
+const {
+  mockPool,
+  mockUpsertDailyMetric,
+  mockGetActivityLog,
+  mockGetRecentActivityLogs,
+  mockGetRetentionByInterval,
+  mockGetVocabularyFunnel,
+  mockGetGradeTrend,
+  mockGetLapseRateTrend,
+  mockGetProgressTimeSeries,
+  mockGetRetentionByContext,
+  mockGetSpanishQuizStats,
+  mockGetSpanishAdaptiveContext,
+  mockGetSpanishAssessments,
+  mockGetLatestSpanishAssessment,
+} = vi.hoisted(() => ({
   mockPool: {},
   mockUpsertDailyMetric: vi.fn(),
   mockGetActivityLog: vi.fn(),
   mockGetRecentActivityLogs: vi.fn(),
+  mockGetRetentionByInterval: vi.fn(),
+  mockGetVocabularyFunnel: vi.fn(),
+  mockGetGradeTrend: vi.fn(),
+  mockGetLapseRateTrend: vi.fn(),
+  mockGetProgressTimeSeries: vi.fn(),
+  mockGetRetentionByContext: vi.fn(),
+  mockGetSpanishQuizStats: vi.fn(),
+  mockGetSpanishAdaptiveContext: vi.fn(),
+  mockGetSpanishAssessments: vi.fn(),
+  mockGetLatestSpanishAssessment: vi.fn(),
 }));
 
 vi.mock("../../src/db/client.js", () => ({
@@ -46,6 +71,16 @@ vi.mock("../../src/db/queries.js", () => ({
   upsertDailyMetric: mockUpsertDailyMetric,
   getActivityLog: mockGetActivityLog,
   getRecentActivityLogs: mockGetRecentActivityLogs,
+  getRetentionByInterval: mockGetRetentionByInterval,
+  getVocabularyFunnel: mockGetVocabularyFunnel,
+  getGradeTrend: mockGetGradeTrend,
+  getLapseRateTrend: mockGetLapseRateTrend,
+  getProgressTimeSeries: mockGetProgressTimeSeries,
+  getRetentionByContext: mockGetRetentionByContext,
+  getSpanishQuizStats: mockGetSpanishQuizStats,
+  getSpanishAdaptiveContext: mockGetSpanishAdaptiveContext,
+  getSpanishAssessments: mockGetSpanishAssessments,
+  getLatestSpanishAssessment: mockGetLatestSpanishAssessment,
 }));
 
 const mockHandleRequest = vi.fn();
@@ -63,6 +98,16 @@ describe("startHttpServer", () => {
     mockUpsertDailyMetric.mockReset();
     mockGetActivityLog.mockReset();
     mockGetRecentActivityLogs.mockReset();
+    mockGetRetentionByInterval.mockReset();
+    mockGetVocabularyFunnel.mockReset();
+    mockGetGradeTrend.mockReset();
+    mockGetLapseRateTrend.mockReset();
+    mockGetProgressTimeSeries.mockReset();
+    mockGetRetentionByContext.mockReset();
+    mockGetSpanishQuizStats.mockReset();
+    mockGetSpanishAdaptiveContext.mockReset();
+    mockGetSpanishAssessments.mockReset();
+    mockGetLatestSpanishAssessment.mockReset();
     // Restore mock implementations after clearAllMocks
     mockApp.set.mockReturnThis();
     mockApp.use.mockReturnThis();
@@ -752,5 +797,221 @@ describe("startHttpServer", () => {
 
     expect(mockRes.sendStatus).toHaveBeenCalledWith(204);
     expect(mockNext).not.toHaveBeenCalled();
+  });
+
+  // =========================================================================
+  // Spanish analytics endpoints
+  // =========================================================================
+
+  it("registers /api/spanish/:chatId/dashboard endpoint", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const dashboardCall = mockApp.get.mock.calls.find(
+      (c: any[]) => c[0] === "/api/spanish/:chatId/dashboard"
+    );
+    expect(dashboardCall).toBeTruthy();
+  });
+
+  it("/api/spanish/:chatId/dashboard returns aggregated data", async () => {
+    const mockStats = { total_words: 50, due_now: 3, new_words: 10, learning_words: 15, review_words: 20, relearning_words: 5, reviews_today: 4, average_grade: 3.2 };
+    const mockAdaptive = { recent_avg_grade: 3.0, recent_lapse_rate: 0.1, avg_difficulty: 4.0, total_reviews: 100, mastered_count: 10, struggling_count: 2 };
+    mockGetSpanishQuizStats.mockResolvedValue(mockStats);
+    mockGetSpanishAdaptiveContext.mockResolvedValue(mockAdaptive);
+    mockGetRetentionByInterval.mockResolvedValue([]);
+    mockGetVocabularyFunnel.mockResolvedValue([]);
+    mockGetGradeTrend.mockResolvedValue([]);
+    mockGetLapseRateTrend.mockResolvedValue([]);
+    mockGetProgressTimeSeries.mockResolvedValue([]);
+    mockGetRetentionByContext.mockResolvedValue([]);
+    mockGetLatestSpanishAssessment.mockResolvedValue(null);
+
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const dashboardCall = mockApp.get.mock.calls.find(
+      (c: any[]) => c[0] === "/api/spanish/:chatId/dashboard"
+    );
+    const handler = dashboardCall![1];
+
+    const mockReq = { params: { chatId: "100" }, headers: {}, query: { days: "30" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+
+    expect(mockRes.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stats: mockStats,
+        adaptive: mockAdaptive,
+        retention: [],
+        funnel: [],
+        grade_trend: [],
+        lapse_trend: [],
+        progress: [],
+        context_retention: [],
+        latest_assessment: null,
+      })
+    );
+  });
+
+  it("/api/spanish/:chatId/dashboard rejects unauthorized when secret is set", async () => {
+    const { config } = await import("../../src/config.js");
+    (config as any).server.mcpSecret = "test-secret";
+
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const dashboardCall = mockApp.get.mock.calls.find(
+      (c: any[]) => c[0] === "/api/spanish/:chatId/dashboard"
+    );
+    const handler = dashboardCall![1];
+
+    const mockReq = { params: { chatId: "100" }, headers: { authorization: "Bearer wrong-token" }, query: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+
+    expect(mockRes.status).toHaveBeenCalledWith(401);
+    (config as any).server.mcpSecret = "";
+  });
+
+  it("/api/spanish/:chatId/dashboard defaults to 90 days for NaN input", async () => {
+    mockGetSpanishQuizStats.mockResolvedValue({ total_words: 0, due_now: 0, new_words: 0, learning_words: 0, review_words: 0, relearning_words: 0, reviews_today: 0, average_grade: 0 });
+    mockGetSpanishAdaptiveContext.mockResolvedValue({ recent_avg_grade: 0, recent_lapse_rate: 0, avg_difficulty: 0, total_reviews: 0, mastered_count: 0, struggling_count: 0 });
+    mockGetRetentionByInterval.mockResolvedValue([]);
+    mockGetVocabularyFunnel.mockResolvedValue([]);
+    mockGetGradeTrend.mockResolvedValue([]);
+    mockGetLapseRateTrend.mockResolvedValue([]);
+    mockGetProgressTimeSeries.mockResolvedValue([]);
+    mockGetRetentionByContext.mockResolvedValue([]);
+    mockGetLatestSpanishAssessment.mockResolvedValue(null);
+
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const dashboardCall = mockApp.get.mock.calls.find(
+      (c: any[]) => c[0] === "/api/spanish/:chatId/dashboard"
+    );
+    const handler = dashboardCall![1];
+
+    const mockReq = { params: { chatId: "100" }, headers: {}, query: { days: "abc" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+
+    expect(mockGetGradeTrend).toHaveBeenCalledWith(mockPool, "100", 90);
+  });
+
+  it("/api/spanish/:chatId/dashboard returns 500 on error", async () => {
+    mockGetSpanishQuizStats.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const dashboardCall = mockApp.get.mock.calls.find(
+      (c: any[]) => c[0] === "/api/spanish/:chatId/dashboard"
+    );
+    const handler = dashboardCall![1];
+
+    const mockReq = { params: { chatId: "100" }, headers: {}, query: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  it("/api/spanish/:chatId/assessments rejects unauthorized when secret is set", async () => {
+    const { config } = await import("../../src/config.js");
+    (config as any).server.mcpSecret = "test-secret";
+
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const assessCall = mockApp.get.mock.calls.find(
+      (c: any[]) => c[0] === "/api/spanish/:chatId/assessments"
+    );
+    const handler = assessCall![1];
+
+    const mockReq = { params: { chatId: "100" }, headers: { authorization: "Bearer wrong-token" }, query: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+
+    expect(mockRes.status).toHaveBeenCalledWith(401);
+    (config as any).server.mcpSecret = "";
+  });
+
+  it("registers /api/spanish/:chatId/assessments endpoint", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const assessCall = mockApp.get.mock.calls.find(
+      (c: any[]) => c[0] === "/api/spanish/:chatId/assessments"
+    );
+    expect(assessCall).toBeTruthy();
+  });
+
+  it("/api/spanish/:chatId/assessments returns assessment list", async () => {
+    const mockAssessments = [
+      { id: 1, chat_id: "100", overall_score: 3.6, assessed_at: new Date() },
+    ];
+    mockGetSpanishAssessments.mockResolvedValue(mockAssessments);
+
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const assessCall = mockApp.get.mock.calls.find(
+      (c: any[]) => c[0] === "/api/spanish/:chatId/assessments"
+    );
+    const handler = assessCall![1];
+
+    const mockReq = { params: { chatId: "100" }, headers: {}, query: { days: "90" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+
+    expect(mockGetSpanishAssessments).toHaveBeenCalledWith(mockPool, "100", 90);
+    expect(mockRes.json).toHaveBeenCalledWith(mockAssessments);
+  });
+
+  it("/api/spanish/:chatId/assessments defaults to 90 days", async () => {
+    mockGetSpanishAssessments.mockResolvedValue([]);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const assessCall = mockApp.get.mock.calls.find(
+      (c: any[]) => c[0] === "/api/spanish/:chatId/assessments"
+    );
+    const handler = assessCall![1];
+
+    const mockReq = { params: { chatId: "100" }, headers: {}, query: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+
+    expect(mockGetSpanishAssessments).toHaveBeenCalledWith(mockPool, "100", 90);
+  });
+
+  it("/api/spanish/:chatId/assessments defaults to 90 days for NaN input", async () => {
+    mockGetSpanishAssessments.mockResolvedValue([]);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const assessCall = mockApp.get.mock.calls.find(
+      (c: any[]) => c[0] === "/api/spanish/:chatId/assessments"
+    );
+    const handler = assessCall![1];
+
+    const mockReq = { params: { chatId: "100" }, headers: {}, query: { days: "abc" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+
+    expect(mockGetSpanishAssessments).toHaveBeenCalledWith(mockPool, "100", 90);
+  });
+
+  it("/api/spanish/:chatId/assessments returns 500 on error", async () => {
+    mockGetSpanishAssessments.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const assessCall = mockApp.get.mock.calls.find(
+      (c: any[]) => c[0] === "/api/spanish/:chatId/assessments"
+    );
+    const handler = assessCall![1];
+
+    const mockReq = { params: { chatId: "100" }, headers: {}, query: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+
+    expect(mockRes.status).toHaveBeenCalledWith(500);
   });
 });

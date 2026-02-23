@@ -615,6 +615,48 @@ export interface SpanishProgressRow {
   updated_at: Date;
 }
 
+// ============================================================================
+// Spanish analytics types
+// ============================================================================
+
+export interface RetentionBucketRow {
+  interval_bucket: string;
+  total_reviews: number;
+  retained: number;
+  retention_rate: number;
+}
+
+export interface VocabularyFunnelRow {
+  state: string;
+  count: number;
+  median_days_in_state: number | null;
+}
+
+export interface GradeTrendRow {
+  date: string;
+  avg_grade: number;
+  review_count: number;
+}
+
+export interface LapseRateTrendRow {
+  date: string;
+  lapse_rate: number;
+  review_count: number;
+}
+
+export interface SpanishAssessmentRow {
+  id: number;
+  chat_id: string;
+  complexity_score: number;
+  grammar_score: number;
+  vocabulary_score: number;
+  code_switching_ratio: number;
+  overall_score: number;
+  sample_message_count: number;
+  rationale: string;
+  assessed_at: Date;
+}
+
 function normalizeVocabularyWord(value: string): string {
   return value.trim().toLowerCase();
 }
@@ -1107,6 +1149,265 @@ export async function getLatestSpanishProgress(
   );
   if (result.rows.length === 0) return null;
   return mapSpanishProgressRow(result.rows[0]);
+}
+
+// ============================================================================
+// Spanish analytics queries
+// ============================================================================
+
+/**
+ * Retention rate grouped by review interval bucket.
+ * Buckets: 0-1d, 1-3d, 3-7d, 7-14d, 14-30d, 30d+
+ * A review is "retained" if grade >= 3.
+ */
+export async function getRetentionByInterval(
+  pool: pg.Pool,
+  chatId: string
+): Promise<RetentionBucketRow[]> {
+  const result = await pool.query(
+    `WITH bucketed AS (
+      SELECT
+        grade,
+        CASE
+          WHEN interval_days IS NULL OR interval_days <= 1 THEN '0-1d'
+          WHEN interval_days <= 3 THEN '1-3d'
+          WHEN interval_days <= 7 THEN '3-7d'
+          WHEN interval_days <= 14 THEN '7-14d'
+          WHEN interval_days <= 30 THEN '14-30d'
+          ELSE '30d+'
+        END AS bucket
+      FROM spanish_reviews
+      WHERE chat_id = $1
+    )
+    SELECT
+      bucket AS interval_bucket,
+      COUNT(*)::int AS total_reviews,
+      COUNT(*) FILTER (WHERE grade >= 3)::int AS retained,
+      CASE WHEN COUNT(*) > 0
+        THEN (COUNT(*) FILTER (WHERE grade >= 3))::float / COUNT(*)
+        ELSE 0
+      END AS retention_rate
+    FROM bucketed
+    GROUP BY bucket
+    ORDER BY CASE bucket
+      WHEN '0-1d' THEN 1 WHEN '1-3d' THEN 2 WHEN '3-7d' THEN 3
+      WHEN '7-14d' THEN 4 WHEN '14-30d' THEN 5 ELSE 6
+    END`,
+    [chatId]
+  );
+  return result.rows.map((row) => ({
+    interval_bucket: row.interval_bucket as string,
+    total_reviews: Number(row.total_reviews),
+    retained: Number(row.retained),
+    retention_rate: parseFloat(row.retention_rate as string),
+  }));
+}
+
+/**
+ * Vocabulary funnel: count of words in each SRS state with median days spent.
+ */
+export async function getVocabularyFunnel(
+  pool: pg.Pool,
+  chatId: string
+): Promise<VocabularyFunnelRow[]> {
+  const result = await pool.query(
+    `SELECT
+      state,
+      COUNT(*)::int AS count,
+      PERCENTILE_CONT(0.5) WITHIN GROUP (
+        ORDER BY EXTRACT(EPOCH FROM (NOW() - first_seen)) / 86400.0
+      )::float AS median_days_in_state
+    FROM spanish_vocabulary
+    WHERE chat_id = $1
+    GROUP BY state
+    ORDER BY CASE state
+      WHEN 'new' THEN 1 WHEN 'learning' THEN 2
+      WHEN 'review' THEN 3 WHEN 'relearning' THEN 4
+    END`,
+    [chatId]
+  );
+  return result.rows.map((row) => ({
+    state: row.state as string,
+    count: Number(row.count),
+    median_days_in_state: row.median_days_in_state != null
+      ? parseFloat(row.median_days_in_state as string)
+      : null,
+  }));
+}
+
+/**
+ * Daily average grade over a rolling window.
+ */
+export async function getGradeTrend(
+  pool: pg.Pool,
+  chatId: string,
+  days: number
+): Promise<GradeTrendRow[]> {
+  const result = await pool.query(
+    `SELECT
+      reviewed_at::date::text AS date,
+      AVG(grade)::float AS avg_grade,
+      COUNT(*)::int AS review_count
+    FROM spanish_reviews
+    WHERE chat_id = $1
+      AND reviewed_at >= NOW() - ($2 || ' days')::interval
+    GROUP BY reviewed_at::date
+    ORDER BY reviewed_at::date`,
+    [chatId, days]
+  );
+  return result.rows.map((row) => ({
+    date: row.date as string,
+    avg_grade: parseFloat(row.avg_grade as string),
+    review_count: Number(row.review_count),
+  }));
+}
+
+/**
+ * Daily lapse rate (% of reviews with grade <= 2) over a rolling window.
+ */
+export async function getLapseRateTrend(
+  pool: pg.Pool,
+  chatId: string,
+  days: number
+): Promise<LapseRateTrendRow[]> {
+  const result = await pool.query(
+    `SELECT
+      reviewed_at::date::text AS date,
+      CASE WHEN COUNT(*) > 0
+        THEN (COUNT(*) FILTER (WHERE grade <= 2))::float / COUNT(*)
+        ELSE 0
+      END AS lapse_rate,
+      COUNT(*)::int AS review_count
+    FROM spanish_reviews
+    WHERE chat_id = $1
+      AND reviewed_at >= NOW() - ($2 || ' days')::interval
+    GROUP BY reviewed_at::date
+    ORDER BY reviewed_at::date`,
+    [chatId, days]
+  );
+  return result.rows.map((row) => ({
+    date: row.date as string,
+    lapse_rate: parseFloat(row.lapse_rate as string),
+    review_count: Number(row.review_count),
+  }));
+}
+
+/**
+ * Historical progress snapshots for time-series display.
+ */
+export async function getProgressTimeSeries(
+  pool: pg.Pool,
+  chatId: string,
+  days: number
+): Promise<SpanishProgressRow[]> {
+  const result = await pool.query(
+    `SELECT *
+    FROM spanish_progress
+    WHERE chat_id = $1
+      AND date >= (CURRENT_DATE - ($2 || ' days')::interval)
+    ORDER BY date`,
+    [chatId, days]
+  );
+  return result.rows.map(mapSpanishProgressRow);
+}
+
+/**
+ * Review count and retention grouped by review_context (conversation, quiz, etc.).
+ */
+export async function getRetentionByContext(
+  pool: pg.Pool,
+  chatId: string
+): Promise<{ context: string; total: number; retained: number; retention_rate: number }[]> {
+  const result = await pool.query(
+    `SELECT
+      review_context AS context,
+      COUNT(*)::int AS total,
+      COUNT(*) FILTER (WHERE grade >= 3)::int AS retained,
+      CASE WHEN COUNT(*) > 0
+        THEN (COUNT(*) FILTER (WHERE grade >= 3))::float / COUNT(*)
+        ELSE 0
+      END AS retention_rate
+    FROM spanish_reviews
+    WHERE chat_id = $1
+    GROUP BY review_context
+    ORDER BY total DESC`,
+    [chatId]
+  );
+  return result.rows.map((row) => ({
+    context: row.context as string,
+    total: Number(row.total),
+    retained: Number(row.retained),
+    retention_rate: parseFloat(row.retention_rate as string),
+  }));
+}
+
+// ============================================================================
+// Spanish assessment queries (LLM-as-judge)
+// ============================================================================
+
+export async function insertSpanishAssessment(
+  pool: pg.Pool,
+  params: {
+    chatId: string;
+    complexityScore: number;
+    grammarScore: number;
+    vocabularyScore: number;
+    codeSwitchingRatio: number;
+    overallScore: number;
+    sampleMessageCount: number;
+    rationale: string;
+  }
+): Promise<SpanishAssessmentRow> {
+  const result = await pool.query(
+    `INSERT INTO spanish_assessments (
+      chat_id, complexity_score, grammar_score, vocabulary_score,
+      code_switching_ratio, overall_score, sample_message_count, rationale
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    RETURNING *`,
+    [
+      params.chatId,
+      params.complexityScore,
+      params.grammarScore,
+      params.vocabularyScore,
+      params.codeSwitchingRatio,
+      params.overallScore,
+      params.sampleMessageCount,
+      params.rationale,
+    ]
+  );
+  return mapSpanishAssessmentRow(result.rows[0]);
+}
+
+export async function getSpanishAssessments(
+  pool: pg.Pool,
+  chatId: string,
+  days: number
+): Promise<SpanishAssessmentRow[]> {
+  const result = await pool.query(
+    `SELECT *
+    FROM spanish_assessments
+    WHERE chat_id = $1
+      AND assessed_at >= NOW() - ($2 || ' days')::interval
+    ORDER BY assessed_at`,
+    [chatId, days]
+  );
+  return result.rows.map(mapSpanishAssessmentRow);
+}
+
+export async function getLatestSpanishAssessment(
+  pool: pg.Pool,
+  chatId: string
+): Promise<SpanishAssessmentRow | null> {
+  const result = await pool.query(
+    `SELECT *
+    FROM spanish_assessments
+    WHERE chat_id = $1
+    ORDER BY assessed_at DESC
+    LIMIT 1`,
+    [chatId]
+  );
+  if (result.rows.length === 0) return null;
+  return mapSpanishAssessmentRow(result.rows[0]);
 }
 
 // ============================================================================
@@ -2402,5 +2703,20 @@ function mapEntryRow(row: Record<string, unknown>): EntryRow {
     audio_count: row.audio_count as number,
     media: (row.media as MediaItem[]) || [],
     weight_kg: row.weight_kg != null ? parseFloat(row.weight_kg as string) : null,
+  };
+}
+
+function mapSpanishAssessmentRow(row: Record<string, unknown>): SpanishAssessmentRow {
+  return {
+    id: row.id as number,
+    chat_id: String(row.chat_id),
+    complexity_score: parseFloat(row.complexity_score as string),
+    grammar_score: parseFloat(row.grammar_score as string),
+    vocabulary_score: parseFloat(row.vocabulary_score as string),
+    code_switching_ratio: parseFloat(row.code_switching_ratio as string),
+    overall_score: parseFloat(row.overall_score as string),
+    sample_message_count: Number(row.sample_message_count),
+    rationale: row.rationale as string,
+    assessed_at: row.assessed_at as Date,
   };
 }

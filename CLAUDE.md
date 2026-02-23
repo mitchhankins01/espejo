@@ -73,6 +73,9 @@ src/
     agent.ts        — Anthropic/OpenAI agent loop. Context building, tool dispatch, compaction, pattern extraction.
     client.ts       — Telegram Bot API client. sendMessage/sendVoice, retry, chunking, HTML parse fallback.
     voice.ts        — Voice processing: Telegram download, Whisper transcription, TTS synthesis helpers.
+  spanish/
+    analytics.ts    — Interface-agnostic Spanish learning analytics. Pure functions: digest building, trend analysis, formatting.
+    assessment.ts   — LLM-as-judge Spanish conversation quality assessment. DI-based client interface.
   storage/
     r2.ts           — Cloudflare R2 client. Upload, exists check, public URL.
   formatters/
@@ -470,6 +473,8 @@ A Telegram chatbot with pattern-based long-term memory. Deployed to Railway, opt
 
 **Commands:**
 - `/compact` — Force pattern extraction from recent conversation (useful for testing, or when you want the bot to learn from a short conversation without waiting)
+- `/digest` — Spanish learning summary: vocabulary stats, retention rates, grade/lapse trends, adaptive status tier, latest assessment
+- `/assess` — Trigger LLM-as-judge evaluation of recent Spanish conversation quality (complexity, grammar, vocabulary, code-switching ratio)
 
 **Pattern memory:**
 - 9 pattern kinds with typed decay scoring: behavior, emotion, belief, goal, preference, temporal, causal, fact, event
@@ -481,6 +486,33 @@ A Telegram chatbot with pattern-based long-term memory. Deployed to Railway, opt
 - Provenance fields: `patterns.source_type/source_id`, `pattern_observations.source_type/source_id`
 
 Episodic memory (`fact` and `event`) is implemented. See `specs/episodic-memory.md`.
+
+### Spanish Learning Observability
+
+Three-tier system for evaluating Spanish tutor effectiveness. Interface-agnostic: analytics layer in `src/spanish/` consumed by both Telegram commands and HTTP endpoints.
+
+**Tier 1 — Retention & Effectiveness Queries** (in `queries.ts`):
+- `getRetentionByInterval` — Retention rate bucketed by SRS interval (0-1d, 1-3d, 3-7d, 7-14d, 14-30d, 30d+)
+- `getVocabularyFunnel` — Word counts by SRS state (new → learning → review → relearning) with median days
+- `getGradeTrend` — Daily average grade over configurable window
+- `getLapseRateTrend` — Daily lapse rate (grade ≤ 2) over configurable window
+- `getProgressTimeSeries` — Historical `spanish_progress` snapshots
+- `getRetentionByContext` — Retention grouped by `review_context` (quiz vs conversation)
+
+**Tier 2 — Digest & Endpoints**:
+- `src/spanish/analytics.ts` — Pure functions: `buildRetentionSummary`, `buildFunnelSummary`, `buildTrendSummary`, `buildAssessmentSummary`, `formatDigestText`, `formatProgressTimeSeries`
+- `/digest` Telegram command — Sends formatted HTML summary of all analytics
+- `GET /api/spanish/:chatId/dashboard` — JSON dashboard aggregating all analytics data
+- `GET /api/spanish/:chatId/assessments` — Assessment history (both require bearer token auth)
+
+**Tier 3 — LLM-as-Judge Assessment** (`src/spanish/assessment.ts`):
+- Samples up to 20 recent user messages from `chat_messages`
+- Sends to gpt-4o-mini for structured evaluation: complexity (1-5), grammar (1-5), vocabulary (1-5), code-switching ratio (0-1), overall (1-5), rationale
+- Stores results in `spanish_assessments` table
+- `AssessmentLlmClient` interface for dependency injection (testable without API calls)
+- `/assess` Telegram command triggers evaluation and sends formatted result
+
+**DB table**: `spanish_assessments` — stores LLM assessment results with scores, sample count, rationale, timestamp. Indexed on `(chat_id, assessed_at DESC)`.
 
 ## What's Out of Scope
 
