@@ -1560,7 +1560,7 @@ describe("runAgent", () => {
 
   it("injects evening review mode instructions when requested", async () => {
     mockAnthropicCreate.mockResolvedValueOnce({
-      content: [{ type: "text", text: "Starting your evening review." }],
+      content: [{ type: "text", text: "Empezamos tu revisión de la noche. ¿Cómo se siente tu cuerpo?" }],
       usage: { input_tokens: 120, output_tokens: 20 },
     });
 
@@ -1574,12 +1574,12 @@ describe("runAgent", () => {
 
     const call = mockAnthropicCreate.mock.calls[0][0];
     expect(call.system).toContain("Evening Review mode is ON.");
-    expect(call.system).toContain("Respect explicit language preference patterns from memory first");
+    expect(call.system).toContain("Spanish is the PRIMARY language");
   });
 
   it("injects morning flow mode instructions when requested", async () => {
     mockAnthropicCreate.mockResolvedValueOnce({
-      content: [{ type: "text", text: "Good morning! How did you land today?" }],
+      content: [{ type: "text", text: "Buenos días! ¿Cómo llegaste esta mañana?" }],
       usage: { input_tokens: 120, output_tokens: 20 },
     });
 
@@ -1593,7 +1593,7 @@ describe("runAgent", () => {
 
     const call = mockAnthropicCreate.mock.calls[0][0];
     expect(call.system).toContain("Morning Flow mode is ON.");
-    expect(call.system).toContain("Respect explicit language preference patterns from memory first");
+    expect(call.system).toContain("Spanish is the PRIMARY language");
   });
 
   it("includes language preference anchors when semantic retrieval is skipped", async () => {
@@ -1740,7 +1740,7 @@ describe("runAgent", () => {
         content: [
           {
             type: "text",
-            text: "Quantum mechanics treats particles as probability amplitudes until measurement collapses outcomes to one observed state, en dat voelt als lazy evaluation with state commit. Entanglement links distant particles so measuring one constrains the other, como si two services shared hidden correlated state. Think of it like distributed state with non-classical correlation.",
+            text: "La mecánica cuántica modela partículas como amplitudes de probabilidad hasta que la medición colapsa los resultados — como lazy evaluation con state commit. El entrelazamiento vincula partículas distantes, como si two services compartieran estado correlacionado. Piénsalo como distributed state with non-classical correlation.",
           },
         ],
         usage: { input_tokens: 80, output_tokens: 35 },
@@ -1753,11 +1753,11 @@ describe("runAgent", () => {
       messageDate: 1000,
     });
 
+    expect(result.response).toContain("mecánica cuántica");
     expect(result.response).toContain("como si");
-    expect(result.response).toContain("en dat");
     expect(mockAnthropicCreate).toHaveBeenCalledTimes(2);
     expect(mockAnthropicCreate.mock.calls[1][0].system).toContain(
-      "Rewrite the assistant draft while preserving meaning and constraints."
+      "Spanish is the PRIMARY language"
     );
   });
 
@@ -1776,7 +1776,7 @@ describe("runAgent", () => {
         content: [
           {
             type: "text",
-            text: "Eso es justo, en ik waardeer de eerlijkheid. Can you share one or two past morning entries that felt right?",
+            text: "Eso es justo, y aprecio la honestidad. ¿Puedes compartir una o dos entradas de la mañana que se sintieron bien?",
           },
         ],
         usage: { input_tokens: 80, output_tokens: 25 },
@@ -1784,17 +1784,17 @@ describe("runAgent", () => {
 
     const result = await runAgent({
       chatId: "100",
-      message: "Start my morning flow now. Pull my last 3 days first, then ask the first bilingual question.",
+      message: "Start my morning flow now. Pull my last 3 days first, then ask the first question in Spanish.",
       externalMessageId: "update:lang-rewrite-morning",
       messageDate: 1000,
       mode: "morning_flow",
     });
 
     expect(result.response).toContain("Eso es justo");
-    expect(result.response).toContain("ik waardeer");
+    expect(result.response).toContain("honestidad");
     expect(mockAnthropicCreate).toHaveBeenCalledTimes(2);
     expect(mockAnthropicCreate.mock.calls[1][0].system).toContain(
-      "Rewrite the assistant draft while preserving meaning and constraints."
+      "Spanish is the PRIMARY language"
     );
   });
 
@@ -1814,7 +1814,7 @@ describe("runAgent", () => {
         content: [
           {
             type: "text",
-            text: "Quantum mechanics treats particles as probability amplitudes until measurement collapses outcomes, en dat voelt als lazy eval. Piensa en entanglement como correlación no clásica.",
+            text: "La mecánica cuántica modela partículas como amplitudes de probabilidad hasta que la medición colapsa los resultados a un solo estado observado — like a lazy eval that finally commits.",
           },
         ],
         usage: { input_tokens: 80, output_tokens: 25 },
@@ -1827,8 +1827,7 @@ describe("runAgent", () => {
       messageDate: 1000,
     });
 
-    expect(result.response).toContain("en dat");
-    expect(result.response).toContain("Piensa");
+    expect(result.response).toContain("mecánica cuántica");
     expect(mockAnthropicCreate).toHaveBeenCalledTimes(2);
   });
 
@@ -1904,7 +1903,7 @@ describe("runAgent", () => {
             message: {
               role: "assistant",
               content:
-                "Quantum mechanics is a probabilistic model where measurement collapses possibilities into one observed value, en dat lijkt op lazy evaluation. Entanglement creates linked outcomes across distance, como una correlacion no clásica.",
+                "La mecánica cuántica es un modelo probabilístico donde la medición colapsa las posibilidades en un solo valor observado — en dat lijkt op lazy evaluation met een definitieve commit.",
             },
           },
         ],
@@ -1918,8 +1917,8 @@ describe("runAgent", () => {
       messageDate: 1000,
     });
 
+    expect(result.response).toContain("mecánica cuántica");
     expect(result.response).toContain("en dat");
-    expect(result.response).toContain("como una");
     expect(mockOpenAIChatCreate).toHaveBeenCalledTimes(2);
     expect(mockAnthropicCreate).not.toHaveBeenCalled();
   });
@@ -2185,12 +2184,12 @@ describe("runAgent", () => {
     );
   });
 
-  it("rewrites when draft has Spanish signals but missing Dutch scaffolding", async () => {
+  it("skips rewrite when draft already has Spanish signals", async () => {
     mockGetLanguagePreferencePatterns.mockResolvedValueOnce([
       {
         id: 305,
         content:
-          "Mitch wants Spanish woven into his interactions, with English and Dutch as the primary communication base.",
+          "Mitch wants Spanish as the primary language with English and Dutch woven in.",
         kind: "preference",
         confidence: 0.98,
         strength: 1,
@@ -2203,35 +2202,25 @@ describe("runAgent", () => {
         created_at: new Date(),
       },
     ]);
-    mockAnthropicCreate
-      .mockResolvedValueOnce({
-        content: [
-          {
-            type: "text",
-            text: "Hola, quantum mechanics models uncertainty through probabilities and superposition.",
-          },
-        ],
-        usage: { input_tokens: 90, output_tokens: 16 },
-      })
-      .mockResolvedValueOnce({
-        content: [
-          {
-            type: "text",
-            text: "Quantum mechanics models uncertainty through probabilities and superposition, en dat is vergelijkbaar met deferred state resolution. Claro, measurement collapses outcomes into one observed state.",
-          },
-        ],
-        usage: { input_tokens: 70, output_tokens: 22 },
-      });
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [
+        {
+          type: "text",
+          text: "Hola, la mecánica cuántica modela la incertidumbre a través de probabilidades y superposición.",
+        },
+      ],
+      usage: { input_tokens: 90, output_tokens: 16 },
+    });
 
     const result = await runAgent({
       chatId: "100",
       message: "Explain quantum mechanics simply",
-      externalMessageId: "update:lang-rewrite-spanish-only-draft",
+      externalMessageId: "update:lang-rewrite-spanish-already",
       messageDate: 1000,
     });
 
-    expect(result.response).toContain("en dat");
-    expect(mockAnthropicCreate).toHaveBeenCalledTimes(2);
+    expect(result.response).toContain("mecánica cuántica");
+    expect(mockAnthropicCreate).toHaveBeenCalledTimes(1);
   });
 
   it("falls back to original draft when OpenAI rewrite returns empty content/usage", async () => {
@@ -2367,14 +2356,14 @@ describe("runAgent", () => {
       },
     ]);
     mockAnthropicCreate.mockResolvedValueOnce({
-      content: [{ type: "text", text: "Starting your evening review." }],
+      content: [{ type: "text", text: "Empezamos tu revisión. ¿Cómo te sientes?" }],
       usage: { input_tokens: 120, output_tokens: 20 },
     });
 
     await runAgent({
       chatId: "100",
       message:
-        "Start my evening review now. Pull my last 7 days first, then ask the first bilingual question.",
+        "Start my evening review now. Pull my last 7 days first, then ask the first question in Spanish.",
       storedUserMessage: "/evening",
       externalMessageId: "update:evening-raw",
       messageDate: 1000,
@@ -2395,7 +2384,7 @@ describe("runAgent", () => {
         expect.objectContaining({
           role: "user",
           content:
-            "Start my evening review now. Pull my last 7 days first, then ask the first bilingual question.",
+            "Start my evening review now. Pull my last 7 days first, then ask the first question in Spanish.",
         }),
       ])
     );
