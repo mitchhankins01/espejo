@@ -24,6 +24,7 @@ import { setMessageHandler, processUpdate } from "./updates.js";
 import type { AssembledMessage, TelegramUpdate } from "./updates.js";
 import {
   buildEveningKickoffMessage,
+  buildMorningKickoffMessage,
   type AgentMode,
 } from "./evening-review.js";
 
@@ -33,7 +34,7 @@ import {
 
 const MAX_TEXT_MESSAGE_VOICE_CHARS = 260;
 const chatModes = new Map<string, AgentMode>();
-const EVENING_DISABLE_TOKENS = new Set(["off", "stop", "end", "done", "exit"]);
+const MODE_DISABLE_TOKENS = new Set(["off", "stop", "end", "done", "exit"]);
 const chatMessageCounters = new Map<string, number>();
 
 const SOUL_FEEDBACK_BUTTONS = {
@@ -101,6 +102,55 @@ function parseNaturalEveningIntent(text: string): EveningIntent | null {
   if (!phraseMatch) return null;
 
   const isExact = /^(?:evening review|evening check[-\s]?in)$/i.test(trimmed);
+  const hasActivationHint =
+    /\b(?:let'?s|lets|start|begin|do|run|can we|time for|switch to|activate|now|ahora|por favor|please)\b/i.test(
+      normalized
+    );
+
+  if (!isExact && !hasActivationHint) return null;
+
+  let seed = trimmed
+    .slice(phraseMatch.index + phraseMatch[0].length)
+    .replace(/^[\s:,\-–—]+/, "")
+    .trim();
+
+  if (/^(now|ahora|please|pls)$/i.test(seed)) {
+    seed = "";
+  }
+
+  return {
+    type: "enable",
+    seed: seed || null,
+  };
+}
+
+type MorningIntent =
+  | { type: "enable"; seed: string | null }
+  | { type: "disable" };
+
+function parseNaturalMorningIntent(text: string): MorningIntent | null {
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.startsWith("/")) return null;
+
+  const normalized = trimmed.toLowerCase();
+  const morningPhrase =
+    /morning\s+(flow|check[-\s]?in)/i;
+
+  if (
+    /\b(?:stop|end|disable|exit|turn off)\s+(?:the\s+)?morning\s+(?:flow|check[-\s]?in)\b/i.test(
+      normalized
+    ) ||
+    /\bmorning\s+(?:flow|check[-\s]?in)\s+(?:off|stop|end|done|exit)\b/i.test(
+      normalized
+    )
+  ) {
+    return { type: "disable" };
+  }
+
+  const phraseMatch = morningPhrase.exec(trimmed);
+  if (!phraseMatch) return null;
+
+  const isExact = /^(?:morning flow|morning check[-\s]?in)$/i.test(trimmed);
   const hasActivationHint =
     /\b(?:let'?s|lets|start|begin|do|run|can we|time for|switch to|activate|now|ahora|por favor|please)\b/i.test(
       normalized
@@ -247,6 +297,7 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
 
     const command = parseSlashCommand(text);
     const naturalEveningIntent = parseNaturalEveningIntent(text);
+    const naturalMorningIntent = parseNaturalMorningIntent(text);
 
     // Handle soul feedback callbacks (soul:personal, soul:generic)
     if (msg.callbackData?.startsWith("soul:")) {
@@ -347,7 +398,7 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
     // Handle /evening command
     if (command?.name === "evening") {
       const firstArg = command.argText.split(/\s+/)[0].toLowerCase();
-      if (EVENING_DISABLE_TOKENS.has(firstArg)) {
+      if (MODE_DISABLE_TOKENS.has(firstArg)) {
         chatModes.delete(chatId);
         await sendTelegramMessage(chatId, "<i>Evening review mode off.</i>");
         return;
@@ -362,6 +413,26 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
     } else if (naturalEveningIntent?.type === "enable") {
       chatModes.set(chatId, "evening_review");
       text = buildEveningKickoffMessage(naturalEveningIntent.seed);
+    }
+
+    // Handle /morning command
+    if (command?.name === "morning") {
+      const firstArg = command.argText.split(/\s+/)[0].toLowerCase();
+      if (MODE_DISABLE_TOKENS.has(firstArg)) {
+        chatModes.delete(chatId);
+        await sendTelegramMessage(chatId, "<i>Morning flow mode off.</i>");
+        return;
+      }
+
+      chatModes.set(chatId, "morning_flow");
+      text = buildMorningKickoffMessage(command.argText || null);
+    } else if (naturalMorningIntent?.type === "disable") {
+      chatModes.delete(chatId);
+      await sendTelegramMessage(chatId, "<i>Morning flow mode off.</i>");
+      return;
+    } else if (naturalMorningIntent?.type === "enable") {
+      chatModes.set(chatId, "morning_flow");
+      text = buildMorningKickoffMessage(naturalMorningIntent.seed);
     }
 
     const { response, activity } = await runAgent({

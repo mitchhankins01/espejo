@@ -1472,6 +1472,25 @@ describe("runAgent", () => {
     expect(call.system).toContain("Respect explicit language preference patterns from memory first");
   });
 
+  it("injects morning flow mode instructions when requested", async () => {
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Good morning! How did you land today?" }],
+      usage: { input_tokens: 120, output_tokens: 20 },
+    });
+
+    await runAgent({
+      chatId: "100",
+      message: "Start morning flow now",
+      externalMessageId: "update:morning-1",
+      messageDate: 1000,
+      mode: "morning_flow",
+    });
+
+    const call = mockAnthropicCreate.mock.calls[0][0];
+    expect(call.system).toContain("Morning Flow mode is ON.");
+    expect(call.system).toContain("Respect explicit language preference patterns from memory first");
+  });
+
   it("includes language preference anchors when semantic retrieval is skipped", async () => {
     mockGetLanguagePreferencePatterns.mockResolvedValueOnce([
       {

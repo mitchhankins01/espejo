@@ -1013,6 +1013,109 @@ describe("error handling", () => {
   });
 });
 
+describe("morning flow mode", () => {
+  it("activates morning flow mode with /morning", async () => {
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/morning", messageId: 1, date: 1000 });
+
+    expect(mockRunAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "morning_flow",
+      })
+    );
+    const firstCall = mockRunAgent.mock.calls[0][0];
+    expect(firstCall.message).toContain("Start my morning flow now.");
+  });
+
+  it("passes optional focus seed through /morning arguments", async () => {
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "/morning sleep and dreams",
+      messageId: 1,
+      date: 1000,
+    });
+
+    const firstCall = mockRunAgent.mock.calls[0][0];
+    expect(firstCall.mode).toBe("morning_flow");
+    expect(firstCall.message).toContain(
+      "Focus this morning: sleep and dreams"
+    );
+  });
+
+  it("keeps morning mode active for subsequent messages", async () => {
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/morning", messageId: 1, date: 1000 });
+    await handler({ chatId: 100, text: "slept terribly", messageId: 2, date: 1001 });
+
+    expect(mockRunAgent).toHaveBeenCalledTimes(2);
+    const secondCall = mockRunAgent.mock.calls[1][0];
+    expect(secondCall.mode).toBe("morning_flow");
+    expect(secondCall.message).toBe("slept terribly");
+  });
+
+  it("deactivates morning mode with /morning off", async () => {
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/morning", messageId: 1, date: 1000 });
+    await handler({ chatId: 100, text: "/morning off", messageId: 2, date: 1001 });
+    await handler({ chatId: 100, text: "back to normal", messageId: 3, date: 1002 });
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      "<i>Morning flow mode off.</i>"
+    );
+    const thirdCall = mockRunAgent.mock.calls[1][0];
+    expect(thirdCall.mode).toBe("default");
+  });
+
+  it("activates morning flow mode from natural language request", async () => {
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "Let's do morning flow ahora",
+      messageId: 1,
+      date: 1000,
+    });
+
+    const firstCall = mockRunAgent.mock.calls[0][0];
+    expect(firstCall.mode).toBe("morning_flow");
+    expect(firstCall.message).toContain("Start my morning flow now.");
+  });
+
+  it("does not hijack plain mentions of morning flow", async () => {
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "my morning flow yesterday was pretty intense",
+      messageId: 1,
+      date: 1000,
+    });
+
+    const firstCall = mockRunAgent.mock.calls[0][0];
+    expect(firstCall.mode).toBe("default");
+    expect(firstCall.message).toBe("my morning flow yesterday was pretty intense");
+  });
+
+  it("deactivates morning mode from natural-language stop phrase", async () => {
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/morning", messageId: 1, date: 1000 });
+    await handler({
+      chatId: 100,
+      text: "stop morning flow",
+      messageId: 2,
+      date: 1001,
+    });
+    await handler({ chatId: 100, text: "back to normal", messageId: 3, date: 1002 });
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      "<i>Morning flow mode off.</i>"
+    );
+    const thirdCall = mockRunAgent.mock.calls[1][0];
+    expect(thirdCall.mode).toBe("default");
+  });
+});
+
 describe("soul feedback buttons", () => {
   it("attaches inline buttons on every Nth message based on soulFeedbackEvery", async () => {
     mockConfig.config.telegram.soulFeedbackEvery = 2;
