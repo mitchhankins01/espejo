@@ -14,7 +14,7 @@ This runs in order, short-circuiting on first failure:
 
 1. `tsc --noEmit` — Type errors mean interfaces don't match the spec
 2. `eslint` — Style violations, unused imports, dead code
-3. `vitest run` — Unit + integration tests
+3. `vitest run --coverage` — Unit + integration tests with 100% coverage enforcement
 
 **Do not commit or move on until `pnpm check` passes.**
 
@@ -67,32 +67,57 @@ src/
     list-tags.ts    — All tags with counts.
     entry-stats.ts  — Writing frequency and trends.
     log-weight.ts   — Daily weight logging (reuses upsertDailyMetric).
+    conjugate-verb.ts — Spanish verb conjugation lookup from reference DB.
+    log-vocabulary.ts — Track Spanish vocabulary with SRS state per chat.
+    spanish-quiz.ts — Spaced-repetition quiz: get due cards, record reviews, stats.
   telegram/
-    webhook.ts      — Telegram webhook handler. Validates secret token, processes text/voice/photo/doc updates, dispatches responses.
+    webhook.ts      — Telegram webhook handler. Validates secret token, processes text/voice/photo/doc updates, dispatches responses. Routes /morning, /evening, /compact, /digest, /assess commands.
     updates.ts      — Update deduplication, per-chat queue, fragment reassembly.
-    agent.ts        — Anthropic/OpenAI agent loop. Context building, tool dispatch, compaction, pattern extraction.
+    agent.ts        — Anthropic/OpenAI agent loop. Context building, tool dispatch, compaction, pattern extraction. Includes Spanish coaching with adaptive difficulty.
     client.ts       — Telegram Bot API client. sendMessage/sendVoice, retry, chunking, HTML parse fallback.
     voice.ts        — Voice processing: Telegram download, Whisper transcription, TTS synthesis helpers.
+    media.ts        — Photo/document processing: Telegram file download, OpenAI vision for photos, text/PDF extraction for documents.
+    evening-review.ts — Agent mode prompts for evening review and morning journal sessions.
+    soul.ts         — Soul state snapshot, evolution during compaction, system prompt building.
+    pulse.ts        — Self-healing quality loop: diagnose drift, propose/apply soul repairs autonomously.
+    network-errors.ts — Recoverable network error classification for retry logic.
   spanish/
     analytics.ts    — Interface-agnostic Spanish learning analytics. Pure functions: digest building, trend analysis, formatting.
     assessment.ts   — LLM-as-judge Spanish conversation quality assessment. DI-based client interface.
+  transports/
+    http.ts         — Express HTTP server. MCP StreamableHTTP transport, Telegram webhook, REST API endpoints (activity logs, Spanish dashboard/assessments).
+    oauth.ts        — OAuth token validation for HTTP API authentication.
   storage/
     r2.ts           — Cloudflare R2 client. Upload, exists check, public URL.
   formatters/
     entry.ts        — Raw DB row → human-readable string with emoji, metadata, media URLs.
     search-results.ts — Ranked results with RRF score context.
 scripts/
-  sync-dayone.ts  — DayOne.sqlite → PG. Idempotent (ON CONFLICT DO UPDATE).
+  sync-dayone.ts    — DayOne.sqlite → PG. Idempotent (ON CONFLICT DO UPDATE).
   embed-entries.ts  — Batch embed all entries missing embeddings.
   migrate.ts        — Runs SQL files, tracks applied migrations in _migrations table.
+  import-verbs.ts   — Downloads Fred Jehle Spanish verb CSV from GitHub, bulk inserts ~11k conjugation rows.
+  sync-weight.ts    — Sync weight data to production.
+  deploy-smoke.ts   — Post-deploy smoke test.
+  telegram-setup.ts — Set/check/delete Telegram webhook.
 specs/
   schema.sql        — Canonical DB schema.
   tools.spec.ts     — Tool contracts: params, types, descriptions, examples.
+  spanish-learning.md — Spanish learning infrastructure design (phases, tables, tools).
   telegram-chatbot-plan.md — Original design for Telegram chatbot with pattern memory.
+  telegram-personality-plan.md — Soul personality system design (one evolving identity).
+  self-healing-organism.md — Autonomous quality loop design (pulse checks, soul repairs).
   episodic-memory.md — Implemented episodic memory + hardening notes (fact + event).
   ltm-research.md   — Evidence-based research on long-term memory architecture.
+  aws-sst-migration-plan.md — Future AWS/SST migration plan (not implemented).
+  web-app.spec.md   — Future web dashboard spec (not implemented).
   fixtures/
     seed.ts         — Test data with pre-computed embeddings for determinism.
+packages/
+  shared/           — @espejo/shared workspace. Shared TypeScript types between MCP server and web frontend.
+web/                — SvelteKit frontend (@espejo/web workspace). Early/partial — not production-ready.
+  src/routes/       — Page components (entries list, detail view).
+  src/lib/server/   — Server-side DB queries.
 ```
 
 ## Key Patterns
@@ -326,7 +351,7 @@ Integration tests use Docker Compose inside CI (same as local). The vitest `glob
 
 ### Coverage
 
-100% line/function/branch/statement coverage enforced via `@vitest/coverage-v8`. Thresholds configured in `vitest.config.ts`. Coverage only runs with `--coverage` flag — `pnpm check` stays fast for local dev.
+100% line/function/branch/statement coverage enforced via `@vitest/coverage-v8`. Thresholds configured in `vitest.config.ts`. `pnpm check` runs coverage locally too (`pnpm test:coverage`).
 
 Files excluded from coverage via config: `src/index.ts` (entry point) and `src/db/client.ts` (module-level pool). Defensive branches in `src/db/queries.ts` and `src/server.ts` use `/* v8 ignore next */` pragmas.
 
@@ -347,7 +372,7 @@ The `lint` job runs cleanly on Apple Silicon. The `test` job may fail locally du
 
 | Environment | Trigger | What runs |
 |-------------|---------|-----------|
-| Local | `pnpm check` | typecheck → lint → test (no coverage) |
+| Local | `pnpm check` | typecheck → lint → test + coverage (100%) |
 | Local (act) | `act push -j lint` | typecheck → lint (in Docker, matches CI) |
 | CI | Push/PR to main | lint → test + coverage (100%) |
 | Production | Merge to main | Railway auto-deploy via Dockerfile |
@@ -454,24 +479,29 @@ pnpm telegram:setup --delete
 | `openai` | Embedding generation |
 | `zod` | Runtime param validation |
 | `dotenv` | Env file loading |
+| `express` | HTTP server for REST API, Telegram webhook, and MCP StreamableHTTP transport |
 | `@aws-sdk/client-s3` | Cloudflare R2 media storage (S3-compatible) |
 | `better-sqlite3` | Read DayOne.sqlite during sync |
 | `@anthropic-ai/sdk` | Claude agent for Telegram chatbot conversations |
 
 ## Telegram Chatbot
 
-A Telegram chatbot with pattern-based long-term memory. Deployed to Railway, opt-in via `TELEGRAM_BOT_TOKEN`. Original design: `specs/telegram-chatbot-plan.md`.
+A Telegram chatbot with pattern-based long-term memory and an evolving personality. Deployed to Railway, opt-in via `TELEGRAM_BOT_TOKEN`. Original design: `specs/telegram-chatbot-plan.md`.
 
 **What it does:**
 - Conversational interface powered by Anthropic or OpenAI (configurable provider)
-- Queries the journal using the existing 7 MCP tools via tool_use loop
+- Queries the journal using all 11 MCP tools via tool_use loop (journal search/retrieval + Spanish learning + weight logging)
+- Spanish language tutor: conducts conversations primarily in Spanish, corrects conjugation mistakes, tracks vocabulary with FSRS spaced repetition, and adapts difficulty based on real review performance
 - Logs weight via natural language ("I weighed in at 76.5 today")
 - Accepts text, voice, photo, and document messages (with OCR/text extraction for media)
 - Voice messages transcribed via OpenAI Whisper
 - Optionally responds with Telegram voice notes using adaptive/fallback rules
 - Extracts patterns from conversations during compaction — the bot's long-term memory
+- Logs activity per agent run (memories retrieved, tool calls with full results) in `activity_logs` table
 
 **Commands:**
+- `/evening` — Evening review mode: guided journaling session with somatic check-ins, system assessments (escalera, boundaries, attachment), and Spanish-primary conversation
+- `/morning` — Morning flow mode: free-flow morning journal session
 - `/compact` — Force pattern extraction from recent conversation (useful for testing, or when you want the bot to learn from a short conversation without waiting)
 - `/digest` — Spanish learning summary: vocabulary stats, retention rates, grade/lapse trends, adaptive status tier, latest assessment
 - `/assess` — Trigger LLM-as-judge evaluation of recent Spanish conversation quality (complexity, grammar, vocabulary, code-switching ratio)
@@ -486,6 +516,64 @@ A Telegram chatbot with pattern-based long-term memory. Deployed to Railway, opt
 - Provenance fields: `patterns.source_type/source_id`, `pattern_observations.source_type/source_id`
 
 Episodic memory (`fact` and `event`) is implemented. See `specs/episodic-memory.md`.
+
+### Soul Personality System
+
+One evolving personality that grows through interaction. Design: `specs/telegram-personality-plan.md`.
+
+- `chat_soul_state` table: identity summary, relational commitments, tone signature, growth notes, version counter
+- Soul state evolves during compaction — LLM analyzes conversation and proposes updates
+- `soul_state_history` table: audit trail of every soul mutation with reason
+- Soul prompt section injected into system prompt on every turn
+
+### Self-Healing Quality Loop
+
+Autonomous quality monitoring and personality drift correction. Design: `specs/self-healing-organism.md`.
+
+- `soul_quality_signals` table: tracks user reactions (felt_personal, felt_generic, correction, positive_reaction)
+- `pulse_checks` table: periodic diagnosis of personality health (healthy, drifting, stale, overcorrecting)
+- `diagnoseQuality()` → `applySoulRepairs()` pipeline: pure functions that analyze signals and adjust soul state
+- `cost_notifications` table: 12-hour spend summary tracking
+
+### Activity Logs
+
+Per-agent-run observability. Each time the bot processes a message, it logs:
+- Memories retrieved (patterns injected into context)
+- Tool calls with full input/output results
+- Cost of the run
+
+DB table: `activity_logs` with `chat_id`, `memories` (JSONB), `tool_calls` (JSONB), `cost_usd`.
+
+HTTP endpoints for inspection:
+- `GET /api/activity-logs/:chatId` — Recent activity logs for a chat
+- `GET /api/activity-logs/:chatId/:id` — Single activity log by ID
+
+### Spanish Learning Infrastructure
+
+Full design: `specs/spanish-learning.md`.
+
+**3 MCP tools:**
+- `conjugate_verb` — Look up Spanish verb conjugations by infinitive, optionally filtered by mood/tense. Data from Fred Jehle database (~11k rows).
+- `log_vocabulary` — Track a vocabulary word per chat with translation, part of speech, regional context, SRS state. Upserts by `(chat_id, word, region)`.
+- `spanish_quiz` — Spaced-repetition flow: `get_due` (fetch due/new cards), `record_review` (FSRS grade 1-4), `stats` (progress summary).
+
+**DB tables:**
+- `spanish_verbs` — Reference conjugation data (~11k rows, imported via `pnpm import:verbs`)
+- `spanish_vocabulary` — Per-chat vocabulary with FSRS state (stability, difficulty, reps, lapses, next_review)
+- `spanish_reviews` — Audit trail of every review event with before/after SRS state
+- `spanish_progress` — Daily learning snapshots per chat (words learned, reviews, streak)
+- `spanish_profiles` — Per-chat learner profile (CEFR level, known tenses, focus topics)
+
+**Agent integration:**
+- Agent retrieves learner profile, recent vocabulary, and due cards to build Spanish coaching context
+- Adaptive difficulty: queries `getSpanishAdaptiveContext()` for retention stats and lapse rate, adjusts guidance (consolidation vs advancement)
+- Language direction: Spanish-primary with English/Dutch woven in for warmth and clarification
+- Vocabulary logged automatically during conversations when new words are introduced
+
+**Import verbs:**
+```bash
+pnpm import:verbs   # Downloads CSV from GitHub, bulk inserts into spanish_verbs
+```
 
 ### Spanish Learning Observability
 
@@ -514,6 +602,19 @@ Three-tier system for evaluating Spanish tutor effectiveness. Interface-agnostic
 
 **DB table**: `spanish_assessments` — stores LLM assessment results with scores, sample count, rationale, timestamp. Indexed on `(chat_id, assessed_at DESC)`.
 
+## HTTP REST API
+
+Beyond MCP transport and Telegram webhook, the HTTP server (`src/transports/http.ts`) exposes REST endpoints authenticated via bearer token (`MCP_SECRET`):
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/activity-logs/:chatId` | GET | Recent activity logs (memories, tool calls, cost) |
+| `/api/activity-logs/:chatId/:id` | GET | Single activity log by ID |
+| `/api/spanish/:chatId/dashboard` | GET | Aggregated Spanish learning analytics (retention, funnel, trends, assessment) |
+| `/api/spanish/:chatId/assessments` | GET | Spanish assessment history |
+| `/api/weight` | POST | Log daily weight (`{ weight_kg, date? }`) |
+| `/api/telegram` | POST | Telegram webhook endpoint (validated via `X-Telegram-Bot-Api-Secret-Token`) |
+
 ## What's Out of Scope
 
 Do not implement these (they're planned future work, not part of the current build):
@@ -521,7 +622,7 @@ Do not implement these (they're planned future work, not part of the current bui
 - Clustering analysis (HDBSCAN/k-means over embeddings)
 - Oura Ring data correlation
 - Write/update/delete tools (this server is read-only for journal entries)
-- Web UI or dashboard (spec exists at `specs/web-app.spec.md`)
+- Web UI or dashboard (spec at `specs/web-app.spec.md`, early SvelteKit scaffold in `web/` — not production-ready)
 - Multi-user support or auth beyond MCP SDK defaults
 - Chunking strategies (entries fit in single embeddings)
 - Auto-purge of compacted messages (function exists in `queries.ts`, not wired up)
