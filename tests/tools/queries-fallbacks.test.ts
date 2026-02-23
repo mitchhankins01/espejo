@@ -10,6 +10,7 @@ import {
   getVerbConjugations,
   getSpanishProfile,
   getSpanishVocabularyById,
+  getSpanishAdaptiveContext,
   insertSpanishReview,
   upsertSpanishProgressSnapshot,
 } from "../../src/db/queries.js";
@@ -280,6 +281,30 @@ describe("queries defensive fallbacks", () => {
     const row = await upsertSpanishProgressSnapshot(pool, "100", "2026-01-01");
     expect(row.streak_days).toBe(0);
     expect(query).toHaveBeenCalledTimes(4);
+  });
+
+  it("returns adaptive context row from single-row query result", async () => {
+    const query = vi.fn().mockResolvedValue({
+      rows: [
+        {
+          recent_avg_grade: 2.8,
+          recent_lapse_rate: 0.15,
+          avg_difficulty: 4.2,
+          total_reviews: 30,
+          mastered_count: 10,
+          struggling_count: 2,
+        },
+      ],
+    });
+    const pool = { query } as unknown as Parameters<typeof getSpanishAdaptiveContext>[0];
+
+    const ctx = await getSpanishAdaptiveContext(pool, "100");
+    expect(ctx.recent_avg_grade).toBe(2.8);
+    expect(ctx.recent_lapse_rate).toBe(0.15);
+    expect(ctx.avg_difficulty).toBe(4.2);
+    expect(ctx.total_reviews).toBe(30);
+    expect(ctx.mastered_count).toBe(10);
+    expect(ctx.struggling_count).toBe(2);
   });
 
   it("maps spanish review nullable numeric fields to null", async () => {
