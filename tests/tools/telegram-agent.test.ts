@@ -39,6 +39,7 @@ const {
   mockGetRecentSpanishVocabulary,
   mockUpsertSpanishVocabulary,
   mockUpsertSpanishProgressSnapshot,
+  mockInsertActivityLog,
   mockGenerateEmbedding,
   mockAnthropicCreate,
   mockOpenAIChatCreate,
@@ -167,6 +168,14 @@ const {
     created_at: new Date(),
     updated_at: new Date(),
   }),
+  mockInsertActivityLog: vi.fn().mockResolvedValue({
+    id: 1,
+    chat_id: "100",
+    memories: [],
+    tool_calls: [],
+    cost_usd: null,
+    created_at: new Date(),
+  }),
   mockGenerateEmbedding: vi.fn().mockResolvedValue({
     embedding: new Array(1536).fill(0),
     inputTokens: 100,
@@ -191,6 +200,7 @@ const {
       embeddingDimensions: 1536,
     },
     anthropic: { apiKey: "sk-ant-test", model: "claude-sonnet-4-6" },
+    server: { appUrl: "" },
     timezone: "Europe/Madrid",
     apiRates: {
       "claude-sonnet-4-6": { input: 3.0, output: 15.0 },
@@ -262,6 +272,7 @@ vi.mock("../../src/db/queries.js", () => ({
   getRecentSpanishVocabulary: mockGetRecentSpanishVocabulary,
   upsertSpanishVocabulary: mockUpsertSpanishVocabulary,
   upsertSpanishProgressSnapshot: mockUpsertSpanishProgressSnapshot,
+  insertActivityLog: mockInsertActivityLog,
 }));
 
 vi.mock("../../src/db/embeddings.js", () => ({
@@ -432,6 +443,14 @@ beforeEach(() => {
     streak_days: 0,
     created_at: new Date(),
     updated_at: new Date(),
+  });
+  mockInsertActivityLog.mockReset().mockResolvedValue({
+    id: 1,
+    chat_id: "100",
+    memories: [],
+    tool_calls: [],
+    cost_usd: null,
+    created_at: new Date(),
   });
   mockGenerateEmbedding.mockReset().mockResolvedValue({
     embedding: new Array(1536).fill(0),
@@ -933,6 +952,92 @@ describe("runAgent", () => {
 
     expect(result.response).toBe("Step 2");
     expect(mockToolHandler).toHaveBeenCalledTimes(1);
+  });
+
+  it("stores activity log when tool calls are made", async () => {
+    mockAnthropicCreate
+      .mockResolvedValueOnce({
+        content: [
+          { type: "text", text: "Let me look that up." },
+          {
+            type: "tool_use",
+            id: "tu-activity",
+            name: "search_entries",
+            input: { query: "morning routine" },
+          },
+        ],
+        usage: { input_tokens: 100, output_tokens: 20 },
+      })
+      .mockResolvedValueOnce({
+        content: [{ type: "text", text: "Found your morning entries." }],
+        usage: { input_tokens: 120, output_tokens: 30 },
+      });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "What does my morning routine look like?",
+      externalMessageId: "update:activity-1",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("Found your morning entries.");
+    expect(result.activityLogId).toBe(1);
+    expect(mockInsertActivityLog).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        chatId: "100",
+        toolCalls: [
+          expect.objectContaining({
+            name: "search_entries",
+            args: { query: "morning routine" },
+          }),
+        ],
+      })
+    );
+  });
+
+  it("does not store activity log when no tools and no patterns", async () => {
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Just chatting." }],
+      usage: { input_tokens: 50, output_tokens: 10 },
+    });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "Hey",
+      externalMessageId: "update:no-activity",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("Just chatting.");
+    expect(result.activityLogId).toBeNull();
+    expect(mockInsertActivityLog).not.toHaveBeenCalled();
+  });
+
+  it("includes activity link when APP_URL is set", async () => {
+    mockConfig.server.appUrl = "https://example.com";
+    mockAnthropicCreate
+      .mockResolvedValueOnce({
+        content: [
+          { type: "tool_use", id: "tu-link", name: "list_tags", input: {} },
+        ],
+        usage: { input_tokens: 50, output_tokens: 10 },
+      })
+      .mockResolvedValueOnce({
+        content: [{ type: "text", text: "Here are the tags." }],
+        usage: { input_tokens: 60, output_tokens: 10 },
+      });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "show tags",
+      externalMessageId: "update:link-1",
+      messageDate: 1000,
+    });
+
+    expect(result.activity).toContain("https://example.com/api/activity/1");
+    expect(result.activity).toContain("details");
+    mockConfig.server.appUrl = "";
   });
 
   it("returns null when openai returns no choices", async () => {

@@ -430,3 +430,20 @@ CREATE TABLE IF NOT EXISTS spanish_progress (
 
 CREATE INDEX IF NOT EXISTS idx_spanish_progress_chat_date
     ON spanish_progress(chat_id, date DESC);
+
+-- ============================================================================
+-- Activity logs (per-agent-run observability)
+-- ============================================================================
+
+-- One row per agent run: memories retrieved, tool calls with full results
+CREATE TABLE IF NOT EXISTS activity_logs (
+    id SERIAL PRIMARY KEY,
+    chat_id BIGINT NOT NULL,
+    memories JSONB NOT NULL DEFAULT '[]',
+    tool_calls JSONB NOT NULL DEFAULT '[]',
+    cost_usd DOUBLE PRECISION,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_activity_logs_chat_created
+    ON activity_logs(chat_id, created_at DESC);

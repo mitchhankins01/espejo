@@ -155,6 +155,7 @@ export const config = {
     mcpSecret: process.env.MCP_SECRET || "",
     oauthClientId: process.env.OAUTH_CLIENT_ID || "",
     oauthClientSecret: process.env.OAUTH_CLIENT_SECRET || "",
+    appUrl: (process.env.APP_URL || "").replace(/\/+$/, ""),
   },
   telegram: {
     botToken: process.env.TELEGRAM_BOT_TOKEN || "",

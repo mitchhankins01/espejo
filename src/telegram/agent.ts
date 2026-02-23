@@ -41,9 +41,11 @@ import {
   getRecentSpanishVocabulary,
   upsertSpanishVocabulary,
   upsertSpanishProgressSnapshot,
+  insertActivityLog,
   type ChatMessageRow,
   type ChatSoulStateRow,
   type PatternSearchRow,
+  type ActivityLogToolCall,
 } from "../db/queries.js";
 import { toolHandlers } from "../server.js";
 import {
@@ -821,12 +823,19 @@ function toAnthropicMessages(
   }));
 }
 
+interface ToolLoopResult {
+  text: string;
+  toolCallCount: number;
+  toolNames: string[];
+  toolCalls: ActivityLogToolCall[];
+}
+
 async function runToolLoop(
   systemPrompt: string,
   messages: ChatHistoryMessage[],
   chatId: string,
   prefill?: string
-): Promise<{ text: string; toolCallCount: number; toolNames: string[] }> {
+): Promise<ToolLoopResult> {
   const provider = getLlmProvider();
   if (provider === "openai") {
     return runOpenAIToolLoop(systemPrompt, messages, chatId, prefill);
@@ -839,7 +848,7 @@ async function runAnthropicToolLoop(
   messages: ChatHistoryMessage[],
   chatId: string,
   prefill?: string
-): Promise<{ text: string; toolCallCount: number; toolNames: string[] }> {
+): Promise<ToolLoopResult> {
   const anthropic = getAnthropic();
   const model = getLlmModel("anthropic");
   const tools = getAnthropicTools();
@@ -847,6 +856,7 @@ async function runAnthropicToolLoop(
   let toolCallCount = 0;
   let lastToolKey = "";
   const toolNamesUsed = new Set<string>();
+  const toolCallRecords: ActivityLogToolCall[] = [];
 
   const loopMessages = toAnthropicMessages(messages);
 
@@ -902,6 +912,7 @@ async function runAnthropicToolLoop(
         text: prefill ? prefill + responseText : responseText,
         toolCallCount,
         toolNames: [...toolNamesUsed],
+        toolCalls: toolCallRecords,
       };
     }
 
@@ -940,6 +951,7 @@ async function runAnthropicToolLoop(
           text: extractTextFromAnthropicMessages(loopMessages),
           toolCallCount,
           toolNames: [...toolNamesUsed],
+          toolCalls: toolCallRecords,
         };
       }
       lastToolKey = toolKey;
@@ -969,6 +981,13 @@ async function runAnthropicToolLoop(
         toolCallId: toolUse.id,
       });
 
+      toolCallRecords.push({
+        name: toolUse.name,
+        args: (toolUse.input ?? {}) as Record<string, unknown>,
+        result,
+        truncated_result: truncated,
+      });
+
       toolResults.push({
         type: "tool_result",
         tool_use_id: toolUse.id,
@@ -992,6 +1011,7 @@ async function runAnthropicToolLoop(
     text: extractTextFromAnthropicMessages(loopMessages),
     toolCallCount,
     toolNames: [...toolNamesUsed],
+    toolCalls: toolCallRecords,
   };
 }
 
@@ -1000,7 +1020,7 @@ async function runOpenAIToolLoop(
   messages: ChatHistoryMessage[],
   chatId: string,
   prefill?: string
-): Promise<{ text: string; toolCallCount: number; toolNames: string[] }> {
+): Promise<ToolLoopResult> {
   const openai = getOpenAI();
   const model = getLlmModel("openai");
   const tools = getOpenAITools();
@@ -1008,6 +1028,7 @@ async function runOpenAIToolLoop(
   let toolCallCount = 0;
   let lastToolKey = "";
   const toolNamesUsed = new Set<string>();
+  const toolCallRecords: ActivityLogToolCall[] = [];
 
   const loopMessages: OpenAIChatMessage[] = messages.map((msg) => ({
     role: msg.role,
@@ -1061,6 +1082,7 @@ async function runOpenAIToolLoop(
         text: prefill ? prefill + assistantContent : assistantContent,
         toolCallCount,
         toolNames: [...toolNamesUsed],
+        toolCalls: toolCallRecords,
       };
     }
 
@@ -1092,6 +1114,7 @@ async function runOpenAIToolLoop(
           text: extractTextFromOpenAIMessages(loopMessages),
           toolCallCount,
           toolNames: [...toolNamesUsed],
+          toolCalls: toolCallRecords,
         };
       }
       lastToolKey = toolKey;
@@ -1103,12 +1126,19 @@ async function runOpenAIToolLoop(
         parsedArgs = toolArgs ? JSON.parse(toolArgs) : {};
       } catch {
         result = `Error: Invalid JSON arguments for tool "${toolName}"`;
+        const truncatedErr = truncateToolResult(toolName, result);
         await insertChatMessage(pool, {
           chatId,
           externalMessageId: null,
           role: "tool_result",
-          content: truncateToolResult(toolName, result),
+          content: truncatedErr,
           toolCallId: toolCall.id,
+        });
+        toolCallRecords.push({
+          name: toolName,
+          args: {},
+          result,
+          truncated_result: truncatedErr,
         });
         loopMessages.push({
           role: "tool",
@@ -1139,6 +1169,13 @@ async function runOpenAIToolLoop(
         toolCallId: toolCall.id,
       });
 
+      toolCallRecords.push({
+        name: toolName,
+        args: parsedArgs as Record<string, unknown>,
+        result,
+        truncated_result: truncated,
+      });
+
       loopMessages.push({
         role: "tool",
         tool_call_id: toolCall.id,
@@ -1157,6 +1194,7 @@ async function runOpenAIToolLoop(
     text: extractTextFromOpenAIMessages(loopMessages),
     toolCallCount,
     toolNames: [...toolNamesUsed],
+    toolCalls: toolCallRecords,
   };
 }
 
@@ -1818,6 +1856,7 @@ export async function forceCompact(
 export interface AgentResult {
   response: string | null;
   activity: string;
+  activityLogId: number | null;
   soulVersion: number;
   patternCount: number;
 }
@@ -1906,7 +1945,7 @@ export async function runAgent(params: {
   }
 
   // 4. Run tool loop
-  const { text, toolCallCount, toolNames } = await runToolLoop(systemPrompt, messages, chatId, prefill);
+  const { text, toolCallCount, toolNames, toolCalls } = await runToolLoop(systemPrompt, messages, chatId, prefill);
   const finalText =
     text && shouldRewriteForLanguagePreference(mode, message, text, patterns)
       ? await rewriteWithLanguagePreference(message, text)
@@ -1940,9 +1979,36 @@ export async function runAgent(params: {
     }
   }
 
+  // 5b. Store activity log
+  let activityLogId: number | null = null;
+  if (patterns.length > 0 || toolCalls.length > 0) {
+    try {
+      const activityLog = await insertActivityLog(pool, {
+        chatId,
+        memories: patterns.map((p) => ({
+          id: p.id,
+          content: p.content,
+          kind: p.kind,
+          confidence: p.confidence,
+          score: p.score,
+        })),
+        toolCalls,
+        costUsd: costNote ? parseFloat(costNote.match(/\$([0-9.]+)/)?.[1] ?? "0") : null,
+      });
+      activityLogId = activityLog.id;
+    } catch (err) {
+      /* v8 ignore next -- non-critical: activity logging is best-effort */
+      console.error(`Telegram activity log error [chat:${chatId}]:`, err);
+    }
+  }
+
+  if (activityLogId && config.server.appUrl) {
+    activityParts.push(`<a href="${config.server.appUrl}/api/activity/${activityLogId}">details</a>`);
+  }
+
   const activity = activityParts.join(" | ");
 
-  if (!finalText) return { response: null, activity, soulVersion, patternCount: patterns.length };
+  if (!finalText) return { response: null, activity, activityLogId, soulVersion, patternCount: patterns.length };
 
   // 6. Store assistant response
   await insertChatMessage(pool, {
@@ -1989,5 +2055,5 @@ export async function runAgent(params: {
     console.error(`Telegram compaction error [chat:${chatId}]:`, err);
   });
 
-  return { response: finalText, activity, soulVersion, patternCount: patterns.length };
+  return { response: finalText, activity, activityLogId, soulVersion, patternCount: patterns.length };
 }
