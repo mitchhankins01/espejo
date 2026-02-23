@@ -37,6 +37,7 @@ const {
   mockGetDueSpanishVocabulary,
   mockGetLatestSpanishProgress,
   mockGetRecentSpanishVocabulary,
+  mockGetSpanishAdaptiveContext,
   mockUpsertSpanishVocabulary,
   mockUpsertSpanishProgressSnapshot,
   mockInsertActivityLog,
@@ -144,6 +145,14 @@ const {
   mockGetDueSpanishVocabulary: vi.fn().mockResolvedValue([]),
   mockGetLatestSpanishProgress: vi.fn().mockResolvedValue(null),
   mockGetRecentSpanishVocabulary: vi.fn().mockResolvedValue([]),
+  mockGetSpanishAdaptiveContext: vi.fn().mockResolvedValue({
+    recent_avg_grade: 0,
+    recent_lapse_rate: 0,
+    avg_difficulty: 0,
+    total_reviews: 0,
+    mastered_count: 0,
+    struggling_count: 0,
+  }),
   mockUpsertSpanishVocabulary: vi.fn().mockResolvedValue({
     inserted: true,
     row: {
@@ -270,6 +279,7 @@ vi.mock("../../src/db/queries.js", () => ({
   getDueSpanishVocabulary: mockGetDueSpanishVocabulary,
   getLatestSpanishProgress: mockGetLatestSpanishProgress,
   getRecentSpanishVocabulary: mockGetRecentSpanishVocabulary,
+  getSpanishAdaptiveContext: mockGetSpanishAdaptiveContext,
   upsertSpanishVocabulary: mockUpsertSpanishVocabulary,
   upsertSpanishProgressSnapshot: mockUpsertSpanishProgressSnapshot,
   insertActivityLog: mockInsertActivityLog,
@@ -420,6 +430,14 @@ beforeEach(() => {
   mockGetDueSpanishVocabulary.mockReset().mockResolvedValue([]);
   mockGetLatestSpanishProgress.mockReset().mockResolvedValue(null);
   mockGetRecentSpanishVocabulary.mockReset().mockResolvedValue([]);
+  mockGetSpanishAdaptiveContext.mockReset().mockResolvedValue({
+    recent_avg_grade: 0,
+    recent_lapse_rate: 0,
+    avg_difficulty: 0,
+    total_reviews: 0,
+    mastered_count: 0,
+    struggling_count: 0,
+  });
   mockUpsertSpanishVocabulary.mockReset().mockResolvedValue({
     inserted: true,
     row: {
@@ -2113,6 +2131,77 @@ describe("runAgent", () => {
         cefrLevel: "B1",
       })
     );
+  });
+
+  it("injects adaptive SLOW DOWN guidance when lapse rate is high", async () => {
+    mockGetSpanishAdaptiveContext.mockResolvedValueOnce({
+      recent_avg_grade: 2.0,
+      recent_lapse_rate: 0.35,
+      avg_difficulty: 5.8,
+      total_reviews: 20,
+      mastered_count: 3,
+      struggling_count: 4,
+    });
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Claro, vamos despacio hoy." }],
+      usage: { input_tokens: 120, output_tokens: 20 },
+    });
+
+    await runAgent({
+      chatId: "100",
+      message: "Hola, ¿cómo estás?",
+      externalMessageId: "update:adaptive-struggling",
+      messageDate: 1000,
+    });
+
+    const call = mockAnthropicCreate.mock.calls[0][0];
+    expect(call.system).toContain("SLOW DOWN");
+    expect(call.system).toContain("lapse rate");
+    expect(call.system).toContain("4 word(s) in relearning");
+  });
+
+  it("injects adaptive stretch guidance when performance is strong", async () => {
+    mockGetSpanishAdaptiveContext.mockResolvedValueOnce({
+      recent_avg_grade: 3.4,
+      recent_lapse_rate: 0.05,
+      avg_difficulty: 3.2,
+      total_reviews: 50,
+      mastered_count: 15,
+      struggling_count: 0,
+    });
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Perfecto, vamos a explorar algo nuevo." }],
+      usage: { input_tokens: 120, output_tokens: 20 },
+    });
+
+    await runAgent({
+      chatId: "100",
+      message: "Hola, ¿qué hacemos hoy?",
+      externalMessageId: "update:adaptive-strong",
+      messageDate: 1000,
+    });
+
+    const call = mockAnthropicCreate.mock.calls[0][0];
+    expect(call.system).toContain("gently stretch");
+    expect(call.system).not.toContain("SLOW DOWN");
+  });
+
+  it("injects no-review-data guidance when total_reviews is 0", async () => {
+    // Default mock already has total_reviews: 0
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Hola, bienvenido." }],
+      usage: { input_tokens: 120, output_tokens: 20 },
+    });
+
+    await runAgent({
+      chatId: "100",
+      message: "Hola",
+      externalMessageId: "update:adaptive-no-data",
+      messageDate: 1000,
+    });
+
+    const call = mockAnthropicCreate.mock.calls[0][0];
+    expect(call.system).toContain("No review data yet");
   });
 
   it("continues when spanish auto-log/context lookups fail", async () => {

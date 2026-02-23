@@ -39,6 +39,7 @@ import {
   getDueSpanishVocabulary,
   getLatestSpanishProgress,
   getRecentSpanishVocabulary,
+  getSpanishAdaptiveContext,
   upsertSpanishVocabulary,
   upsertSpanishProgressSnapshot,
   insertActivityLog,
@@ -469,14 +470,48 @@ async function autoLogSpanishVocabulary(
   return candidates.length;
 }
 
+function buildAdaptiveGuidance(
+  level: string,
+  ctx: { recent_avg_grade: number; recent_lapse_rate: number; avg_difficulty: number; total_reviews: number; struggling_count: number }
+): string {
+  // No review data yet — use the profile level as-is
+  if (ctx.total_reviews === 0) {
+    return `- Stay strictly at ${level}. No review data yet — keep vocabulary and grammar simple and conversational until patterns emerge.`;
+  }
+
+  const lines: string[] = [];
+  const grade = ctx.recent_avg_grade;
+  const lapseRate = ctx.recent_lapse_rate;
+
+  if (grade < 2.3 || lapseRate > 0.3) {
+    // Struggling: simplify
+    lines.push(`- SLOW DOWN. Average grade ${grade.toFixed(1)}/4 and ${Math.round(lapseRate * 100)}% lapse rate — the user is struggling. Use only core ${level} vocabulary and simple sentence structures. Avoid introducing new words or tenses until grades improve.`);
+    if (ctx.struggling_count > 0) {
+      lines.push(`- ${ctx.struggling_count} word(s) in relearning — focus on reinforcing those before adding new vocabulary.`);
+    }
+  } else if (grade < 2.8) {
+    // Moderate: hold steady
+    lines.push(`- Hold at ${level}. Average grade ${grade.toFixed(1)}/4 — the user is learning but not solid yet. Stick to known vocabulary and tenses. Introduce new words only when they come up organically.`);
+  } else if (grade >= 3.2 && lapseRate < 0.1) {
+    // Crushing it: push gently
+    lines.push(`- The user is performing well (avg grade ${grade.toFixed(1)}/4, ${Math.round(lapseRate * 100)}% lapses). You can gently stretch beyond ${level} — try one slightly harder word or structure per exchange, always with a gloss.`);
+  } else {
+    // Healthy: stay at level
+    lines.push(`- Stay at ${level}. Performance is solid (avg grade ${grade.toFixed(1)}/4). Keep the current pace — mix familiar and recently learned vocabulary.`);
+  }
+
+  return lines.join("\n");
+}
+
 async function buildSpanishContextPrompt(chatId: string): Promise<string> {
   try {
     await ensureSpanishProfile(chatId);
-    const [profile, due, recent, progress] = await Promise.all([
+    const [profile, due, recent, progress, adaptive] = await Promise.all([
       getSpanishProfile(pool, chatId),
       getDueSpanishVocabulary(pool, chatId, 3),
       getRecentSpanishVocabulary(pool, chatId, 3),
       getLatestSpanishProgress(pool, chatId),
+      getSpanishAdaptiveContext(pool, chatId),
     ]);
 
     const level = profile?.cefr_level ?? "B1";
@@ -487,6 +522,9 @@ async function buildSpanishContextPrompt(chatId: string): Promise<string> {
       ? `words=${progress.words_learned}, in_progress=${progress.words_in_progress}, reviews_today=${progress.reviews_today}, streak=${progress.streak_days}`
       : "no progress snapshot yet";
 
+    // Build adaptive difficulty guidance from real performance data
+    const adaptiveLine = buildAdaptiveGuidance(level, adaptive);
+
     return `Spanish tutoring profile:
 - Current chat_id: ${chatId}
 - Level: ${level}
@@ -494,12 +532,17 @@ async function buildSpanishContextPrompt(chatId: string): Promise<string> {
 - Due words: ${dueWords || "none"}
 - Recent words: ${recentWords || "none"}
 - Progress: ${progressLine}
+- Performance (30d): avg_grade=${adaptive.recent_avg_grade.toFixed(1)}, lapse_rate=${Math.round(adaptive.recent_lapse_rate * 100)}%, avg_difficulty=${adaptive.avg_difficulty.toFixed(1)}, mastered=${adaptive.mastered_count}, struggling=${adaptive.struggling_count}
 
 LANGUAGE RULE — Spanish is the PRIMARY language of every response.
 - Default to Spanish for the bulk of your output. Weave in English or Dutch only when it clarifies meaning, adds warmth, or matches the user's code-switching.
 - Never respond entirely in English. If you catch yourself writing a full English sentence, rephrase it in Spanish (with an English/Dutch gloss if the vocab is above ${level}).
 - Match the user's own code-switching: if they write in English or Dutch, you may mirror briefly, but always return to Spanish.
-- Keep grammar at ${level} level. Use known tenses (${knownTenses}) as the backbone; introduce new structures sparingly with brief English/Dutch glosses.
+
+ADAPTIVE DIFFICULTY:
+${adaptiveLine}
+- Known tenses (${knownTenses}) are the backbone. Introduce new structures ONE at a time with a brief English/Dutch gloss, then reuse that structure 2-3 times before introducing another.
+- If the user makes a grammar or vocab mistake, correct it gently inline and move on — don't lecture.
 
 ACTIVE SPANISH COACHING:
 - When correcting a verb mistake, call conjugate_verb to show the correct form. Correct inline — don't make a separate correction block.
