@@ -743,7 +743,7 @@ describe("Spanish learning queries", () => {
 
 describe("getSpanishAdaptiveContext", () => {
   it("returns zeroed context when no reviews or vocabulary exist", async () => {
-    const ctx = await getSpanishAdaptiveContext(pool, "no-reviews-chat");
+    const ctx = await getSpanishAdaptiveContext(pool, "900001");
     expect(ctx.recent_avg_grade).toBe(0);
     expect(ctx.recent_lapse_rate).toBe(0);
     expect(ctx.avg_difficulty).toBe(0);
@@ -753,7 +753,7 @@ describe("getSpanishAdaptiveContext", () => {
   });
 
   it("computes adaptive context from reviews and vocabulary", async () => {
-    const chatId = "adaptive-ctx-test";
+    const chatId = "900002";
     const v1 = await upsertSpanishVocabulary(pool, {
       chatId,
       word: "gato",
@@ -800,12 +800,12 @@ describe("getSpanishAdaptiveContext", () => {
 
 describe("getRetentionByInterval", () => {
   it("returns empty array when no reviews exist", async () => {
-    const result = await getRetentionByInterval(pool, "no-reviews");
+    const result = await getRetentionByInterval(pool, "900003");
     expect(result).toHaveLength(0);
   });
 
   it("buckets reviews by interval and computes retention", async () => {
-    const chatId = "retention-test";
+    const chatId = "900004";
     const v1 = await upsertSpanishVocabulary(pool, { chatId, word: "perro", translation: "dog" });
 
     // Good review with short interval (retained)
@@ -834,12 +834,12 @@ describe("getRetentionByInterval", () => {
 
 describe("getVocabularyFunnel", () => {
   it("returns empty array when no vocabulary exists", async () => {
-    const result = await getVocabularyFunnel(pool, "no-vocab");
+    const result = await getVocabularyFunnel(pool, "900005");
     expect(result).toHaveLength(0);
   });
 
   it("groups vocabulary by state with counts", async () => {
-    const chatId = "funnel-test";
+    const chatId = "900006";
     await upsertSpanishVocabulary(pool, { chatId, word: "casa", translation: "house" });
     await upsertSpanishVocabulary(pool, { chatId, word: "gato", translation: "cat" });
 
@@ -853,12 +853,12 @@ describe("getVocabularyFunnel", () => {
 
 describe("getGradeTrend", () => {
   it("returns empty array when no reviews exist", async () => {
-    const result = await getGradeTrend(pool, "no-reviews", 30);
+    const result = await getGradeTrend(pool, "900007", 30);
     expect(result).toHaveLength(0);
   });
 
   it("returns daily grade averages", async () => {
-    const chatId = "grade-trend-test";
+    const chatId = "900008";
     const v1 = await upsertSpanishVocabulary(pool, { chatId, word: "libro", translation: "book" });
 
     await insertSpanishReview(pool, {
@@ -876,12 +876,12 @@ describe("getGradeTrend", () => {
 
 describe("getLapseRateTrend", () => {
   it("returns empty array when no reviews exist", async () => {
-    const result = await getLapseRateTrend(pool, "no-reviews", 30);
+    const result = await getLapseRateTrend(pool, "900009", 30);
     expect(result).toHaveLength(0);
   });
 
   it("computes daily lapse rate", async () => {
-    const chatId = "lapse-trend-test";
+    const chatId = "900010";
     const v1 = await upsertSpanishVocabulary(pool, { chatId, word: "mesa", translation: "table" });
 
     // Grade 4 (not a lapse)
@@ -907,12 +907,12 @@ describe("getLapseRateTrend", () => {
 
 describe("getProgressTimeSeries", () => {
   it("returns empty array when no progress exists", async () => {
-    const result = await getProgressTimeSeries(pool, "no-progress", 30);
+    const result = await getProgressTimeSeries(pool, "900011", 30);
     expect(result).toHaveLength(0);
   });
 
   it("returns progress snapshots within date range", async () => {
-    const chatId = "progress-ts-test";
+    const chatId = "900012";
     await upsertSpanishVocabulary(pool, { chatId, word: "sol", translation: "sun" });
     const today = new Date().toISOString().slice(0, 10);
     await upsertSpanishProgressSnapshot(pool, chatId, today);
@@ -925,12 +925,12 @@ describe("getProgressTimeSeries", () => {
 
 describe("getRetentionByContext", () => {
   it("returns empty array when no reviews exist", async () => {
-    const result = await getRetentionByContext(pool, "no-reviews");
+    const result = await getRetentionByContext(pool, "900013");
     expect(result).toHaveLength(0);
   });
 
   it("groups retention by review context", async () => {
-    const chatId = "context-retention-test";
+    const chatId = "900014";
     const v1 = await upsertSpanishVocabulary(pool, { chatId, word: "agua", translation: "water" });
 
     await insertSpanishReview(pool, {
@@ -954,7 +954,7 @@ describe("getRetentionByContext", () => {
 describe("insertSpanishAssessment", () => {
   it("inserts and returns assessment row", async () => {
     const result = await insertSpanishAssessment(pool, {
-      chatId: "assess-test",
+      chatId: "900015",
       complexityScore: 3.5,
       grammarScore: 4.0,
       vocabularyScore: 3.2,
@@ -965,7 +965,7 @@ describe("insertSpanishAssessment", () => {
     });
 
     expect(result.id).toBeGreaterThan(0);
-    expect(result.chat_id).toBe("assess-test");
+    expect(result.chat_id).toBe("900015");
     expect(result.complexity_score).toBeCloseTo(3.5, 1);
     expect(result.overall_score).toBeCloseTo(3.6, 1);
     expect(result.rationale).toBe("Good progress overall.");
@@ -975,19 +975,19 @@ describe("insertSpanishAssessment", () => {
 describe("getSpanishAssessments", () => {
   it("returns assessments within date range", async () => {
     await insertSpanishAssessment(pool, {
-      chatId: "assess-history",
+      chatId: "900016",
       complexityScore: 3.0, grammarScore: 3.0, vocabularyScore: 3.0,
       codeSwitchingRatio: 0.7, overallScore: 3.0,
       sampleMessageCount: 10, rationale: "Early progress.",
     });
 
-    const result = await getSpanishAssessments(pool, "assess-history", 30);
+    const result = await getSpanishAssessments(pool, "900016", 30);
     expect(result.length).toBeGreaterThan(0);
-    expect(result[0].chat_id).toBe("assess-history");
+    expect(result[0].chat_id).toBe("900016");
   });
 
   it("returns empty for non-existent chat", async () => {
-    const result = await getSpanishAssessments(pool, "no-chat", 30);
+    const result = await getSpanishAssessments(pool, "900017", 30);
     expect(result).toHaveLength(0);
   });
 });
@@ -995,26 +995,26 @@ describe("getSpanishAssessments", () => {
 describe("getLatestSpanishAssessment", () => {
   it("returns latest assessment", async () => {
     await insertSpanishAssessment(pool, {
-      chatId: "latest-assess",
+      chatId: "900018",
       complexityScore: 2.5, grammarScore: 2.5, vocabularyScore: 2.5,
       codeSwitchingRatio: 0.5, overallScore: 2.5,
       sampleMessageCount: 8, rationale: "First assessment.",
     });
     await insertSpanishAssessment(pool, {
-      chatId: "latest-assess",
+      chatId: "900018",
       complexityScore: 3.5, grammarScore: 3.5, vocabularyScore: 3.5,
       codeSwitchingRatio: 0.8, overallScore: 3.5,
       sampleMessageCount: 12, rationale: "Second assessment.",
     });
 
-    const result = await getLatestSpanishAssessment(pool, "latest-assess");
+    const result = await getLatestSpanishAssessment(pool, "900018");
     expect(result).not.toBeNull();
     expect(result!.overall_score).toBeCloseTo(3.5, 1);
     expect(result!.rationale).toBe("Second assessment.");
   });
 
   it("returns null for non-existent chat", async () => {
-    const result = await getLatestSpanishAssessment(pool, "no-chat");
+    const result = await getLatestSpanishAssessment(pool, "900017");
     expect(result).toBeNull();
   });
 });

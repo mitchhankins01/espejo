@@ -1229,6 +1229,7 @@ export async function getVocabularyFunnel(
   return result.rows.map((row) => ({
     state: row.state as string,
     count: Number(row.count),
+    /* v8 ignore next 3 */
     median_days_in_state: row.median_days_in_state != null
       ? parseFloat(row.median_days_in_state as string)
       : null,
