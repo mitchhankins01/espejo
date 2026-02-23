@@ -310,3 +310,123 @@ CREATE TABLE IF NOT EXISTS soul_state_history (
 
 CREATE INDEX IF NOT EXISTS idx_soul_state_history_chat_version
     ON soul_state_history(chat_id, version DESC);
+
+-- ============================================================================
+-- Spanish learning memory
+-- ============================================================================
+
+-- Per-chat learner profile
+CREATE TABLE IF NOT EXISTS spanish_profiles (
+    chat_id BIGINT PRIMARY KEY,
+    cefr_level TEXT,
+    known_tenses TEXT[] NOT NULL DEFAULT '{}',
+    focus_topics TEXT[] NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT spanish_profiles_cefr_level_check CHECK (
+        cefr_level IS NULL OR cefr_level IN ('A1', 'A2', 'B1', 'B2', 'C1', 'C2')
+    )
+);
+
+-- Global Spanish verb conjugation reference data
+CREATE TABLE IF NOT EXISTS spanish_verbs (
+    id SERIAL PRIMARY KEY,
+    infinitive TEXT NOT NULL,
+    infinitive_english TEXT,
+    mood TEXT NOT NULL,
+    tense TEXT NOT NULL,
+    verb_english TEXT,
+    form_1s TEXT,
+    form_2s TEXT,
+    form_3s TEXT,
+    form_1p TEXT,
+    form_2p TEXT,
+    form_3p TEXT,
+    gerund TEXT,
+    past_participle TEXT,
+    is_irregular BOOLEAN NOT NULL DEFAULT FALSE,
+    source TEXT NOT NULL DEFAULT 'jehle',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (infinitive, mood, tense)
+);
+
+CREATE INDEX IF NOT EXISTS idx_spanish_verbs_lookup
+    ON spanish_verbs(infinitive, mood, tense);
+CREATE INDEX IF NOT EXISTS idx_spanish_verbs_irregular
+    ON spanish_verbs(is_irregular);
+
+-- Per-chat vocabulary with spaced-repetition state
+CREATE TABLE IF NOT EXISTS spanish_vocabulary (
+    id SERIAL PRIMARY KEY,
+    chat_id BIGINT NOT NULL,
+    word TEXT NOT NULL,
+    translation TEXT,
+    part_of_speech TEXT,
+    region TEXT NOT NULL DEFAULT '',
+    example_sentence TEXT,
+    notes TEXT,
+    source TEXT NOT NULL DEFAULT 'chat',
+    stability DOUBLE PRECISION NOT NULL DEFAULT 0,
+    difficulty DOUBLE PRECISION NOT NULL DEFAULT 0,
+    reps INT NOT NULL DEFAULT 0,
+    lapses INT NOT NULL DEFAULT 0,
+    state TEXT NOT NULL DEFAULT 'new',
+    last_review TIMESTAMPTZ,
+    next_review TIMESTAMPTZ,
+    first_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT spanish_vocabulary_state_check CHECK (
+        state IN ('new', 'learning', 'review', 'relearning')
+    ),
+    UNIQUE (chat_id, word, region)
+);
+
+CREATE INDEX IF NOT EXISTS idx_spanish_vocabulary_due
+    ON spanish_vocabulary(chat_id, next_review, state);
+CREATE INDEX IF NOT EXISTS idx_spanish_vocabulary_region
+    ON spanish_vocabulary(chat_id, region);
+CREATE INDEX IF NOT EXISTS idx_spanish_vocabulary_seen
+    ON spanish_vocabulary(chat_id, last_seen DESC);
+
+-- Review audit trail (FSRS state transitions)
+CREATE TABLE IF NOT EXISTS spanish_reviews (
+    id SERIAL PRIMARY KEY,
+    chat_id BIGINT NOT NULL,
+    vocabulary_id INT NOT NULL REFERENCES spanish_vocabulary(id) ON DELETE CASCADE,
+    grade INT NOT NULL,
+    stability_before DOUBLE PRECISION,
+    stability_after DOUBLE PRECISION,
+    difficulty_before DOUBLE PRECISION,
+    difficulty_after DOUBLE PRECISION,
+    interval_days DOUBLE PRECISION,
+    retrievability DOUBLE PRECISION,
+    review_context TEXT NOT NULL DEFAULT 'conversation',
+    reviewed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT spanish_reviews_grade_check CHECK (grade >= 1 AND grade <= 4)
+);
+
+CREATE INDEX IF NOT EXISTS idx_spanish_reviews_chat_reviewed
+    ON spanish_reviews(chat_id, reviewed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_spanish_reviews_vocab
+    ON spanish_reviews(vocabulary_id);
+
+-- Daily learning snapshots per chat
+CREATE TABLE IF NOT EXISTS spanish_progress (
+    id SERIAL PRIMARY KEY,
+    chat_id BIGINT NOT NULL,
+    date DATE NOT NULL,
+    words_learned INT NOT NULL DEFAULT 0,
+    words_in_progress INT NOT NULL DEFAULT 0,
+    reviews_today INT NOT NULL DEFAULT 0,
+    new_words_today INT NOT NULL DEFAULT 0,
+    tenses_practiced TEXT[] NOT NULL DEFAULT '{}',
+    streak_days INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (chat_id, date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_spanish_progress_chat_date
+    ON spanish_progress(chat_id, date DESC);

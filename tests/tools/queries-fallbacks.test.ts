@@ -7,6 +7,11 @@ import {
   countStaleEventPatterns,
   insertSoulQualitySignal,
   insertPulseCheck,
+  getVerbConjugations,
+  getSpanishProfile,
+  getSpanishVocabularyById,
+  insertSpanishReview,
+  upsertSpanishProgressSnapshot,
 } from "../../src/db/queries.js";
 
 describe("queries defensive fallbacks", () => {
@@ -142,5 +147,178 @@ describe("queries defensive fallbacks", () => {
 
     expect(result.signal_counts).toEqual({});
     expect(result.repairs_applied).toEqual([]);
+  });
+
+  it("maps spanish vocabulary difficulty to 0 when DB row omits it", async () => {
+    const query = vi.fn().mockResolvedValue({
+      rows: [
+        {
+          id: 1,
+          chat_id: "100",
+          word: "maje",
+          translation: null,
+          part_of_speech: null,
+          region: undefined,
+          example_sentence: null,
+          notes: null,
+          source: "chat",
+          stability: undefined,
+          difficulty: undefined,
+          reps: 0,
+          lapses: 0,
+          state: "new",
+          last_review: null,
+          next_review: null,
+          first_seen: new Date("2026-01-01T00:00:00Z"),
+          last_seen: new Date("2026-01-01T00:00:00Z"),
+          created_at: new Date("2026-01-01T00:00:00Z"),
+          updated_at: new Date("2026-01-01T00:00:00Z"),
+        },
+      ],
+    });
+    const pool = {
+      query,
+    } as unknown as Parameters<typeof getSpanishVocabularyById>[0];
+
+    const row = await getSpanishVocabularyById(pool, "100", 1);
+    expect(row).not.toBeNull();
+    expect(row!.difficulty).toBe(0);
+    expect(row!.stability).toBe(0);
+    expect(row!.region).toBe("");
+  });
+
+  it("maps spanish verb nullable text fields to null defaults", async () => {
+    const query = vi.fn().mockResolvedValue({
+      rows: [
+        {
+          id: 1,
+          infinitive: "tener",
+          infinitive_english: undefined,
+          mood: "Indicativo",
+          tense: "Presente",
+          verb_english: undefined,
+          form_1s: undefined,
+          form_2s: undefined,
+          form_3s: undefined,
+          form_1p: undefined,
+          form_2p: undefined,
+          form_3p: undefined,
+          gerund: undefined,
+          past_participle: undefined,
+          is_irregular: false,
+          source: "jehle",
+          created_at: new Date("2026-01-01T00:00:00Z"),
+        },
+      ],
+    });
+    const pool = { query } as unknown as Parameters<typeof getVerbConjugations>[0];
+
+    const rows = await getVerbConjugations(pool, {
+      verb: "tener",
+      limit: 1,
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].infinitive_english).toBeNull();
+    expect(rows[0].verb_english).toBeNull();
+    expect(rows[0].form_1s).toBeNull();
+    expect(rows[0].past_participle).toBeNull();
+  });
+
+  it("maps spanish profile cefr_level to null when omitted", async () => {
+    const query = vi.fn().mockResolvedValue({
+      rows: [
+        {
+          chat_id: "100",
+          cefr_level: undefined,
+          known_tenses: [],
+          focus_topics: [],
+          created_at: new Date("2026-01-01T00:00:00Z"),
+          updated_at: new Date("2026-01-01T00:00:00Z"),
+        },
+      ],
+    });
+    const pool = { query } as unknown as Parameters<typeof getSpanishProfile>[0];
+
+    const profile = await getSpanishProfile(pool, "100");
+    expect(profile).not.toBeNull();
+    expect(profile!.cefr_level).toBeNull();
+  });
+
+  it("falls back to streak_days=0 when streak query returns no rows", async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({
+        rows: [{ words_learned: 1, words_in_progress: 0, new_words_today: 1 }],
+      })
+      .mockResolvedValueOnce({
+        rows: [{ reviews_today: 0, tenses_practiced: [] }],
+      })
+      .mockResolvedValueOnce({
+        rows: [],
+      })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: 1,
+            chat_id: "100",
+            date: new Date("2026-01-01T00:00:00Z"),
+            words_learned: 1,
+            words_in_progress: 0,
+            reviews_today: 0,
+            new_words_today: 1,
+            tenses_practiced: [],
+            streak_days: 0,
+            created_at: new Date("2026-01-01T00:00:00Z"),
+            updated_at: new Date("2026-01-01T00:00:00Z"),
+          },
+        ],
+      });
+    const pool = {
+      query,
+    } as unknown as Parameters<typeof upsertSpanishProgressSnapshot>[0];
+
+    const row = await upsertSpanishProgressSnapshot(pool, "100", "2026-01-01");
+    expect(row.streak_days).toBe(0);
+    expect(query).toHaveBeenCalledTimes(4);
+  });
+
+  it("maps spanish review nullable numeric fields to null", async () => {
+    const query = vi.fn().mockResolvedValue({
+      rows: [
+        {
+          id: 5,
+          chat_id: "100",
+          vocabulary_id: 7,
+          grade: 3,
+          stability_before: null,
+          stability_after: null,
+          difficulty_before: null,
+          difficulty_after: null,
+          interval_days: null,
+          retrievability: null,
+          review_context: "conversation",
+          reviewed_at: new Date("2026-01-01T00:00:00Z"),
+        },
+      ],
+    });
+    const pool = { query } as unknown as Parameters<typeof insertSpanishReview>[0];
+
+    const review = await insertSpanishReview(pool, {
+      chatId: "100",
+      vocabularyId: 7,
+      grade: 3,
+      stabilityBefore: null,
+      stabilityAfter: null,
+      difficultyBefore: null,
+      difficultyAfter: null,
+      intervalDays: null,
+      retrievability: null,
+      reviewContext: "conversation",
+    });
+
+    expect(review.stability_before).toBeNull();
+    expect(review.difficulty_after).toBeNull();
+    expect(review.interval_days).toBeNull();
+    expect(review.retrievability).toBeNull();
   });
 });

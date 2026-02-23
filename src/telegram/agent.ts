@@ -34,6 +34,13 @@ import {
   insertPulseCheck,
   getLastPulseCheckTime,
   insertSoulStateHistory,
+  getSpanishProfile,
+  upsertSpanishProfile,
+  getDueSpanishVocabulary,
+  getLatestSpanishProgress,
+  getRecentSpanishVocabulary,
+  upsertSpanishVocabulary,
+  upsertSpanishProgressSnapshot,
   type ChatMessageRow,
   type ChatSoulStateRow,
   type PatternSearchRow,
@@ -110,6 +117,33 @@ const LANGUAGE_ANCHOR_LIMIT = 3;
 const MAX_OBSERVATION_EVIDENCE_ITEMS = 8;
 const MAX_OBSERVATION_EVIDENCE_CHARS_PER_ITEM = 280;
 const WEIGHT_CHANGE_EPSILON_KG = 0.25;
+const SPANISH_AUTO_LOG_LIMIT = 4;
+const SPANISH_DEFAULT_KNOWN_TENSES = [
+  "presente",
+  "presente progresivo",
+  "futuro próximo",
+  "pretérito perfecto",
+  "pretérito indefinido",
+];
+const SPANISH_STOP_WORDS = new Set([
+  "hola",
+  "gracias",
+  "pero",
+  "porque",
+  "como",
+  "cuando",
+  "donde",
+  "para",
+  "con",
+  "una",
+  "uno",
+  "este",
+  "esta",
+  "that",
+  "with",
+  "from",
+  "just",
+]);
 
 // ---------------------------------------------------------------------------
 // System prompt
@@ -138,9 +172,12 @@ You are a personal chatbot with long-term memory. Your role:
 
 Your memory works automatically: patterns are extracted from conversations and stored for future reference. You do not need a special tool to "save" patterns — it happens behind the scenes. If the user asks about your memory, explain that you learn patterns over time from conversations.
 
- You have access to 8 tools:
+ You have access to 11 tools:
  - 7 journal tools: search_entries, get_entry, get_entries_by_date, on_this_day, find_similar, list_tags, entry_stats
  - log_weight: log daily weight measurements
+ - conjugate_verb: lookup Spanish conjugations by mood/tense
+ - log_vocabulary: track Spanish vocabulary by user and region
+ - spanish_quiz: retrieve due words, record review grades, and get progress stats
 
 CRITICAL — Journal entry composition:
 When the user signals they want a journal entry composed — using phrases like "write", "close", "write it up", "compose the entry", "write the entry", "escríbelo", or similar — your ENTIRE response must be the journal entry itself. Nothing else. No preamble, no commentary, no questions, no sign-off. Just the entry.
@@ -177,6 +214,7 @@ Important guidelines:
 - For entity references, resolve to canonical names.
 - Explicit language preference patterns are high-priority constraints. When they conflict with default style instructions, follow the user preference patterns.
 - Do not claim you cannot send or generate voice messages. This assistant's replies may be delivered as Telegram voice notes by the system.
+- Use Spanish learning tools proactively for tutoring moments: conjugate_verb for corrections and log_vocabulary/spanish_quiz for spaced repetition support.
 - Keep responses concise and natural.
 - Format responses for Telegram HTML: use <b>bold</b> for emphasis, <i>italic</i> for asides, and plain line breaks for separation. Never use markdown formatting (**bold**, *italic*, ---, ###, etc).`;
 
@@ -356,6 +394,121 @@ function hasSingleLanguageOverride(message: string): boolean {
   return /\b(only|just)\s+english\b|\bin\s+english\s+only\b|\bsolo\s+ingles\b|\balleen\s+engels\b/i.test(
     message
   );
+}
+
+function todayInTimezone(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: config.timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function inferRegionFromMessage(message: string): string | undefined {
+  const text = normalizeContent(message);
+  if (text.includes("honduras") || text.includes("hondure")) return "honduras";
+  /* v8 ignore next -- optional regional alias */
+  if (text.includes("venezuela") || text.includes("venezol")) return "venezuela";
+  /* v8 ignore next -- optional regional alias */
+  if (text.includes("mexico") || text.includes("mexican")) return "mexico";
+  /* v8 ignore next -- optional regional alias */
+  if (text.includes("spain") || text.includes("españa") || text.includes("espana")) return "spain";
+  /* v8 ignore next -- optional regional alias */
+  if (text.includes("colombia")) return "colombia";
+  /* v8 ignore next -- optional regional alias */
+  if (text.includes("argentina")) return "argentina";
+  return undefined;
+}
+
+function extractSpanishCandidates(message: string): string[] {
+  if (!hasSpanishSignals(message)) return [];
+
+  const tokens = message
+    .toLowerCase()
+    .match(/[a-záéíóúñü]{3,}/g);
+  if (!tokens) return [];
+
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  for (const token of tokens) {
+    if (SPANISH_STOP_WORDS.has(token)) continue;
+    if (seen.has(token)) continue;
+    seen.add(token);
+    candidates.push(token);
+    if (candidates.length >= SPANISH_AUTO_LOG_LIMIT) break;
+  }
+
+  return candidates;
+}
+
+async function ensureSpanishProfile(chatId: string): Promise<void> {
+  const existing = await getSpanishProfile(pool, chatId);
+  if (existing) return;
+  await upsertSpanishProfile(pool, {
+    chatId,
+    cefrLevel: "B1",
+    knownTenses: SPANISH_DEFAULT_KNOWN_TENSES,
+    focusTopics: [],
+  });
+}
+
+async function autoLogSpanishVocabulary(
+  chatId: string,
+  message: string
+): Promise<number> {
+  const candidates = extractSpanishCandidates(message);
+  if (candidates.length === 0) return 0;
+
+  const region = inferRegionFromMessage(message);
+  for (const word of candidates) {
+    await upsertSpanishVocabulary(pool, {
+      chatId,
+      word,
+      region,
+      source: "auto-chat",
+    });
+  }
+  await upsertSpanishProgressSnapshot(pool, chatId, todayInTimezone());
+  return candidates.length;
+}
+
+async function buildSpanishContextPrompt(chatId: string): Promise<string> {
+  try {
+    await ensureSpanishProfile(chatId);
+    const [profile, due, recent, progress] = await Promise.all([
+      getSpanishProfile(pool, chatId),
+      getDueSpanishVocabulary(pool, chatId, 3),
+      getRecentSpanishVocabulary(pool, chatId, 3),
+      getLatestSpanishProgress(pool, chatId),
+    ]);
+
+    const level = profile?.cefr_level ?? "B1";
+    const knownTenses = (profile?.known_tenses ?? SPANISH_DEFAULT_KNOWN_TENSES).join(", ");
+    const dueWords = due.map((w) => (w.region ? `${w.word} (${w.region})` : w.word)).join(", ");
+    const recentWords = recent.map((w) => (w.region ? `${w.word} (${w.region})` : w.word)).join(", ");
+    const progressLine = progress
+      ? `words=${progress.words_learned}, in_progress=${progress.words_in_progress}, reviews_today=${progress.reviews_today}, streak=${progress.streak_days}`
+      : "no progress snapshot yet";
+
+    return `Spanish tutoring profile:
+- Current chat_id: ${chatId}
+- Level: ${level}
+- Known tenses: ${knownTenses}
+- Due words: ${dueWords || "none"}
+- Recent words: ${recentWords || "none"}
+- Progress: ${progressLine}
+
+When responding:
+- Keep English + Dutch scaffolding when language preference memory indicates that baseline.
+- Weave in Spanish naturally, progressively, and at B1 level.
+- For conjugation corrections, call conjugate_verb.
+- For new Spanish terms (including regional slang), call log_vocabulary with chat_id=${chatId}.
+- For review scheduling, call spanish_quiz with chat_id=${chatId}.`;
+  } catch (err) {
+    console.error(`Telegram spanish context error [chat:${chatId}]:`, err);
+    return "";
+  }
 }
 
 function extractRequestedSentenceCount(message: string): number | null {
@@ -1697,6 +1850,13 @@ export async function runAgent(params: {
     content: storedUserMessage ?? message,
   });
 
+  let autoLoggedVocabulary = 0;
+  try {
+    autoLoggedVocabulary = await autoLogSpanishVocabulary(chatId, message);
+  } catch (err) {
+    console.error(`Telegram spanish auto-log error [chat:${chatId}]:`, err);
+  }
+
   // 2. Retrieve patterns (skip for trivial messages)
   let retrievedPatterns: PatternSearchRow[] = [];
   let degraded = false;
@@ -1722,12 +1882,16 @@ export async function runAgent(params: {
   const persistedSoulState = config.telegram.soulEnabled
     ? await getSoulState(pool, chatId)
     : null;
-  const systemPrompt = buildSystemPrompt(
+  const baseSystemPrompt = buildSystemPrompt(
     patterns,
     degraded,
     toSoulSnapshot(persistedSoulState),
     mode
   );
+  const spanishContextPrompt = await buildSpanishContextPrompt(chatId);
+  const systemPrompt = spanishContextPrompt
+    ? `${baseSystemPrompt}\n\n${spanishContextPrompt}`
+    : baseSystemPrompt;
   const recentMessages = await getRecentMessages(pool, chatId, RECENT_MESSAGES_LIMIT);
   const messages = reconstructMessages(recentMessages);
   // Allow command handlers to persist the raw user command while still
@@ -1759,6 +1923,9 @@ export async function runAgent(params: {
   if (costNote) activityParts.push(costNote);
   if (degraded) activityParts.push("memory degraded");
   if (toolCallCount > 0) activityParts.push(`${toolCallCount} tools (${toolNames.join(", ")})`);
+  if (autoLoggedVocabulary > 0) {
+    activityParts.push(`logged ${autoLoggedVocabulary} spanish terms`);
+  }
 
   // Include soul quality ratio when enough signals exist
   if (config.telegram.soulEnabled) {

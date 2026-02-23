@@ -32,6 +32,13 @@ const {
   mockInsertPulseCheck,
   mockGetLastPulseCheckTime,
   mockInsertSoulStateHistory,
+  mockGetSpanishProfile,
+  mockUpsertSpanishProfile,
+  mockGetDueSpanishVocabulary,
+  mockGetLatestSpanishProgress,
+  mockGetRecentSpanishVocabulary,
+  mockUpsertSpanishVocabulary,
+  mockUpsertSpanishProgressSnapshot,
   mockGenerateEmbedding,
   mockAnthropicCreate,
   mockOpenAIChatCreate,
@@ -104,6 +111,61 @@ const {
     id: 1, chat_id: "100", version: 1, identity_summary: "",
     relational_commitments: [], tone_signature: [], growth_notes: [],
     change_reason: "", created_at: new Date(),
+  }),
+  mockGetSpanishProfile: vi.fn().mockResolvedValue({
+    chat_id: "100",
+    cefr_level: "B1",
+    known_tenses: [
+      "presente",
+      "presente progresivo",
+      "futuro próximo",
+      "pretérito perfecto",
+      "pretérito indefinido",
+    ],
+    focus_topics: [],
+    created_at: new Date(),
+    updated_at: new Date(),
+  }),
+  mockUpsertSpanishProfile: vi.fn().mockResolvedValue({
+    chat_id: "100",
+    cefr_level: "B1",
+    known_tenses: [
+      "presente",
+      "presente progresivo",
+      "futuro próximo",
+      "pretérito perfecto",
+      "pretérito indefinido",
+    ],
+    focus_topics: [],
+    created_at: new Date(),
+    updated_at: new Date(),
+  }),
+  mockGetDueSpanishVocabulary: vi.fn().mockResolvedValue([]),
+  mockGetLatestSpanishProgress: vi.fn().mockResolvedValue(null),
+  mockGetRecentSpanishVocabulary: vi.fn().mockResolvedValue([]),
+  mockUpsertSpanishVocabulary: vi.fn().mockResolvedValue({
+    inserted: true,
+    row: {
+      id: 1,
+      word: "chamo",
+      translation: null,
+      region: "",
+      part_of_speech: null,
+      state: "new",
+    },
+  }),
+  mockUpsertSpanishProgressSnapshot: vi.fn().mockResolvedValue({
+    id: 1,
+    chat_id: "100",
+    date: new Date(),
+    words_learned: 0,
+    words_in_progress: 0,
+    reviews_today: 0,
+    new_words_today: 0,
+    tenses_practiced: [],
+    streak_days: 0,
+    created_at: new Date(),
+    updated_at: new Date(),
   }),
   mockGenerateEmbedding: vi.fn().mockResolvedValue({
     embedding: new Array(1536).fill(0),
@@ -193,6 +255,13 @@ vi.mock("../../src/db/queries.js", () => ({
   insertPulseCheck: mockInsertPulseCheck,
   getLastPulseCheckTime: mockGetLastPulseCheckTime,
   insertSoulStateHistory: mockInsertSoulStateHistory,
+  getSpanishProfile: mockGetSpanishProfile,
+  upsertSpanishProfile: mockUpsertSpanishProfile,
+  getDueSpanishVocabulary: mockGetDueSpanishVocabulary,
+  getLatestSpanishProgress: mockGetLatestSpanishProgress,
+  getRecentSpanishVocabulary: mockGetRecentSpanishVocabulary,
+  upsertSpanishVocabulary: mockUpsertSpanishVocabulary,
+  upsertSpanishProgressSnapshot: mockUpsertSpanishProgressSnapshot,
 }));
 
 vi.mock("../../src/db/embeddings.js", () => ({
@@ -308,6 +377,61 @@ beforeEach(() => {
     id: 1, chat_id: "100", version: 1, identity_summary: "",
     relational_commitments: [], tone_signature: [], growth_notes: [],
     change_reason: "", created_at: new Date(),
+  });
+  mockGetSpanishProfile.mockReset().mockResolvedValue({
+    chat_id: "100",
+    cefr_level: "B1",
+    known_tenses: [
+      "presente",
+      "presente progresivo",
+      "futuro próximo",
+      "pretérito perfecto",
+      "pretérito indefinido",
+    ],
+    focus_topics: [],
+    created_at: new Date(),
+    updated_at: new Date(),
+  });
+  mockUpsertSpanishProfile.mockReset().mockResolvedValue({
+    chat_id: "100",
+    cefr_level: "B1",
+    known_tenses: [
+      "presente",
+      "presente progresivo",
+      "futuro próximo",
+      "pretérito perfecto",
+      "pretérito indefinido",
+    ],
+    focus_topics: [],
+    created_at: new Date(),
+    updated_at: new Date(),
+  });
+  mockGetDueSpanishVocabulary.mockReset().mockResolvedValue([]);
+  mockGetLatestSpanishProgress.mockReset().mockResolvedValue(null);
+  mockGetRecentSpanishVocabulary.mockReset().mockResolvedValue([]);
+  mockUpsertSpanishVocabulary.mockReset().mockResolvedValue({
+    inserted: true,
+    row: {
+      id: 1,
+      word: "chamo",
+      translation: null,
+      region: "",
+      part_of_speech: null,
+      state: "new",
+    },
+  });
+  mockUpsertSpanishProgressSnapshot.mockReset().mockResolvedValue({
+    id: 1,
+    chat_id: "100",
+    date: new Date(),
+    words_learned: 0,
+    words_in_progress: 0,
+    reviews_today: 0,
+    new_words_today: 0,
+    tenses_practiced: [],
+    streak_days: 0,
+    created_at: new Date(),
+    updated_at: new Date(),
   });
   mockGenerateEmbedding.mockReset().mockResolvedValue({
     embedding: new Array(1536).fill(0),
@@ -1603,6 +1727,228 @@ describe("runAgent", () => {
     expect(result.response).toContain("como una");
     expect(mockOpenAIChatCreate).toHaveBeenCalledTimes(2);
     expect(mockAnthropicCreate).not.toHaveBeenCalled();
+  });
+
+  it("auto-logs spanish candidate words with regional context", async () => {
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Perfecto." }],
+      usage: { input_tokens: 120, output_tokens: 30 },
+    });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "En Honduras uso chamo y maje con mis amigos.",
+      externalMessageId: "update:spanish-auto-1",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("Perfecto.");
+    expect(mockUpsertSpanishVocabulary).toHaveBeenCalled();
+    expect(mockUpsertSpanishVocabulary).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        chatId: "100",
+        region: "honduras",
+        source: "auto-chat",
+      })
+    );
+    expect(mockUpsertSpanishProgressSnapshot).toHaveBeenCalled();
+    expect(result.activity).toContain("logged");
+  });
+
+  it("auto-logs spanish words without region and uses progress snapshot context", async () => {
+    mockGetLatestSpanishProgress.mockResolvedValueOnce({
+      id: 1,
+      chat_id: "100",
+      date: new Date(),
+      words_learned: 12,
+      words_in_progress: 5,
+      reviews_today: 3,
+      new_words_today: 1,
+      tenses_practiced: ["presente"],
+      streak_days: 7,
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Vale." }],
+      usage: { input_tokens: 120, output_tokens: 20 },
+    });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "Hola chamo, vamos con esto.",
+      externalMessageId: "update:spanish-auto-no-region",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("Vale.");
+    expect(mockUpsertSpanishVocabulary).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        chatId: "100",
+        region: undefined,
+      })
+    );
+    expect(result.activity).toContain("logged");
+  });
+
+  it("deduplicates repeated spanish candidates and tolerates sparse profile fields", async () => {
+    mockGetSpanishProfile.mockResolvedValue({
+      chat_id: "100",
+      cefr_level: null,
+      known_tenses: undefined,
+      focus_topics: [],
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+    mockGetDueSpanishVocabulary.mockResolvedValue([
+      {
+        id: 1,
+        word: "maje",
+        region: "honduras",
+      },
+    ]);
+    mockGetRecentSpanishVocabulary.mockResolvedValue([
+      {
+        id: 2,
+        word: "chamo",
+        region: "",
+      },
+    ]);
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Bien." }],
+      usage: { input_tokens: 100, output_tokens: 22 },
+    });
+
+    await runAgent({
+      chatId: "100",
+      message: "hola chamo chamo con enfoque",
+      externalMessageId: "update:spanish-dedupe",
+      messageDate: 1000,
+    });
+
+    expect(mockUpsertSpanishVocabulary).toHaveBeenCalledTimes(2);
+    expect(mockUpsertSpanishVocabulary).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      expect.objectContaining({ word: "chamo" })
+    );
+  });
+
+  it("builds spanish context when due terms have no region and recent terms do", async () => {
+    mockGetDueSpanishVocabulary.mockResolvedValue([
+      {
+        id: 10,
+        word: "hola",
+        region: "",
+      },
+    ]);
+    mockGetRecentSpanishVocabulary.mockResolvedValue([
+      {
+        id: 11,
+        word: "maje",
+        region: "honduras",
+      },
+    ]);
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Hecho." }],
+      usage: { input_tokens: 90, output_tokens: 20 },
+    });
+
+    await runAgent({
+      chatId: "100",
+      message: "Hola, ¿cómo vas?",
+      externalMessageId: "update:spanish-context-mixed-regions",
+      messageDate: 1000,
+    });
+
+    expect(mockAnthropicCreate).toHaveBeenCalled();
+  });
+
+  it("skips spanish token logging when signal text has no word tokens", async () => {
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "ok" }],
+      usage: { input_tokens: 60, output_tokens: 12 },
+    });
+
+    await runAgent({
+      chatId: "100",
+      message: "¿¡",
+      externalMessageId: "update:spanish-empty-token",
+      messageDate: 1000,
+    });
+
+    expect(mockUpsertSpanishVocabulary).not.toHaveBeenCalled();
+  });
+
+  it("creates spanish profile defaults when profile is missing", async () => {
+    mockGetSpanishProfile
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({
+        chat_id: "100",
+        cefr_level: "B1",
+        known_tenses: [
+          "presente",
+          "presente progresivo",
+          "futuro próximo",
+          "pretérito perfecto",
+          "pretérito indefinido",
+        ],
+        focus_topics: [],
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Listo." }],
+      usage: { input_tokens: 120, output_tokens: 30 },
+    });
+
+    await runAgent({
+      chatId: "100",
+      message: "Hola",
+      externalMessageId: "update:spanish-profile-default",
+      messageDate: 1000,
+    });
+
+    expect(mockUpsertSpanishProfile).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        chatId: "100",
+        cefrLevel: "B1",
+      })
+    );
+  });
+
+  it("continues when spanish auto-log/context lookups fail", async () => {
+    mockUpsertSpanishVocabulary.mockRejectedValueOnce(
+      new Error("auto vocab failure")
+    );
+    mockGetSpanishProfile.mockRejectedValueOnce(
+      new Error("profile lookup failure")
+    );
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Fallback response" }],
+      usage: { input_tokens: 80, output_tokens: 18 },
+    });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "Hola, chamo en Honduras con maje.",
+      externalMessageId: "update:spanish-error-path",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("Fallback response");
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Telegram spanish auto-log error [chat:100]:",
+      expect.any(Error)
+    );
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Telegram spanish context error [chat:100]:",
+      expect.any(Error)
+    );
   });
 
   it("falls back to original draft when language rewrite call fails", async () => {

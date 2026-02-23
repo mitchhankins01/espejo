@@ -33,6 +33,7 @@
     "sync:prod": "NODE_ENV=production tsx scripts/sync-dayone.ts --skip-media",
     "embed": "tsx scripts/embed-entries.ts",
     "embed:prod": "NODE_ENV=production tsx scripts/embed-entries.ts",
+    "import:verbs": "tsx scripts/import-verbs.ts",
     "sync:weight": "tsx scripts/sync-weight.ts",
     "sync:weight:prod": "NODE_ENV=production tsx scripts/sync-weight.ts",
     "telegram:setup": "tsx scripts/telegram-setup.ts",

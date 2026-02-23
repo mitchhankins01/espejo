@@ -37,6 +37,11 @@ const limitParam = (defaultVal: number, max: number) =>
     .default(defaultVal)
     .describe(`Max results to return (default: ${defaultVal}, max: ${max})`);
 
+const spanishActionParam = z
+  .string()
+  .regex(/^(get_due|record_review|stats)$/, "Must be get_due, record_review, or stats")
+  .describe("Quiz action: get_due, record_review, or stats");
+
 // ============================================================================
 // Tool result types
 // ============================================================================
@@ -308,6 +313,154 @@ export const toolSpecs = {
         input: { weight_kg: 80.0, date: "2025-03-15" },
         behavior:
           "Logs weight for a specific date",
+      },
+    ],
+  },
+  conjugate_verb: {
+    name: "conjugate_verb" as const,
+    description:
+      "Look up Spanish verb conjugations by infinitive, optionally filtered by mood and tense. " +
+      "Useful for correcting conjugation mistakes in natural conversation.",
+    params: z.object({
+      verb: z
+        .string()
+        .min(1)
+        .describe("Spanish infinitive, e.g. 'tener', 'estar', 'hablar'"),
+      mood: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Optional mood filter, e.g. 'Indicativo'"),
+      tense: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Optional tense filter, e.g. 'Presente'"),
+      limit: limitParam(20, 60),
+    }),
+    examples: [
+      {
+        input: { verb: "tener", mood: "Indicativo", tense: "Presente" },
+        behavior:
+          "Returns present indicative forms for tener (yo tengo, tú tienes, etc.)",
+      },
+      {
+        input: { verb: "hablar", limit: 6 },
+        behavior:
+          "Returns up to 6 conjugation rows across common moods/tenses for hablar",
+      },
+    ],
+  },
+  log_vocabulary: {
+    name: "log_vocabulary" as const,
+    description:
+      "Track a Spanish vocabulary word for a specific chat/user, including optional region and usage notes. " +
+      "Upserts by chat + word + region so repeated logging reinforces the same card.",
+    params: z.object({
+      chat_id: z
+        .string()
+        .min(1)
+        .describe("Chat/user identifier for multi-chat isolation"),
+      word: z
+        .string()
+        .min(1)
+        .describe("Vocabulary word or short phrase in Spanish"),
+      translation: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Optional translation or gloss"),
+      part_of_speech: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Optional part of speech, e.g. noun, verb, adjective"),
+      region: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Optional regional context, e.g. Honduras, Venezuela, Spain"),
+      example_sentence: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Optional example sentence"),
+      notes: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Optional notes"),
+      source: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Optional source tag, defaults to 'chat'"),
+    }),
+    examples: [
+      {
+        input: {
+          chat_id: "123",
+          word: "maje",
+          translation: "dude / bro",
+          part_of_speech: "noun",
+          region: "Honduras",
+        },
+        behavior:
+          "Creates or updates a Honduras-specific vocabulary card for maje",
+      },
+    ],
+  },
+  spanish_quiz: {
+    name: "spanish_quiz" as const,
+    description:
+      "Manage lightweight Spanish spaced-repetition flow: fetch due cards, record a review grade, or get progress stats.",
+    params: z.object({
+      action: spanishActionParam,
+      chat_id: z
+        .string()
+        .min(1)
+        .describe("Chat/user identifier for multi-chat isolation"),
+      vocabulary_id: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Required for action=record_review"),
+      grade: z
+        .number()
+        .int()
+        .min(1)
+        .max(4)
+        .optional()
+        .describe("Review grade 1-4, required for action=record_review"),
+      review_context: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Optional context tag, e.g. conversation or correction"),
+      limit: limitParam(5, 30),
+    }),
+    examples: [
+      {
+        input: { action: "get_due", chat_id: "123", limit: 5 },
+        behavior:
+          "Returns up to 5 due/new vocabulary cards for this chat",
+      },
+      {
+        input: {
+          action: "record_review",
+          chat_id: "123",
+          vocabulary_id: 42,
+          grade: 3,
+          review_context: "conversation",
+        },
+        behavior:
+          "Stores a review event and schedules the next review date",
+      },
+      {
+        input: { action: "stats", chat_id: "123" },
+        behavior:
+          "Returns vocabulary and review progress statistics",
       },
     ],
   },

@@ -15,3 +15,4 @@ Journal.json
 *.sqlite-wal
 .claude/
 .svelte-kit/
+data/

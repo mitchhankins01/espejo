@@ -16,6 +16,18 @@ import {
   listTags,
   getEntryStats,
   upsertDailyMetric,
+  getSpanishProfile,
+  upsertSpanishProfile,
+  getVerbConjugations,
+  upsertSpanishVocabulary,
+  getSpanishVocabularyById,
+  getDueSpanishVocabulary,
+  getRecentSpanishVocabulary,
+  updateSpanishVocabularySchedule,
+  insertSpanishReview,
+  getSpanishQuizStats,
+  upsertSpanishProgressSnapshot,
+  getLatestSpanishProgress,
   insertChatMessage,
   getRecentMessages,
   markMessagesCompacted,
@@ -482,6 +494,237 @@ describe("upsertDailyMetric", () => {
       ["2024-03-15"]
     );
     expect(result.rows[0].weight_kg).toBe(99.9);
+  });
+});
+
+// ============================================================================
+// Spanish learning queries
+// ============================================================================
+
+describe("Spanish learning queries", () => {
+  it("upserts and fetches spanish profile", async () => {
+    const created = await upsertSpanishProfile(pool, {
+      chatId: "101",
+      cefrLevel: "B1",
+      knownTenses: ["presente", "pretérito perfecto"],
+      focusTopics: ["daily life"],
+    });
+    expect(created.chat_id).toBe("101");
+    expect(created.cefr_level).toBe("B1");
+    expect(created.known_tenses).toEqual(["presente", "pretérito perfecto"]);
+
+    const updated = await upsertSpanishProfile(pool, {
+      chatId: "101",
+      cefrLevel: null,
+      knownTenses: [],
+      focusTopics: [],
+    });
+    expect(updated.cefr_level).toBe("B1");
+    expect(updated.known_tenses).toEqual(["presente", "pretérito perfecto"]);
+
+    const fetched = await getSpanishProfile(pool, "101");
+    expect(fetched).not.toBeNull();
+    expect(fetched!.chat_id).toBe("101");
+
+    const missing = await getSpanishProfile(pool, "999");
+    expect(missing).toBeNull();
+  });
+
+  it("looks up verb conjugations with optional filters", async () => {
+    await pool.query(
+      `INSERT INTO spanish_verbs (
+        infinitive, infinitive_english, mood, tense, verb_english,
+        form_1s, form_2s, form_3s, form_1p, form_2p, form_3p,
+        gerund, past_participle, is_irregular
+      )
+      VALUES
+        ('tener', 'to have', 'Indicativo', 'Presente', 'I have', 'tengo', 'tienes', 'tiene', 'tenemos', 'tenéis', 'tienen', 'teniendo', 'tenido', TRUE),
+        ('tener', 'to have', 'Indicativo', 'Pretérito', 'I had', 'tuve', 'tuviste', 'tuvo', 'tuvimos', 'tuvisteis', 'tuvieron', 'teniendo', 'tenido', TRUE),
+        ('hablar', 'to speak', 'Indicativo', 'Presente', 'I speak', 'hablo', 'hablas', 'habla', 'hablamos', 'habláis', 'hablan', 'hablando', 'hablado', FALSE)`
+    );
+
+    const allTener = await getVerbConjugations(pool, {
+      verb: "tener",
+      limit: 10,
+    });
+    expect(allTener).toHaveLength(2);
+    expect(allTener[0].infinitive).toBe("tener");
+
+    const filtered = await getVerbConjugations(pool, {
+      verb: "tener",
+      mood: "Indicativo",
+      tense: "Presente",
+      limit: 10,
+    });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].form_1s).toBe("tengo");
+    expect(filtered[0].is_irregular).toBe(true);
+  });
+
+  it("upserts vocabulary and supports retrieval by id, due list, and recent list", async () => {
+    const created = await upsertSpanishVocabulary(pool, {
+      chatId: "102",
+      word: "Maje",
+      translation: "dude",
+      partOfSpeech: "noun",
+      region: "Honduras",
+      exampleSentence: "Qué onda, maje",
+      source: "chat",
+    });
+    expect(created.inserted).toBe(true);
+    expect(created.row.word).toBe("maje");
+    expect(created.row.region).toBe("honduras");
+
+    const updated = await upsertSpanishVocabulary(pool, {
+      chatId: "102",
+      word: "maje",
+      region: "Honduras",
+      notes: "informal regional slang",
+    });
+    expect(updated.inserted).toBe(false);
+    expect(updated.row.notes).toContain("regional");
+
+    const unscoped = await upsertSpanishVocabulary(pool, {
+      chatId: "102",
+      word: "hola",
+      translation: "hello",
+    });
+    expect(unscoped.row.region).toBe("");
+
+    const byId = await getSpanishVocabularyById(pool, "102", created.row.id);
+    expect(byId).not.toBeNull();
+    expect(byId!.word).toBe("maje");
+
+    const missing = await getSpanishVocabularyById(pool, "102", 99999);
+    expect(missing).toBeNull();
+
+    const due = await getDueSpanishVocabulary(pool, "102", 10);
+    expect(due.length).toBeGreaterThan(0);
+    expect(due[0].word).toBe("maje");
+
+    const recent = await getRecentSpanishVocabulary(pool, "102", 10);
+    expect(recent.length).toBeGreaterThan(0);
+    expect(recent.map((row) => row.id)).toContain(created.row.id);
+  });
+
+  it("updates vocabulary schedule and errors for unknown ids", async () => {
+    const created = await upsertSpanishVocabulary(pool, {
+      chatId: "103",
+      word: "chamo",
+      translation: "dude",
+      region: "venezuela",
+    });
+
+    const now = new Date("2026-02-20T10:00:00Z");
+    const next = new Date("2026-02-23T10:00:00Z");
+    const updated = await updateSpanishVocabularySchedule(pool, {
+      chatId: "103",
+      vocabularyId: created.row.id,
+      state: "review",
+      stability: 2.5,
+      difficulty: 4.2,
+      reps: 1,
+      lapses: 0,
+      lastReview: now,
+      nextReview: next,
+    });
+    expect(updated.state).toBe("review");
+    expect(updated.next_review?.toISOString()).toBe(next.toISOString());
+
+    await expect(
+      updateSpanishVocabularySchedule(pool, {
+        chatId: "103",
+        vocabularyId: 999999,
+        state: "review",
+        stability: 1,
+        difficulty: 5,
+        reps: 1,
+        lapses: 0,
+        lastReview: now,
+        nextReview: next,
+      })
+    ).rejects.toThrow("not found");
+  });
+
+  it("records spanish reviews and computes stats/progress snapshots", async () => {
+    const one = await upsertSpanishVocabulary(pool, {
+      chatId: "104",
+      word: "maje",
+      translation: "dude",
+      region: "honduras",
+    });
+    const two = await upsertSpanishVocabulary(pool, {
+      chatId: "104",
+      word: "chamo",
+      translation: "dude",
+      region: "venezuela",
+    });
+
+    const now = new Date();
+    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    await updateSpanishVocabularySchedule(pool, {
+      chatId: "104",
+      vocabularyId: one.row.id,
+      state: "review",
+      stability: 3.2,
+      difficulty: 3.1,
+      reps: 2,
+      lapses: 0,
+      lastReview: now,
+      nextReview: tomorrow,
+    });
+
+    const review = await insertSpanishReview(pool, {
+      chatId: "104",
+      vocabularyId: one.row.id,
+      grade: 4,
+      stabilityBefore: 1.5,
+      stabilityAfter: 3.2,
+      difficultyBefore: 3.6,
+      difficultyAfter: 3.1,
+      intervalDays: 3,
+      retrievability: 0.9,
+      reviewContext: "conversation,tense:presente",
+    });
+    expect(review.grade).toBe(4);
+    expect(review.review_context).toContain("tense:");
+
+    const stats = await getSpanishQuizStats(pool, "104");
+    expect(stats.total_words).toBe(2);
+    expect(stats.review_words).toBeGreaterThanOrEqual(1);
+    expect(stats.reviews_today).toBeGreaterThanOrEqual(1);
+    expect(stats.average_grade).toBeGreaterThan(0);
+
+    const today = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Europe/Madrid",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+    const progress = await upsertSpanishProgressSnapshot(
+      pool,
+      "104",
+      today
+    );
+    expect(progress.words_learned).toBe(2);
+    expect(progress.reviews_today).toBeGreaterThanOrEqual(1);
+
+    const latest = await getLatestSpanishProgress(pool, "104");
+    expect(latest).not.toBeNull();
+    const latestDateMadrid = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Europe/Madrid",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(latest!.date);
+    expect(latestDateMadrid).toBe(today);
+    expect(latest!.chat_id).toBe("104");
+
+    const missingLatest = await getLatestSpanishProgress(pool, "999");
+    expect(missingLatest).toBeNull();
+
+    // keep second record referenced so fixtures remain explicit in this scenario
+    expect(two.row.word).toBe("chamo");
   });
 });
 
