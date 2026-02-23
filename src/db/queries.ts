@@ -2114,7 +2114,7 @@ export async function getRecentActivityLogs(
   }
   if (params.toolName) {
     values.push(params.toolName);
-    conditions.push(`tool_calls @> ('[{"name":' || to_jsonb($${values.length}::text) || '}]')::jsonb`);
+    conditions.push(`tool_calls @> jsonb_build_array(jsonb_build_object('name', $${values.length}::text))`);
   }
 
   values.push(params.limit);
@@ -2328,8 +2328,8 @@ function mapActivityLogRow(row: Record<string, unknown>): ActivityLogRow {
   return {
     id: row.id as number,
     chat_id: String(row.chat_id),
-    memories: (row.memories as ActivityLogMemory[]) ?? [],
-    tool_calls: (row.tool_calls as ActivityLogToolCall[]) ?? [],
+    memories: (row.memories as ActivityLogMemory[]) ?? [] /* v8 ignore next -- defensive: SQL defaults to '[]' */,
+    tool_calls: (row.tool_calls as ActivityLogToolCall[]) ?? [] /* v8 ignore next -- defensive: SQL defaults to '[]' */,
     cost_usd: row.cost_usd != null ? parseFloat(row.cost_usd as string) : null,
     created_at: row.created_at as Date,
   };

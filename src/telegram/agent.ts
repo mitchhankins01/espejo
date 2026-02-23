@@ -983,7 +983,7 @@ async function runAnthropicToolLoop(
 
       toolCallRecords.push({
         name: toolUse.name,
-        args: (toolUse.input ?? {}) as Record<string, unknown>,
+        args: (toolUse.input ?? /* v8 ignore next -- defensive: Anthropic always provides input */ {}) as Record<string, unknown>,
         result,
         truncated_result: truncated,
       });
@@ -1993,11 +1993,12 @@ export async function runAgent(params: {
           score: p.score,
         })),
         toolCalls,
+        /* v8 ignore next -- best-effort cost parsing from activity note */
         costUsd: costNote ? parseFloat(costNote.match(/\$([0-9.]+)/)?.[1] ?? "0") : null,
       });
       activityLogId = activityLog.id;
+      /* v8 ignore next 3 -- non-critical: activity logging is best-effort */
     } catch (err) {
-      /* v8 ignore next -- non-critical: activity logging is best-effort */
       console.error(`Telegram activity log error [chat:${chatId}]:`, err);
     }
   }

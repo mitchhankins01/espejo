@@ -560,6 +560,47 @@ describe("startHttpServer", () => {
     (config as any).server.mcpSecret = "";
   });
 
+  it("/api/activity rejects wrong bearer token", async () => {
+    const { config } = await import("../../src/config.js");
+    (config as any).server.mcpSecret = "test-secret";
+
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const activityCall = mockApp.get.mock.calls.find(
+      (c: any[]) => c[0] === "/api/activity"
+    );
+    const handler = activityCall![1];
+
+    const mockReq = { headers: { authorization: "Bearer wrong-token" }, query: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+
+    expect(mockRes.status).toHaveBeenCalledWith(401);
+    (config as any).server.mcpSecret = "";
+  });
+
+  it("/api/activity defaults limit for NaN input", async () => {
+    mockGetRecentActivityLogs.mockResolvedValue([]);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const activityCall = mockApp.get.mock.calls.find(
+      (c: any[]) => c[0] === "/api/activity"
+    );
+    const handler = activityCall![1];
+
+    const mockReq = { headers: {}, query: { limit: "abc" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+
+    expect(mockGetRecentActivityLogs).toHaveBeenCalledWith(mockPool, {
+      toolName: undefined,
+      since: undefined,
+      limit: 20,
+    });
+  });
+
   it("/api/activity returns 500 on database error", async () => {
     mockGetRecentActivityLogs.mockRejectedValue(new Error("db error"));
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
@@ -655,6 +696,26 @@ describe("startHttpServer", () => {
     expect(mockRes.status).toHaveBeenCalledWith(401);
     expect(mockGetActivityLog).not.toHaveBeenCalled();
 
+    (config as any).server.mcpSecret = "";
+  });
+
+  it("/api/activity/:id rejects wrong bearer token", async () => {
+    const { config } = await import("../../src/config.js");
+    (config as any).server.mcpSecret = "test-secret";
+
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const activityCall = mockApp.get.mock.calls.find(
+      (c: any[]) => c[0] === "/api/activity/:id"
+    );
+    const handler = activityCall![1];
+
+    const mockReq = { headers: { authorization: "Bearer wrong-token" }, params: { id: "42" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+
+    expect(mockRes.status).toHaveBeenCalledWith(401);
     (config as any).server.mcpSecret = "";
   });
 

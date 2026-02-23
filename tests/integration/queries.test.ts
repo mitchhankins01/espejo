@@ -62,6 +62,9 @@ import {
   getLastPulseCheckTime,
   getLastPulseCheck,
   insertSoulStateHistory,
+  insertActivityLog,
+  getActivityLog,
+  getRecentActivityLogs,
 } from "../../src/db/queries.js";
 import { fixturePatterns } from "../../specs/fixtures/seed.js";
 
@@ -1664,5 +1667,96 @@ describe("insertSoulStateHistory", () => {
     ]);
     expect(snapshot.change_reason).toContain("pulse: drifting");
     expect(snapshot.created_at).toBeInstanceOf(Date);
+  });
+});
+
+describe("activity logs", () => {
+  it("inserts and retrieves an activity log by ID", async () => {
+    const log = await insertActivityLog(pool, {
+      chatId: "500",
+      memories: [{ content: "likes coffee", kind: "preference", confidence: 0.9, score: 0.8 }],
+      toolCalls: [{ name: "search_entries", args: { query: "coffee" }, result: "found 3", truncated_result: "found 3" }],
+      costUsd: 0.0042,
+    });
+
+    expect(log.id).toBeGreaterThan(0);
+    expect(log.chat_id).toBe("500");
+    expect(log.memories).toHaveLength(1);
+    expect(log.memories[0].content).toBe("likes coffee");
+    expect(log.tool_calls).toHaveLength(1);
+    expect(log.tool_calls[0].name).toBe("search_entries");
+    expect(log.cost_usd).toBeCloseTo(0.0042);
+    expect(log.created_at).toBeInstanceOf(Date);
+
+    const fetched = await getActivityLog(pool, log.id);
+    expect(fetched).not.toBeNull();
+    expect(fetched!.id).toBe(log.id);
+    expect(fetched!.memories[0].kind).toBe("preference");
+  });
+
+  it("getActivityLog returns null for nonexistent ID", async () => {
+    const result = await getActivityLog(pool, 999999);
+    expect(result).toBeNull();
+  });
+
+  it("getRecentActivityLogs returns logs ordered by created_at DESC", async () => {
+    await insertActivityLog(pool, { chatId: "600", memories: [], toolCalls: [], costUsd: null });
+    await insertActivityLog(pool, { chatId: "600", memories: [], toolCalls: [], costUsd: 0.01 });
+
+    const logs = await getRecentActivityLogs(pool, { chatId: "600", limit: 10 });
+    expect(logs).toHaveLength(2);
+    expect(logs[0].created_at.getTime()).toBeGreaterThanOrEqual(logs[1].created_at.getTime());
+  });
+
+  it("getRecentActivityLogs filters by chatId", async () => {
+    await insertActivityLog(pool, { chatId: "701", memories: [], toolCalls: [], costUsd: null });
+    await insertActivityLog(pool, { chatId: "702", memories: [], toolCalls: [], costUsd: null });
+
+    const logs = await getRecentActivityLogs(pool, { chatId: "701", limit: 10 });
+    expect(logs).toHaveLength(1);
+    expect(logs[0].chat_id).toBe("701");
+  });
+
+  it("getRecentActivityLogs filters by toolName", async () => {
+    await insertActivityLog(pool, {
+      chatId: "800",
+      memories: [],
+      toolCalls: [{ name: "search_entries", args: {}, result: "r", truncated_result: "r" }],
+      costUsd: null,
+    });
+    await insertActivityLog(pool, {
+      chatId: "800",
+      memories: [],
+      toolCalls: [{ name: "get_entry", args: {}, result: "r", truncated_result: "r" }],
+      costUsd: null,
+    });
+
+    const logs = await getRecentActivityLogs(pool, { chatId: "800", toolName: "search_entries", limit: 10 });
+    expect(logs).toHaveLength(1);
+    expect(logs[0].tool_calls[0].name).toBe("search_entries");
+  });
+
+  it("getRecentActivityLogs respects limit", async () => {
+    for (let i = 0; i < 5; i++) {
+      await insertActivityLog(pool, { chatId: "900", memories: [], toolCalls: [], costUsd: null });
+    }
+
+    const logs = await getRecentActivityLogs(pool, { chatId: "900", limit: 3 });
+    expect(logs).toHaveLength(3);
+  });
+
+  it("getRecentActivityLogs filters by since date", async () => {
+    await insertActivityLog(pool, { chatId: "1000", memories: [], toolCalls: [], costUsd: null });
+
+    const future = new Date(Date.now() + 60_000);
+    const logs = await getRecentActivityLogs(pool, { chatId: "1000", since: future, limit: 10 });
+    expect(logs).toHaveLength(0);
+  });
+
+  it("getRecentActivityLogs with no filters returns all logs", async () => {
+    await insertActivityLog(pool, { chatId: "1100", memories: [], toolCalls: [], costUsd: null });
+
+    const logs = await getRecentActivityLogs(pool, { limit: 100 });
+    expect(logs.length).toBeGreaterThan(0);
   });
 });
