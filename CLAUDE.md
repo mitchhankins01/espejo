@@ -113,6 +113,11 @@ specs/
   web-app.spec.md   — Future web dashboard spec (not implemented).
   fixtures/
     seed.ts         — Test data with pre-computed embeddings for determinism.
+packages/
+  shared/           — @espejo/shared workspace. Shared TypeScript types between MCP server and web frontend.
+web/                — SvelteKit frontend (@espejo/web workspace). Early/partial — not production-ready.
+  src/routes/       — Page components (entries list, detail view).
+  src/lib/server/   — Server-side DB queries.
 ```
 
 ## Key Patterns
@@ -346,7 +351,7 @@ Integration tests use Docker Compose inside CI (same as local). The vitest `glob
 
 ### Coverage
 
-100% line/function/branch/statement coverage enforced via `@vitest/coverage-v8`. Thresholds configured in `vitest.config.ts`. Coverage only runs with `--coverage` flag — `pnpm check` stays fast for local dev.
+100% line/function/branch/statement coverage enforced via `@vitest/coverage-v8`. Thresholds configured in `vitest.config.ts`. `pnpm check` runs coverage locally too (`pnpm test:coverage`).
 
 Files excluded from coverage via config: `src/index.ts` (entry point) and `src/db/client.ts` (module-level pool). Defensive branches in `src/db/queries.ts` and `src/server.ts` use `/* v8 ignore next */` pragmas.
 
@@ -485,7 +490,7 @@ A Telegram chatbot with pattern-based long-term memory and an evolving personali
 
 **What it does:**
 - Conversational interface powered by Anthropic or OpenAI (configurable provider)
-- Queries the journal using all 10 MCP tools via tool_use loop (journal search/retrieval + Spanish learning + weight logging)
+- Queries the journal using all 11 MCP tools via tool_use loop (journal search/retrieval + Spanish learning + weight logging)
 - Spanish language tutor: conducts conversations primarily in Spanish, corrects conjugation mistakes, tracks vocabulary with FSRS spaced repetition, and adapts difficulty based on real review performance
 - Logs weight via natural language ("I weighed in at 76.5 today")
 - Accepts text, voice, photo, and document messages (with OCR/text extraction for media)
@@ -617,7 +622,7 @@ Do not implement these (they're planned future work, not part of the current bui
 - Clustering analysis (HDBSCAN/k-means over embeddings)
 - Oura Ring data correlation
 - Write/update/delete tools (this server is read-only for journal entries)
-- Web UI or dashboard (spec exists at `specs/web-app.spec.md`)
+- Web UI or dashboard (spec at `specs/web-app.spec.md`, early SvelteKit scaffold in `web/` — not production-ready)
 - Multi-user support or auth beyond MCP SDK defaults
 - Chunking strategies (entries fit in single embeddings)
 - Auto-purge of compacted messages (function exists in `queries.ts`, not wired up)
