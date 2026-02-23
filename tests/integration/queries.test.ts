@@ -26,6 +26,7 @@ import {
   updateSpanishVocabularySchedule,
   insertSpanishReview,
   getSpanishQuizStats,
+  getSpanishAdaptiveContext,
   upsertSpanishProgressSnapshot,
   getLatestSpanishProgress,
   insertChatMessage,
@@ -728,6 +729,58 @@ describe("Spanish learning queries", () => {
 
     // keep second record referenced so fixtures remain explicit in this scenario
     expect(two.row.word).toBe("chamo");
+  });
+});
+
+describe("getSpanishAdaptiveContext", () => {
+  it("returns zeroed context when no reviews or vocabulary exist", async () => {
+    const ctx = await getSpanishAdaptiveContext(pool, "no-reviews-chat");
+    expect(ctx.recent_avg_grade).toBe(0);
+    expect(ctx.recent_lapse_rate).toBe(0);
+    expect(ctx.avg_difficulty).toBe(0);
+    expect(ctx.total_reviews).toBe(0);
+    expect(ctx.mastered_count).toBe(0);
+    expect(ctx.struggling_count).toBe(0);
+  });
+
+  it("computes adaptive context from reviews and vocabulary", async () => {
+    const chatId = "adaptive-ctx-test";
+    const v1 = await upsertSpanishVocabulary(pool, {
+      chatId,
+      word: "gato",
+      translation: "cat",
+    });
+    const now = new Date();
+    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    await updateSpanishVocabularySchedule(pool, {
+      chatId,
+      vocabularyId: v1.row.id,
+      state: "review",
+      stability: 3.0,
+      difficulty: 3.5,
+      reps: 2,
+      lapses: 0,
+      lastReview: now,
+      nextReview: tomorrow,
+    });
+
+    await insertSpanishReview(pool, {
+      chatId,
+      vocabularyId: v1.row.id,
+      grade: 3,
+      stabilityBefore: 2.0,
+      stabilityAfter: 3.0,
+      difficultyBefore: 3.6,
+      difficultyAfter: 3.5,
+      intervalDays: 3,
+      retrievability: 0.9,
+    });
+
+    const ctx = await getSpanishAdaptiveContext(pool, chatId);
+    expect(ctx.total_reviews).toBe(1);
+    expect(ctx.recent_avg_grade).toBeCloseTo(3, 0);
+    expect(ctx.avg_difficulty).toBeCloseTo(3.5, 0);
+    expect(ctx.mastered_count).toBe(1);
   });
 });
 

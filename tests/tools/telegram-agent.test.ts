@@ -2186,6 +2186,58 @@ describe("runAgent", () => {
     expect(call.system).not.toContain("SLOW DOWN");
   });
 
+  it("injects adaptive hold guidance when grade is moderate", async () => {
+    mockGetSpanishAdaptiveContext.mockResolvedValueOnce({
+      recent_avg_grade: 2.5,
+      recent_lapse_rate: 0.15,
+      avg_difficulty: 4.0,
+      total_reviews: 30,
+      mastered_count: 8,
+      struggling_count: 1,
+    });
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Bueno, sigamos practicando." }],
+      usage: { input_tokens: 120, output_tokens: 20 },
+    });
+
+    await runAgent({
+      chatId: "100",
+      message: "Hola, ¿seguimos?",
+      externalMessageId: "update:adaptive-moderate",
+      messageDate: 1000,
+    });
+
+    const call = mockAnthropicCreate.mock.calls[0][0];
+    expect(call.system).toContain("Hold at");
+    expect(call.system).toContain("not solid yet");
+  });
+
+  it("injects adaptive stay guidance when performance is healthy", async () => {
+    mockGetSpanishAdaptiveContext.mockResolvedValueOnce({
+      recent_avg_grade: 3.0,
+      recent_lapse_rate: 0.12,
+      avg_difficulty: 4.5,
+      total_reviews: 40,
+      mastered_count: 12,
+      struggling_count: 0,
+    });
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Muy bien, continuemos." }],
+      usage: { input_tokens: 120, output_tokens: 20 },
+    });
+
+    await runAgent({
+      chatId: "100",
+      message: "¿Qué más podemos hacer?",
+      externalMessageId: "update:adaptive-healthy",
+      messageDate: 1000,
+    });
+
+    const call = mockAnthropicCreate.mock.calls[0][0];
+    expect(call.system).toContain("Stay at");
+    expect(call.system).toContain("Performance is solid");
+  });
+
   it("injects no-review-data guidance when total_reviews is 0", async () => {
     // Default mock already has total_reviews: 0
     mockAnthropicCreate.mockResolvedValueOnce({
