@@ -502,8 +502,8 @@ async function buildSpanishContextPrompt(chatId: string): Promise<string> {
 - Progress: ${progressLine}
 
 When responding:
-- Keep English + Dutch scaffolding when language preference memory indicates that baseline.
-- Weave in Spanish naturally, progressively, and at B1 level.
+- ALWAYS use English + Dutch as the communication scaffolding and weave in Spanish naturally. Every response should contain at least some Spanish and Dutch — never respond entirely in English.
+- Spanish level: B1. Keep it progressive and natural.
 - For conjugation corrections, call conjugate_verb.
 - For new Spanish terms (including regional slang), call log_vocabulary with chat_id=${chatId}.
 - For review scheduling, call spanish_quiz with chat_id=${chatId}.`;
@@ -521,12 +521,12 @@ function extractRequestedSentenceCount(message: string): number | null {
 }
 
 function shouldRewriteForLanguagePreference(
-  mode: AgentMode,
+  _mode: AgentMode,
   message: string,
   responseText: string,
-  patterns: PatternSearchRow[]
+  patterns: PatternSearchRow[],
+  hasSpanishProfile: boolean
 ): boolean {
-  if (mode !== "default") return false;
   if (hasSingleLanguageOverride(message)) return false;
 
   const patternsText = patterns
@@ -539,7 +539,9 @@ function shouldRewriteForLanguagePreference(
     patternsText.includes("espanol") ||
     patternsText.includes("español");
 
-  if (!(hasEnglish && hasDutch && hasSpanish)) return false;
+  const hasLanguageSignal = (hasEnglish && hasDutch && hasSpanish) || hasSpanishProfile;
+
+  if (!hasLanguageSignal) return false;
 
   return !(hasSpanishSignals(responseText) && hasDutchSignals(responseText));
 }
@@ -1947,7 +1949,7 @@ export async function runAgent(params: {
   // 4. Run tool loop
   const { text, toolCallCount, toolNames, toolCalls } = await runToolLoop(systemPrompt, messages, chatId, prefill);
   const finalText =
-    text && shouldRewriteForLanguagePreference(mode, message, text, patterns)
+    text && shouldRewriteForLanguagePreference(mode, message, text, patterns, !!spanishContextPrompt)
       ? await rewriteWithLanguagePreference(message, text)
       : text;
 
