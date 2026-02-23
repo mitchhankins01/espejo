@@ -7,6 +7,13 @@ import {
   getLastAssistantMessageId,
   insertSoulQualitySignal,
   getLastPulseCheck,
+  getRetentionByInterval,
+  getVocabularyFunnel,
+  getGradeTrend,
+  getLapseRateTrend,
+  getSpanishQuizStats,
+  getSpanishAdaptiveContext,
+  getLatestSpanishAssessment,
 } from "../db/queries.js";
 import { runAgent, forceCompact } from "./agent.js";
 import {
@@ -27,6 +34,18 @@ import {
   buildMorningKickoffMessage,
   type AgentMode,
 } from "./evening-review.js";
+import {
+  buildRetentionSummary,
+  buildFunnelSummary,
+  buildTrendSummary,
+  buildAssessmentSummary,
+  formatDigestText,
+  type SpanishDigest,
+} from "../spanish/analytics.js";
+import {
+  assessSpanishQuality,
+  createOpenAIAssessmentClient,
+} from "../spanish/assessment.js";
 
 // ---------------------------------------------------------------------------
 // Message handler — wires updates → agent → client
@@ -384,6 +403,56 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
       } catch (err) {
         console.error(`Telegram /soul error [chat:${chatId}]:`, err);
         await sendTelegramMessage(chatId, "Error loading soul state.");
+      }
+      return;
+    }
+
+    // Handle /digest command — Spanish learning progress summary
+    if (command?.name === "digest") {
+      try {
+        const days = 30;
+        const [stats, adaptive, retention, funnel, grades, lapses, latestAssessment] =
+          await Promise.all([
+            getSpanishQuizStats(pool, chatId),
+            getSpanishAdaptiveContext(pool, chatId),
+            getRetentionByInterval(pool, chatId),
+            getVocabularyFunnel(pool, chatId),
+            getGradeTrend(pool, chatId, days),
+            getLapseRateTrend(pool, chatId, days),
+            getLatestSpanishAssessment(pool, chatId),
+          ]);
+
+        const digest: SpanishDigest = {
+          period_label: `last ${days} days`,
+          stats,
+          adaptive,
+          retention_summary: buildRetentionSummary(retention),
+          funnel_summary: buildFunnelSummary(funnel),
+          trend_summary: buildTrendSummary(grades, lapses),
+          assessment_summary: buildAssessmentSummary(latestAssessment),
+        };
+
+        await sendTelegramMessage(chatId, formatDigestText(digest));
+      } catch (err) {
+        console.error(`Telegram /digest error [chat:${chatId}]:`, err);
+        await sendTelegramMessage(chatId, "Error generating digest.");
+      }
+      return;
+    }
+
+    // Handle /assess command — LLM-as-judge Spanish quality assessment
+    if (command?.name === "assess") {
+      try {
+        await sendChatAction(chatId, "typing");
+        const OpenAI = (await import("openai")).default;
+        const openai = new OpenAI({ apiKey: config.openai.apiKey });
+        const client = createOpenAIAssessmentClient(openai);
+        const { summary } = await assessSpanishQuality(pool, chatId, client);
+        await sendTelegramMessage(chatId, summary);
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error(`Telegram /assess error [chat:${chatId}]:`, errMsg);
+        await sendTelegramMessage(chatId, `Assessment error: ${errMsg}`);
       }
       return;
     }

@@ -447,3 +447,23 @@ CREATE TABLE IF NOT EXISTS activity_logs (
 
 CREATE INDEX IF NOT EXISTS idx_activity_logs_chat_created
     ON activity_logs(chat_id, created_at DESC);
+
+-- ============================================================================
+-- Spanish learning assessments (LLM-as-judge conversation quality)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS spanish_assessments (
+    id SERIAL PRIMARY KEY,
+    chat_id BIGINT NOT NULL,
+    complexity_score DOUBLE PRECISION NOT NULL,
+    grammar_score DOUBLE PRECISION NOT NULL,
+    vocabulary_score DOUBLE PRECISION NOT NULL,
+    code_switching_ratio DOUBLE PRECISION NOT NULL,
+    overall_score DOUBLE PRECISION NOT NULL,
+    sample_message_count INT NOT NULL,
+    rationale TEXT NOT NULL,
+    assessed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_spanish_assessments_chat_assessed
+    ON spanish_assessments(chat_id, assessed_at DESC);

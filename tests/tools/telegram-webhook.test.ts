@@ -21,6 +21,14 @@ const {
   mockGetLastAssistantMessageId,
   mockInsertSoulQualitySignal,
   mockGetLastPulseCheck,
+  mockGetRetentionByInterval,
+  mockGetVocabularyFunnel,
+  mockGetGradeTrend,
+  mockGetLapseRateTrend,
+  mockGetSpanishQuizStats,
+  mockGetSpanishAdaptiveContext,
+  mockGetLatestSpanishAssessment,
+  mockAssessSpanishQuality,
   mockConfig,
 } = vi.hoisted(() => ({
   mockRunAgent: vi.fn().mockResolvedValue({ response: "agent response", activity: "", soulVersion: 1, patternCount: 0 }),
@@ -41,6 +49,17 @@ const {
   mockGetLastAssistantMessageId: vi.fn().mockResolvedValue(42),
   mockInsertSoulQualitySignal: vi.fn().mockResolvedValue({ id: 1 }),
   mockGetLastPulseCheck: vi.fn().mockResolvedValue(null),
+  mockGetRetentionByInterval: vi.fn().mockResolvedValue([]),
+  mockGetVocabularyFunnel: vi.fn().mockResolvedValue([]),
+  mockGetGradeTrend: vi.fn().mockResolvedValue([]),
+  mockGetLapseRateTrend: vi.fn().mockResolvedValue([]),
+  mockGetSpanishQuizStats: vi.fn().mockResolvedValue({ total_words: 10, due_now: 2, new_words: 3, learning_words: 4, review_words: 2, relearning_words: 1, reviews_today: 5, average_grade: 3.0 }),
+  mockGetSpanishAdaptiveContext: vi.fn().mockResolvedValue({ recent_avg_grade: 3.0, recent_lapse_rate: 0.1, avg_difficulty: 4.0, total_reviews: 50, mastered_count: 5, struggling_count: 1 }),
+  mockGetLatestSpanishAssessment: vi.fn().mockResolvedValue(null),
+  mockAssessSpanishQuality: vi.fn().mockResolvedValue({
+    assessment: { id: 1, overall_score: 3.6, assessed_at: new Date() },
+    summary: "<b>Spanish Assessment</b>\nOverall: <b>3.6/5</b>",
+  }),
   mockConfig: {
     config: {
       telegram: {
@@ -56,6 +75,7 @@ const {
         soulEnabled: true,
         soulFeedbackEvery: 8,
       },
+      openai: { apiKey: "test-openai-key", chatModel: "gpt-4o-mini" },
     },
   },
 }));
@@ -105,6 +125,18 @@ vi.mock("../../src/db/queries.js", () => ({
   getLastAssistantMessageId: mockGetLastAssistantMessageId,
   insertSoulQualitySignal: mockInsertSoulQualitySignal,
   getLastPulseCheck: mockGetLastPulseCheck,
+  getRetentionByInterval: mockGetRetentionByInterval,
+  getVocabularyFunnel: mockGetVocabularyFunnel,
+  getGradeTrend: mockGetGradeTrend,
+  getLapseRateTrend: mockGetLapseRateTrend,
+  getSpanishQuizStats: mockGetSpanishQuizStats,
+  getSpanishAdaptiveContext: mockGetSpanishAdaptiveContext,
+  getLatestSpanishAssessment: mockGetLatestSpanishAssessment,
+}));
+
+vi.mock("../../src/spanish/assessment.js", () => ({
+  assessSpanishQuality: mockAssessSpanishQuality,
+  createOpenAIAssessmentClient: vi.fn(),
 }));
 
 vi.mock("../../src/config.js", () => mockConfig);
@@ -1466,5 +1498,85 @@ describe("/soul command", () => {
       "100",
       "Error loading soul state."
     );
+  });
+
+  // =========================================================================
+  // /digest command
+  // =========================================================================
+
+  it("/digest sends Spanish learning summary", async () => {
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/digest", messageId: 1, date: 1000 });
+
+    expect(mockGetSpanishQuizStats).toHaveBeenCalled();
+    expect(mockGetSpanishAdaptiveContext).toHaveBeenCalled();
+    expect(mockGetRetentionByInterval).toHaveBeenCalled();
+    expect(mockGetVocabularyFunnel).toHaveBeenCalled();
+    expect(mockGetGradeTrend).toHaveBeenCalled();
+    expect(mockGetLapseRateTrend).toHaveBeenCalled();
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      expect.stringContaining("Spanish Learning Digest")
+    );
+    // Should not dispatch to agent
+    expect(mockRunAgent).not.toHaveBeenCalled();
+  });
+
+  it("/digest handles errors gracefully", async () => {
+    mockGetSpanishQuizStats.mockRejectedValueOnce(new Error("db error"));
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/digest", messageId: 1, date: 1000 });
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      "Error generating digest."
+    );
+    expect(mockRunAgent).not.toHaveBeenCalled();
+  });
+
+  // =========================================================================
+  // /assess command
+  // =========================================================================
+
+  it("/assess triggers LLM assessment and sends summary", async () => {
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/assess", messageId: 1, date: 1000 });
+
+    expect(mockSendChatAction).toHaveBeenCalledWith("100", "typing");
+    expect(mockAssessSpanishQuality).toHaveBeenCalled();
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      expect.stringContaining("3.6/5")
+    );
+    expect(mockRunAgent).not.toHaveBeenCalled();
+  });
+
+  it("/assess handles errors gracefully", async () => {
+    mockAssessSpanishQuality.mockRejectedValueOnce(
+      new Error("Not enough user messages")
+    );
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/assess", messageId: 1, date: 1000 });
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      expect.stringContaining("Not enough user messages")
+    );
+    expect(mockRunAgent).not.toHaveBeenCalled();
+  });
+
+  it("/assess handles non-Error exceptions", async () => {
+    mockAssessSpanishQuality.mockRejectedValueOnce("string error");
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/assess", messageId: 1, date: 1000 });
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      expect.stringContaining("string error")
+    );
+    expect(mockRunAgent).not.toHaveBeenCalled();
   });
 });
