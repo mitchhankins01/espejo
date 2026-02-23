@@ -592,6 +592,15 @@ export interface SpanishQuizStatsRow {
   average_grade: number;
 }
 
+export interface SpanishAdaptiveContextRow {
+  recent_avg_grade: number;
+  recent_lapse_rate: number;
+  avg_difficulty: number;
+  total_reviews: number;
+  mastered_count: number;
+  struggling_count: number;
+}
+
 export interface SpanishProgressRow {
   id: number;
   chat_id: string;
@@ -937,6 +946,41 @@ export async function getSpanishQuizStats(
     reviews_today: review.reviews_today,
     average_grade: review.average_grade,
   };
+}
+
+export async function getSpanishAdaptiveContext(
+  pool: pg.Pool,
+  chatId: string
+): Promise<SpanishAdaptiveContextRow> {
+  const result = await pool.query(
+    `SELECT
+      COALESCE((
+        SELECT AVG(grade)::float FROM spanish_reviews
+        WHERE chat_id = $1 AND reviewed_at > NOW() - INTERVAL '30 days'
+      ), 0)::float AS recent_avg_grade,
+      COALESCE((
+        SELECT COUNT(*) FILTER (WHERE grade <= 2)::float / NULLIF(COUNT(*), 0)
+        FROM spanish_reviews
+        WHERE chat_id = $1 AND reviewed_at > NOW() - INTERVAL '30 days'
+      ), 0)::float AS recent_lapse_rate,
+      COALESCE((
+        SELECT AVG(difficulty)::float FROM spanish_vocabulary
+        WHERE chat_id = $1 AND state != 'new'
+      ), 0)::float AS avg_difficulty,
+      COALESCE((
+        SELECT COUNT(*)::int FROM spanish_reviews WHERE chat_id = $1
+      ), 0)::int AS total_reviews,
+      COALESCE((
+        SELECT COUNT(*)::int FROM spanish_vocabulary
+        WHERE chat_id = $1 AND state = 'review' AND difficulty < 4
+      ), 0)::int AS mastered_count,
+      COALESCE((
+        SELECT COUNT(*)::int FROM spanish_vocabulary
+        WHERE chat_id = $1 AND (state = 'relearning' OR (state = 'learning' AND lapses > 1))
+      ), 0)::int AS struggling_count`,
+    [chatId]
+  );
+  return result.rows[0];
 }
 
 export async function upsertSpanishProgressSnapshot(

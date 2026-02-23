@@ -39,6 +39,7 @@ import {
   getDueSpanishVocabulary,
   getLatestSpanishProgress,
   getRecentSpanishVocabulary,
+  getSpanishAdaptiveContext,
   upsertSpanishVocabulary,
   upsertSpanishProgressSnapshot,
   insertActivityLog,
@@ -216,7 +217,7 @@ Important guidelines:
 - For entity references, resolve to canonical names.
 - Explicit language preference patterns are high-priority constraints. When they conflict with default style instructions, follow the user preference patterns.
 - Do not claim you cannot send or generate voice messages. This assistant's replies may be delivered as Telegram voice notes by the system.
-- Use Spanish learning tools proactively for tutoring moments: conjugate_verb for corrections and log_vocabulary/spanish_quiz for spaced repetition support.
+- Use Spanish learning tools proactively: conjugate_verb for corrections, log_vocabulary to silently track new words, spanish_quiz to weave due reviews into conversation. Grade the user's vocabulary usage in real time (grade=3 for correct use, grade=1-2 for struggles).
 - Keep responses concise and natural.
 - Format responses for Telegram HTML: use <b>bold</b> for emphasis, <i>italic</i> for asides, and plain line breaks for separation. Never use markdown formatting (**bold**, *italic*, ---, ###, etc).`;
 
@@ -386,12 +387,6 @@ function hasSpanishSignals(text: string): boolean {
   );
 }
 
-function hasDutchSignals(text: string): boolean {
-  return /\b(ik|jij|je|wij|jullie|niet|wel|maar|want|goed|de|het|een|met|voor|zoals)\b/i.test(
-    text
-  );
-}
-
 function hasSingleLanguageOverride(message: string): boolean {
   return /\b(only|just)\s+english\b|\bin\s+english\s+only\b|\bsolo\s+ingles\b|\balleen\s+engels\b/i.test(
     message
@@ -475,14 +470,48 @@ async function autoLogSpanishVocabulary(
   return candidates.length;
 }
 
+function buildAdaptiveGuidance(
+  level: string,
+  ctx: { recent_avg_grade: number; recent_lapse_rate: number; avg_difficulty: number; total_reviews: number; struggling_count: number }
+): string {
+  // No review data yet — use the profile level as-is
+  if (ctx.total_reviews === 0) {
+    return `- Stay strictly at ${level}. No review data yet — keep vocabulary and grammar simple and conversational until patterns emerge.`;
+  }
+
+  const lines: string[] = [];
+  const grade = ctx.recent_avg_grade;
+  const lapseRate = ctx.recent_lapse_rate;
+
+  if (grade < 2.3 || lapseRate > 0.3) {
+    // Struggling: simplify
+    lines.push(`- SLOW DOWN. Average grade ${grade.toFixed(1)}/4 and ${Math.round(lapseRate * 100)}% lapse rate — the user is struggling. Use only core ${level} vocabulary and simple sentence structures. Avoid introducing new words or tenses until grades improve.`);
+    if (ctx.struggling_count > 0) {
+      lines.push(`- ${ctx.struggling_count} word(s) in relearning — focus on reinforcing those before adding new vocabulary.`);
+    }
+  } else if (grade < 2.8) {
+    // Moderate: hold steady
+    lines.push(`- Hold at ${level}. Average grade ${grade.toFixed(1)}/4 — the user is learning but not solid yet. Stick to known vocabulary and tenses. Introduce new words only when they come up organically.`);
+  } else if (grade >= 3.2 && lapseRate < 0.1) {
+    // Crushing it: push gently
+    lines.push(`- The user is performing well (avg grade ${grade.toFixed(1)}/4, ${Math.round(lapseRate * 100)}% lapses). You can gently stretch beyond ${level} — try one slightly harder word or structure per exchange, always with a gloss.`);
+  } else {
+    // Healthy: stay at level
+    lines.push(`- Stay at ${level}. Performance is solid (avg grade ${grade.toFixed(1)}/4). Keep the current pace — mix familiar and recently learned vocabulary.`);
+  }
+
+  return lines.join("\n");
+}
+
 async function buildSpanishContextPrompt(chatId: string): Promise<string> {
   try {
     await ensureSpanishProfile(chatId);
-    const [profile, due, recent, progress] = await Promise.all([
+    const [profile, due, recent, progress, adaptive] = await Promise.all([
       getSpanishProfile(pool, chatId),
       getDueSpanishVocabulary(pool, chatId, 3),
       getRecentSpanishVocabulary(pool, chatId, 3),
       getLatestSpanishProgress(pool, chatId),
+      getSpanishAdaptiveContext(pool, chatId),
     ]);
 
     const level = profile?.cefr_level ?? "B1";
@@ -493,6 +522,9 @@ async function buildSpanishContextPrompt(chatId: string): Promise<string> {
       ? `words=${progress.words_learned}, in_progress=${progress.words_in_progress}, reviews_today=${progress.reviews_today}, streak=${progress.streak_days}`
       : "no progress snapshot yet";
 
+    // Build adaptive difficulty guidance from real performance data
+    const adaptiveLine = buildAdaptiveGuidance(level, adaptive);
+
     return `Spanish tutoring profile:
 - Current chat_id: ${chatId}
 - Level: ${level}
@@ -500,13 +532,24 @@ async function buildSpanishContextPrompt(chatId: string): Promise<string> {
 - Due words: ${dueWords || "none"}
 - Recent words: ${recentWords || "none"}
 - Progress: ${progressLine}
+- Performance (30d): avg_grade=${adaptive.recent_avg_grade.toFixed(1)}, lapse_rate=${Math.round(adaptive.recent_lapse_rate * 100)}%, avg_difficulty=${adaptive.avg_difficulty.toFixed(1)}, mastered=${adaptive.mastered_count}, struggling=${adaptive.struggling_count}
 
-When responding:
-- Keep English + Dutch scaffolding when language preference memory indicates that baseline.
-- Weave in Spanish naturally, progressively, and at B1 level.
-- For conjugation corrections, call conjugate_verb.
-- For new Spanish terms (including regional slang), call log_vocabulary with chat_id=${chatId}.
-- For review scheduling, call spanish_quiz with chat_id=${chatId}.`;
+LANGUAGE RULE — Spanish is the PRIMARY language of every response.
+- Default to Spanish for the bulk of your output. Weave in English or Dutch only when it clarifies meaning, adds warmth, or matches the user's code-switching.
+- Never respond entirely in English. If you catch yourself writing a full English sentence, rephrase it in Spanish (with an English/Dutch gloss if the vocab is above ${level}).
+- Match the user's own code-switching: if they write in English or Dutch, you may mirror briefly, but always return to Spanish.
+
+ADAPTIVE DIFFICULTY:
+${adaptiveLine}
+- Known tenses (${knownTenses}) are the backbone. Introduce new structures ONE at a time with a brief English/Dutch gloss, then reuse that structure 2-3 times before introducing another.
+- If the user makes a grammar or vocab mistake, correct it gently inline and move on — don't lecture.
+
+ACTIVE SPANISH COACHING:
+- When correcting a verb mistake, call conjugate_verb to show the correct form. Correct inline — don't make a separate correction block.
+- When new vocabulary comes up in conversation, call log_vocabulary silently with chat_id=${chatId}. Don't announce you're tracking it.
+- ${dueWords ? `Due for review: ${dueWords}. Work these words into the conversation naturally. When the user produces them correctly, call spanish_quiz(action=record_review, grade=3, chat_id=${chatId}). When they struggle or you have to supply the word, grade=1 or 2.` : "No words due for review right now."}
+- ${recentWords ? `Recently learned: ${recentWords}. Reinforce these by using them yourself.` : ""}
+- Periodically call spanish_quiz(action=get_due, chat_id=${chatId}) to check for due reviews — weave them into the conversation, never run formal flashcard drills.`;
   } catch (err) {
     console.error(`Telegram spanish context error [chat:${chatId}]:`, err);
     return "";
@@ -521,12 +564,12 @@ function extractRequestedSentenceCount(message: string): number | null {
 }
 
 function shouldRewriteForLanguagePreference(
-  mode: AgentMode,
+  _mode: AgentMode,
   message: string,
   responseText: string,
-  patterns: PatternSearchRow[]
+  patterns: PatternSearchRow[],
+  hasSpanishProfile: boolean
 ): boolean {
-  if (mode !== "default") return false;
   if (hasSingleLanguageOverride(message)) return false;
 
   const patternsText = patterns
@@ -539,9 +582,12 @@ function shouldRewriteForLanguagePreference(
     patternsText.includes("espanol") ||
     patternsText.includes("español");
 
-  if (!(hasEnglish && hasDutch && hasSpanish)) return false;
+  const hasLanguageSignal = (hasEnglish && hasDutch && hasSpanish) || hasSpanishProfile;
 
-  return !(hasSpanishSignals(responseText) && hasDutchSignals(responseText));
+  if (!hasLanguageSignal) return false;
+
+  // Spanish is primary — rewrite if the response lacks Spanish signals.
+  return !hasSpanishSignals(responseText);
 }
 
 async function logEmbeddingUsage(
@@ -638,8 +684,8 @@ async function rewriteWithLanguagePreference(
     : "Keep roughly the same sentence count as the draft.";
   const systemPrompt = `Rewrite the assistant draft while preserving meaning and constraints.
 - Keep the response concise and natural.
-- Use English + Dutch as the communication scaffolding.
-- Weave in at least a little Spanish naturally.
+- Spanish is the PRIMARY language — rewrite the bulk of the response in Spanish.
+- Weave in English or Dutch only for warmth, humor, or to clarify vocabulary above B1.
 - Do not add new factual claims.
 - Keep Telegram HTML-compatible text only (no markdown fences).
 - ${sentenceRule}
@@ -1947,7 +1993,7 @@ export async function runAgent(params: {
   // 4. Run tool loop
   const { text, toolCallCount, toolNames, toolCalls } = await runToolLoop(systemPrompt, messages, chatId, prefill);
   const finalText =
-    text && shouldRewriteForLanguagePreference(mode, message, text, patterns)
+    text && shouldRewriteForLanguagePreference(mode, message, text, patterns, !!spanishContextPrompt)
       ? await rewriteWithLanguagePreference(message, text)
       : text;
 
