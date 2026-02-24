@@ -37,6 +37,6 @@ export function formatOuraWeekly(rows: OuraSummaryRow[]): string {
     `Average HRV: ${avg(rows.map((r) => r.average_hrv))}ms`,
     `Total steps: ${totalSteps.toLocaleString()} | Workouts: ${workouts}`,
     "",
-    ...rows.map((r) => `${formatDay(r.day)} — Sleep ${r.sleep_score ?? "-"}, Ready ${r.readiness_score ?? "-"}, Activity ${r.activity_score ?? "-"}, Steps ${r.steps ?? "-"}`),
+    ...rows.map((r) => `${formatDay(r.day)} — Sleep ${r.sleep_score ?? "-"}, Ready ${r.readiness_score ?? "-"}, Activity ${r.activity_score ?? "-"}, Steps ${r.steps ?? "-"}, Stress ${r.stress ?? "-"}, Eff ${r.efficiency ?? "-"}%`),
   ].join("\n");
 }

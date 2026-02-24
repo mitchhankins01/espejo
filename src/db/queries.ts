@@ -2951,27 +2951,44 @@ export async function getOuraWeeklyRows(pool: pg.Pool, endDay: string): Promise<
   return result.rows;
 }
 
+export type OuraTrendMetric = "sleep_score" | "hrv" | "readiness" | "activity" | "steps" | "sleep_duration" | "stress" | "resting_heart_rate" | "temperature" | "active_calories" | "heart_rate" | "efficiency";
+
+const ouraTrendColumnSql: Record<OuraTrendMetric, string> = {
+  sleep_score: "d.score",
+  hrv: "ss.average_hrv",
+  readiness: "r.score",
+  activity: "a.score",
+  steps: "a.steps",
+  sleep_duration: "d.total_sleep_duration_seconds",
+  stress: "st.stress_high_seconds",
+  resting_heart_rate: "r.resting_heart_rate",
+  temperature: "r.temperature_deviation",
+  active_calories: "a.active_calories",
+  heart_rate: "ss.average_heart_rate",
+  efficiency: "d.efficiency",
+};
+
+const stressJoinMetrics: Set<OuraTrendMetric> = new Set(["stress"]);
+
+function needsStressJoin(metric: OuraTrendMetric): boolean {
+  return stressJoinMetrics.has(metric);
+}
+
 export async function getOuraTrendMetric(
   pool: pg.Pool,
-  metric: "sleep_score" | "hrv" | "readiness" | "activity" | "steps" | "sleep_duration",
+  metric: OuraTrendMetric,
   days: number
 ): Promise<Array<{ day: Date; value: number }>> {
-  const columnSql: Record<typeof metric, string> = {
-    sleep_score: "d.score",
-    hrv: "ss.average_hrv",
-    readiness: "r.score",
-    activity: "a.score",
-    steps: "a.steps",
-    sleep_duration: "d.total_sleep_duration_seconds",
-  };
+  const stressJoin = needsStressJoin(metric) ? "LEFT JOIN oura_daily_stress st ON st.day = d.day" : "";
   const result = await pool.query<{ day: Date; value: number }>(
-    `SELECT d.day, ${columnSql[metric]}::double precision AS value
+    `SELECT d.day, ${ouraTrendColumnSql[metric]}::double precision AS value
      FROM oura_daily_sleep d
      LEFT JOIN oura_daily_readiness r ON r.day = d.day
      LEFT JOIN oura_daily_activity a ON a.day = d.day
      LEFT JOIN oura_sleep_sessions ss ON ss.day = d.day AND COALESCE(ss.period, 0) = 0
+     ${stressJoin}
      WHERE d.day >= (CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day')
-       AND ${columnSql[metric]} IS NOT NULL
+       AND ${ouraTrendColumnSql[metric]} IS NOT NULL
      ORDER BY d.day ASC`,
     [days]
   );
@@ -2980,26 +2997,20 @@ export async function getOuraTrendMetric(
 
 export async function getOuraTrendMetricForRange(
   pool: pg.Pool,
-  metric: "sleep_score" | "hrv" | "readiness" | "activity" | "steps" | "sleep_duration",
+  metric: OuraTrendMetric,
   startDate: string,
   endDate: string
 ): Promise<Array<{ day: Date; value: number }>> {
-  const columnSql: Record<typeof metric, string> = {
-    sleep_score: "d.score",
-    hrv: "ss.average_hrv",
-    readiness: "r.score",
-    activity: "a.score",
-    steps: "a.steps",
-    sleep_duration: "d.total_sleep_duration_seconds",
-  };
+  const stressJoin = needsStressJoin(metric) ? "LEFT JOIN oura_daily_stress st ON st.day = d.day" : "";
   const result = await pool.query<{ day: Date; value: number }>(
-    `SELECT d.day, ${columnSql[metric]}::double precision AS value
+    `SELECT d.day, ${ouraTrendColumnSql[metric]}::double precision AS value
      FROM oura_daily_sleep d
      LEFT JOIN oura_daily_readiness r ON r.day = d.day
      LEFT JOIN oura_daily_activity a ON a.day = d.day
      LEFT JOIN oura_sleep_sessions ss ON ss.day = d.day AND COALESCE(ss.period, 0) = 0
+     ${stressJoin}
      WHERE d.day >= $1::date AND d.day <= $2::date
-       AND ${columnSql[metric]} IS NOT NULL
+       AND ${ouraTrendColumnSql[metric]} IS NOT NULL
      ORDER BY d.day ASC`,
     [startDate, endDate]
   );

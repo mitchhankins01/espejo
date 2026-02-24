@@ -108,6 +108,8 @@ describe("formatOuraWeekly", () => {
     expect(result).toContain("Total steps:");
     expect(result).toContain("2025-01-15");
     expect(result).toContain("2025-01-16");
+    expect(result).toContain("Stress normal");
+    expect(result).toContain("Eff 90%");
   });
 
   it("handles all null scores", () => {
@@ -131,6 +133,8 @@ describe("formatOuraWeekly", () => {
         sleep_score: null,
         readiness_score: null,
         activity_score: null,
+        stress: null,
+        efficiency: null,
       }),
     ];
     const result = formatOuraWeekly(rows);
@@ -141,5 +145,7 @@ describe("formatOuraWeekly", () => {
     expect(result).toContain("Ready -");
     expect(result).toContain("Activity -");
     expect(result).toContain("Steps -");
+    expect(result).toContain("Stress -");
+    expect(result).toContain("Eff -%");
   });
 });

@@ -9,7 +9,7 @@ function avg(vals: number[]): number {
 
 export async function handleOuraComparePeriods(pool: pg.Pool, input: unknown): Promise<string> {
   const params = validateToolInput("oura_compare_periods", input);
-  const metrics = ["sleep_score", "readiness", "activity", "hrv", "steps", "sleep_duration"] as const;
+  const metrics = ["sleep_score", "readiness", "activity", "hrv", "steps", "sleep_duration", "stress", "resting_heart_rate", "temperature", "active_calories", "heart_rate", "efficiency"] as const;
 
   const startDate = params.from_a < params.from_b ? params.from_a : params.from_b;
   const endDate = params.to_a > params.to_b ? params.to_a : params.to_b;
