@@ -49,6 +49,7 @@ import {
   type ActivityLogToolCall,
 } from "../db/queries.js";
 import { toolHandlers } from "../server.js";
+import { buildOuraContextPrompt } from "../oura/context.js";
 import {
   buildSoulPromptSection,
   evolveSoulState,
@@ -175,12 +176,11 @@ You are a personal chatbot with long-term memory. Your role:
 
 Your memory works automatically: patterns are extracted from conversations and stored for future reference. You do not need a special tool to "save" patterns — it happens behind the scenes. If the user asks about your memory, explain that you learn patterns over time from conversations.
 
- You have access to 11 tools:
+ You have access to 17 tools:
  - 7 journal tools: search_entries, get_entry, get_entries_by_date, on_this_day, find_similar, list_tags, entry_stats
  - log_weight: log daily weight measurements
- - conjugate_verb: lookup Spanish conjugations by mood/tense
- - log_vocabulary: track Spanish vocabulary by user and region
- - spanish_quiz: retrieve due words, record review grades, and get progress stats
+ - 3 Spanish tools: conjugate_verb, log_vocabulary, spanish_quiz
+ - 6 Oura tools: get_oura_summary, get_oura_weekly, get_oura_trends, get_oura_analysis, oura_compare_periods, oura_correlate
 
 CRITICAL — Journal entry composition:
 When the user signals they want a journal entry composed — using phrases like "write", "close", "write it up", "compose the entry", "write the entry", "escríbelo", or similar — your ENTIRE response must be the journal entry itself. Nothing else. No preamble, no commentary, no questions, no sign-off. Just the entry.
@@ -1967,8 +1967,10 @@ export async function runAgent(params: {
     mode
   );
   const spanishContextPrompt = await buildSpanishContextPrompt(chatId);
-  const systemPrompt = spanishContextPrompt
-    ? `${baseSystemPrompt}\n\n${spanishContextPrompt}`
+  const ouraContextPrompt = await buildOuraContextPrompt(pool);
+  const contextSections = [spanishContextPrompt, ouraContextPrompt].filter((v) => v.length > 0);
+  const systemPrompt = contextSections.length > 0
+    ? `${baseSystemPrompt}\n\n${contextSections.join("\n\n")}`
     : baseSystemPrompt;
   const recentMessages = await getRecentMessages(pool, chatId, RECENT_MESSAGES_LIMIT);
   const messages = reconstructMessages(recentMessages);

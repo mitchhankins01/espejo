@@ -467,3 +467,108 @@ CREATE TABLE IF NOT EXISTS spanish_assessments (
 
 CREATE INDEX IF NOT EXISTS idx_spanish_assessments_chat_assessed
     ON spanish_assessments(chat_id, assessed_at DESC);
+
+-- ============================================================================
+-- Oura Ring integration
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS oura_sync_state (
+    endpoint TEXT PRIMARY KEY,
+    last_synced_day DATE NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS oura_sync_runs (
+    id SERIAL PRIMARY KEY,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finished_at TIMESTAMPTZ,
+    status TEXT NOT NULL DEFAULT 'running',
+    records_synced INT NOT NULL DEFAULT 0,
+    error TEXT
+);
+
+CREATE TABLE IF NOT EXISTS oura_daily_sleep (
+    day DATE PRIMARY KEY,
+    score INT,
+    total_sleep_duration_seconds INT,
+    deep_sleep_duration_seconds INT,
+    rem_sleep_duration_seconds INT,
+    light_sleep_duration_seconds INT,
+    efficiency DOUBLE PRECISION,
+    contributors JSONB,
+    raw_json JSONB NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS oura_sleep_sessions (
+    oura_id TEXT PRIMARY KEY,
+    day DATE NOT NULL,
+    period INT,
+    bedtime_start TIMESTAMPTZ,
+    bedtime_end TIMESTAMPTZ,
+    average_hrv DOUBLE PRECISION,
+    average_heart_rate DOUBLE PRECISION,
+    total_sleep_duration_seconds INT,
+    efficiency DOUBLE PRECISION,
+    raw_json JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_oura_sleep_sessions_day ON oura_sleep_sessions(day DESC);
+
+CREATE TABLE IF NOT EXISTS oura_daily_readiness (
+    day DATE PRIMARY KEY,
+    score INT,
+    temperature_deviation DOUBLE PRECISION,
+    resting_heart_rate DOUBLE PRECISION,
+    hrv_balance DOUBLE PRECISION,
+    contributors JSONB,
+    raw_json JSONB NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS oura_daily_activity (
+    day DATE PRIMARY KEY,
+    score INT,
+    steps INT,
+    active_calories INT,
+    total_calories INT,
+    medium_activity_seconds INT,
+    high_activity_seconds INT,
+    low_activity_seconds INT,
+    raw_json JSONB NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS oura_daily_stress (
+    day DATE PRIMARY KEY,
+    stress_high_seconds INT,
+    recovery_high_seconds INT,
+    day_summary TEXT,
+    raw_json JSONB NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS oura_workouts (
+    oura_id TEXT PRIMARY KEY,
+    day DATE NOT NULL,
+    activity TEXT,
+    calories DOUBLE PRECISION,
+    distance DOUBLE PRECISION,
+    duration_seconds INT,
+    average_heart_rate DOUBLE PRECISION,
+    max_heart_rate DOUBLE PRECISION,
+    raw_json JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_oura_workouts_day ON oura_workouts(day DESC);
+
+CREATE OR REPLACE VIEW daily_health_snapshot AS
+SELECT d.day,
+       d.score AS sleep_score,
+       r.score AS readiness_score,
+       a.score AS activity_score,
+       a.steps,
+       st.day_summary AS stress,
+       ss.average_hrv,
+       ss.average_heart_rate,
+       m.weight_kg
+FROM oura_daily_sleep d
+LEFT JOIN oura_daily_readiness r ON r.day = d.day
+LEFT JOIN oura_daily_activity a ON a.day = d.day
+LEFT JOIN oura_daily_stress st ON st.day = d.day
+LEFT JOIN oura_sleep_sessions ss ON ss.day = d.day AND COALESCE(ss.period, 0) = 0
+LEFT JOIN daily_metrics m ON m.date = d.day;

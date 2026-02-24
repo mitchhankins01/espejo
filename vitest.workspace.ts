@@ -7,6 +7,8 @@ export default defineWorkspace([
       include: [
         "tests/tools/**/*.test.ts",
         "tests/formatters/**/*.test.ts",
+        "tests/oura/**/*.test.ts",
+        "tests/utils/**/*.test.ts",
       ],
       exclude: ["tests/integration/**"],
     },

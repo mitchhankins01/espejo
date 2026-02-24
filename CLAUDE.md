@@ -70,6 +70,12 @@ src/
     conjugate-verb.ts — Spanish verb conjugation lookup from reference DB.
     log-vocabulary.ts — Track Spanish vocabulary with SRS state per chat.
     spanish-quiz.ts — Spaced-repetition quiz: get due cards, record reviews, stats.
+    get-oura-summary.ts — Single-day Oura health snapshot.
+    get-oura-weekly.ts — 7-day Oura overview with averages.
+    get-oura-trends.ts — N-day trend analysis for a metric.
+    get-oura-analysis.ts — Multi-type analysis: sleep quality, anomalies, HRV trend, temperature, best sleep.
+    oura-compare-periods.ts — Side-by-side metrics comparison between two date ranges.
+    oura-correlate.ts — Pearson correlation between two health metrics.
   telegram/
     webhook.ts      — Telegram webhook handler. Validates secret token, processes text/voice/photo/doc updates, dispatches responses. Routes /morning, /evening, /compact, /digest, /assess commands.
     updates.ts      — Update deduplication, per-chat queue, fragment reassembly.
@@ -84,6 +90,15 @@ src/
   spanish/
     analytics.ts    — Interface-agnostic Spanish learning analytics. Pure functions: digest building, trend analysis, formatting.
     assessment.ts   — LLM-as-judge Spanish conversation quality assessment. DI-based client interface.
+  oura/
+    client.ts       — Oura API v2 client.
+    sync.ts         — Oura sync engine: API fetch + DB upserts + advisory lock + timer.
+    context.ts      — Oura context prompt builder for Telegram agent injection.
+    formatters.ts   — Oura tool response formatting helpers.
+    analysis.ts     — 1100-line statistical analysis module (pure functions): trend detection, outlier detection (IQR + Z-score), correlations, sleep debt/regularity/stage ratios, HRV recovery patterns, temperature analysis, day-of-week patterns.
+    types.ts        — TypeScript interfaces for stored Oura data.
+  utils/
+    dates.ts        — Shared timezone-aware date utility (todayInTimezone). Used by tools and sync.
   transports/
     http.ts         — Express HTTP server. MCP StreamableHTTP transport, Telegram webhook, REST API endpoints (activity logs, Spanish dashboard/assessments).
     oauth.ts        — OAuth token validation for HTTP API authentication.
@@ -98,6 +113,7 @@ scripts/
   migrate.ts        — Runs SQL files, tracks applied migrations in _migrations table.
   import-verbs.ts   — Downloads Fred Jehle Spanish verb CSV from GitHub, bulk inserts ~11k conjugation rows.
   sync-weight.ts    — Sync weight data to production.
+  sync-oura.ts      — Backfill/sync Oura biometrics into Postgres (pnpm sync:oura).
   deploy-smoke.ts   — Post-deploy smoke test.
   telegram-setup.ts — Set/check/delete Telegram webhook.
 specs/
@@ -108,6 +124,7 @@ specs/
   telegram-personality-plan.md — Soul personality system design (one evolving identity).
   self-healing-organism.md — Autonomous quality loop design (pulse checks, soul repairs).
   episodic-memory.md — Implemented episodic memory + hardening notes (fact + event).
+  oura-integration-plan.md — Oura Ring integration design (5 phases, all implemented).
   ltm-research.md   — Evidence-based research on long-term memory architecture.
   aws-sst-migration-plan.md — Future AWS/SST migration plan (not implemented).
   web-app.spec.md   — Future web dashboard spec (not implemented).
@@ -184,7 +201,7 @@ Media files (photos, videos, audio) are uploaded to Cloudflare R2 during sync if
 
 ### Two Test Tiers
 
-**Unit tests** (`tests/tools/`, `tests/formatters/`):
+**Unit tests** (`tests/tools/`, `tests/formatters/`, `tests/oura/`, `tests/utils/`):
 - No database needed
 - Test param validation, formatter output, spec conformance
 - Fast — run in milliseconds
@@ -353,7 +370,7 @@ Integration tests use Docker Compose inside CI (same as local). The vitest `glob
 
 100% line/function/branch/statement coverage enforced via `@vitest/coverage-v8`. Thresholds configured in `vitest.config.ts`. `pnpm check` runs coverage locally too (`pnpm test:coverage`).
 
-Files excluded from coverage via config: `src/index.ts` (entry point) and `src/db/client.ts` (module-level pool). Defensive branches in `src/db/queries.ts` and `src/server.ts` use `/* v8 ignore next */` pragmas.
+Files excluded from coverage via config: `src/index.ts` (entry point), `src/db/client.ts` (module-level pool), `src/transports/oauth.ts` (runtime-only OAuth), and `src/oura/types.ts` (type-only). Defensive branches in `src/db/queries.ts`, `src/server.ts`, and `src/oura/analysis.ts` use `/* v8 ignore next */` pragmas.
 
 Run `pnpm test:coverage` locally to check coverage before pushing.
 
@@ -490,7 +507,7 @@ A Telegram chatbot with pattern-based long-term memory and an evolving personali
 
 **What it does:**
 - Conversational interface powered by Anthropic or OpenAI (configurable provider)
-- Queries the journal using all 11 MCP tools via tool_use loop (journal search/retrieval + Spanish learning + weight logging)
+- Queries the journal and biometrics using 17 MCP tools via tool_use loop (journal retrieval + Spanish learning + weight logging + Oura analytics)
 - Spanish language tutor: conducts conversations primarily in Spanish, corrects conjugation mistakes, tracks vocabulary with FSRS spaced repetition, and adapts difficulty based on real review performance
 - Logs weight via natural language ("I weighed in at 76.5 today")
 - Accepts text, voice, photo, and document messages (with OCR/text extraction for media)
@@ -602,6 +619,47 @@ Three-tier system for evaluating Spanish tutor effectiveness. Interface-agnostic
 
 **DB table**: `spanish_assessments` — stores LLM assessment results with scores, sample count, rationale, timestamp. Indexed on `(chat_id, assessed_at DESC)`.
 
+### Oura Ring Integration
+
+Hourly sync from Oura API v2 into PostgreSQL, giving the Telegram agent access to biometrics. Design: `specs/oura-integration-plan.md`.
+
+**6 MCP tools:**
+- `get_oura_summary` — Single-day health snapshot: sleep score/duration/stages, readiness, activity/steps, stress, HRV, workouts. Defaults to today.
+- `get_oura_weekly` — 7-day overview: daily scores, averages, best/worst days, total steps/workouts.
+- `get_oura_trends` — N-day trend analysis: rolling averages (7/14/30-day), trend direction, day-of-week patterns. Optional metric filter.
+- `get_oura_analysis` — Multi-type analysis: `sleep_quality` (debt, regularity, stage ratios), `anomalies` (IQR + Z-score outliers), `hrv_trend` (rolling averages, recovery patterns), `temperature` (deviation trends, flagged days), `best_sleep` (activity/workout/day-of-week correlations).
+- `oura_compare_periods` — Side-by-side metrics between two date ranges with % changes.
+- `oura_correlate` — Pearson correlation between any two metrics (r, p-value, strength).
+
+**DB tables (8):**
+- `oura_sync_state` — Last sync date per endpoint
+- `oura_sync_runs` — Audit trail: start/end time, records synced, errors
+- `oura_daily_sleep` — Scores + contributors JSONB + raw_json
+- `oura_sleep_sessions` — Per-session: stages, HR, HRV, efficiency
+- `oura_daily_readiness` — Recovery score, temperature deviation
+- `oura_daily_activity` — Steps, calories, intensity breakdown
+- `oura_daily_stress` — Stress/recovery seconds, day summary
+- `oura_workouts` — Activity type, duration, HR, distance
+- `daily_health_snapshot` — SQL view joining all domains for cross-metric queries
+
+**Sync mechanism:**
+- In-process `setInterval` in HTTP server, starts when `OURA_ACCESS_TOKEN` is set
+- PG advisory lock prevents overlapping runs
+- Initial run: 30-day backfill. Hourly runs: 3-day rolling lookback
+- 6 endpoints fetched in parallel, all upserts idempotent (`ON CONFLICT DO UPDATE`)
+- Manual backfill: `pnpm sync:oura [--days 90]`
+
+**Context injection:**
+- `buildOuraContextPrompt()` auto-injects today's biometrics into the Telegram agent system prompt
+- Includes sleep score/duration/stages/efficiency, readiness, activity, HRV, steps, stress, bedtime/waketime
+
+**Config:**
+```
+OURA_ACCESS_TOKEN          — Personal access token from cloud.ouraring.com
+OURA_SYNC_INTERVAL_MINUTES — default 60
+OURA_SYNC_LOOKBACK_DAYS    — default 3
+```
+
 ## HTTP REST API
 
 Beyond MCP transport and Telegram webhook, the HTTP server (`src/transports/http.ts`) exposes REST endpoints authenticated via bearer token (`MCP_SECRET`):
@@ -620,7 +678,6 @@ Beyond MCP transport and Telegram webhook, the HTTP server (`src/transports/http
 Do not implement these (they're planned future work, not part of the current build):
 
 - Clustering analysis (HDBSCAN/k-means over embeddings)
-- Oura Ring data correlation
 - Write/update/delete tools (this server is read-only for journal entries)
 - Web UI or dashboard (spec at `specs/web-app.spec.md`, early SvelteKit scaffold in `web/` — not production-ready)
 - Multi-user support or auth beyond MCP SDK defaults
