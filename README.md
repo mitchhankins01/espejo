@@ -1,6 +1,6 @@
 # espejo
 
-A personal AI journal system built on PostgreSQL + pgvector. Started as an MCP server for semantic search over Day One exports, then grew into a Telegram chatbot with pattern-based long-term memory, an evolving personality, and a Spanish language tutor.
+A personal AI journal system built on PostgreSQL + pgvector. Started as an MCP server for semantic search over Day One exports, then migrated to an Obsidian vault source and grew into a Telegram chatbot with pattern-based long-term memory, an evolving personality, and a Spanish language tutor.
 
 *Espejo* means *mirror* in Spanish.
 
@@ -130,14 +130,14 @@ Design documents for each phase live in `specs/`:
 
 ## Why This Exists
 
-Day One has an MCP integration that lets LLMs read and write journal entries. In practice, it's limited:
+Day One's MCP limitations were the original motivation for this project:
 
 - **Multi-term search is broken** — querying for more than one term frequently returns zero results
 - **No semantic search** — you can ask "what did I write on December 5th" but not "entries where I was processing difficult emotions about work"
 - **No fuzzy matching** — typos or paraphrased concepts return nothing
 - **No cross-entry analysis** — no way to find similar entries, discover recurring themes, or correlate patterns over time
 
-This project exports the full Day One journal into PostgreSQL with pgvector, then puts an MCP server in front of it that supports hybrid semantic + keyword search, entry similarity, and structured queries that actually work.
+Today the journal source is an Obsidian vault synced into PostgreSQL with pgvector, then exposed through an MCP server that supports hybrid semantic + keyword search, entry similarity, and structured queries that actually work.
 
 ## Search: Hybrid RRF
 
@@ -305,7 +305,7 @@ Authenticated via `MCP_SECRET` bearer token:
 pnpm install
 docker compose up -d              # Dev PostgreSQL on port 5434
 pnpm migrate                      # Apply schema
-pnpm sync                         # Sync from DayOne.sqlite (set DAYONE_SQLITE_PATH)
+pnpm sync                         # Sync from Obsidian vault (set OBSIDIAN_VAULT_PATH)
 pnpm embed                        # Generate embeddings via OpenAI
 pnpm dev                          # Start MCP server (stdio)
 ```

@@ -1,6 +1,6 @@
 # espejo-mcp
 
-MCP server + Telegram chatbot for semantic journal search over Day One exports in PostgreSQL + pgvector.
+MCP server + Telegram chatbot for semantic journal search over Obsidian journal data in PostgreSQL + pgvector.
 
 ## Development Loop
 
@@ -26,7 +26,7 @@ If a test fails, read the full error output. Test names map to specs in `specs/t
 pnpm install
 docker compose up -d                    # Dev PG on port 5434
 pnpm migrate                            # Apply schema
-pnpm sync                               # Sync from DayOne.sqlite (set DAYONE_SQLITE_PATH in .env)
+pnpm sync                               # Sync from Obsidian vault (set OBSIDIAN_VAULT_PATH in .env)
 pnpm embed                              # Generate embeddings via OpenAI
 pnpm dev                                # Start MCP server (stdio)
 ```
@@ -108,7 +108,8 @@ src/
     entry.ts        — Raw DB row → human-readable string with emoji, metadata, media URLs.
     search-results.ts — Ranked results with RRF score context.
 scripts/
-  sync-dayone.ts    — DayOne.sqlite → PG. Idempotent (ON CONFLICT DO UPDATE).
+  sync-obsidian.ts  — Obsidian vault markdown → PG. Idempotent (ON CONFLICT DO UPDATE).
+  export-to-obsidian.ts — PG → Obsidian markdown export (one-time/backfill).
   embed-entries.ts  — Batch embed all entries missing embeddings.
   migrate.ts        — Runs SQL files, tracks applied migrations in _migrations table.
   import-verbs.ts   — Downloads Fred Jehle Spanish verb CSV from GitHub, bulk inserts ~11k conjugation rows.
@@ -125,6 +126,7 @@ specs/
   self-healing-organism.md — Autonomous quality loop design (pulse checks, soul repairs).
   episodic-memory.md — Implemented episodic memory + hardening notes (fact + event).
   oura-integration-plan.md — Oura Ring integration design (5 phases, all implemented).
+  obsidian-migration-plan.md — Day One → Obsidian migration plan (implemented).
   ltm-research.md   — Evidence-based research on long-term memory architecture.
   aws-sst-migration-plan.md — Future AWS/SST migration plan (not implemented).
   web-app.spec.md   — Future web dashboard spec (not implemented).
@@ -193,9 +195,9 @@ Tags live in a separate `tags` table with a junction table `entry_tags`. This en
 
 ### Sync Is Idempotent
 
-`scripts/sync-dayone.ts` reads directly from the DayOne.sqlite database and uses `ON CONFLICT (uuid) DO UPDATE` so re-running it updates existing entries. Run `pnpm sync` any time to pick up new or modified entries from Day One.
+`scripts/sync-obsidian.ts` reads `.md` notes from an Obsidian vault and uses `ON CONFLICT (uuid) DO UPDATE` so re-running it updates existing entries. Run `pnpm sync` any time to pick up new or modified notes.
 
-Media files (photos, videos, audio) are uploaded to Cloudflare R2 during sync if R2 credentials are configured. The sync checks if each file already exists in R2 (HEAD request) and skips re-upload. Use `--skip-media` for a quick metadata-only sync. Attachments with `ZHASDATA=0` (iCloud-only, not downloaded locally) are skipped with a warning.
+Media files referenced from notes are uploaded to Cloudflare R2 during sync if R2 credentials are configured. The sync checks if each file already exists in R2 (HEAD request) and skips re-upload. Use `--skip-media` for a quick metadata-only sync.
 
 ## Test Strategy
 
@@ -324,17 +326,18 @@ Create a new `.sql` file in a `migrations/` directory (if using file-based migra
 
 ### Sync local data to production
 
-After journaling new entries in Day One, push them to Railway:
+After journaling new entries in Obsidian, push them to Railway:
 
 ```bash
-# 1. Sync new entries from DayOne.sqlite → local dev DB
-pnpm sync --skip-media
+# 1. Sync new notes from Obsidian vault → local dev DB
+pnpm sync -- --vault-path /path/to/vault/journal --skip-media
 
 # 2. Embed any new entries missing embeddings
 pnpm embed
 
 # 3. Push to production (Railway)
-NODE_ENV=production DATABASE_URL=<railway_url> OPENAI_API_KEY=<key> pnpm sync --skip-media
+NODE_ENV=production DATABASE_URL=<railway_url> OPENAI_API_KEY=<key> \
+  OBSIDIAN_VAULT_PATH=/path/to/vault/journal pnpm sync --skip-media
 NODE_ENV=production DATABASE_URL=<railway_url> OPENAI_API_KEY=<key> pnpm embed
 ```
 
@@ -344,7 +347,7 @@ For media upload to R2, drop `--skip-media` and add R2 env vars:
 
 ```bash
 NODE_ENV=production DATABASE_URL=<url> R2_ACCOUNT_ID=<id> R2_ACCESS_KEY_ID=<key> \
-  R2_SECRET_ACCESS_KEY=<secret> R2_BUCKET_NAME=<bucket> DAYONE_SQLITE_PATH=<path> pnpm sync
+  R2_SECRET_ACCESS_KEY=<secret> R2_BUCKET_NAME=<bucket> OBSIDIAN_VAULT_PATH=<path> pnpm sync
 ```
 
 ### Re-embed after model change
@@ -498,7 +501,7 @@ pnpm telegram:setup --delete
 | `dotenv` | Env file loading |
 | `express` | HTTP server for REST API, Telegram webhook, and MCP StreamableHTTP transport |
 | `@aws-sdk/client-s3` | Cloudflare R2 media storage (S3-compatible) |
-| `better-sqlite3` | Read DayOne.sqlite during sync |
+| `gray-matter` | Parse/stringify Obsidian markdown frontmatter |
 | `@anthropic-ai/sdk` | Claude agent for Telegram chatbot conversations |
 
 ## Telegram Chatbot

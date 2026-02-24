@@ -41,7 +41,7 @@ Also update `specs/schema.sql` with the new tables.
 ### Verb data import
 
 - **Source**: [Fred Jehle Spanish Verb Database](https://github.com/ghidinelli/fred-jehle-spanish-verbs) — ~600 verbs, all moods/tenses, CC BY-NC-SA 3.0
-- New script: `scripts/import-verbs.ts` — downloads CSV from GitHub, parses, bulk inserts with `ON CONFLICT DO UPDATE` (idempotent, same pattern as `sync-dayone.ts`)
+- New script: `scripts/import-verbs.ts` — downloads CSV from GitHub, parses, bulk inserts with `ON CONFLICT DO UPDATE` (idempotent, same pattern as `sync-obsidian.ts`)
 - Derives `is_irregular` by comparing each form against computed regular -ar/-er/-ir patterns
 - Add `pnpm import:verbs` to `package.json`
 - No need to bundle the CSV — download on first run, cache locally in `data/`
