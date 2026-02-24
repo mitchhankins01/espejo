@@ -30,10 +30,11 @@ const {
   mockGetLatestSpanishAssessment,
   mockAssessSpanishQuality,
   mockGetOuraSyncRun,
+  mockGetActivityLog,
   mockInsertChatMessage,
   mockConfig,
 } = vi.hoisted(() => ({
-  mockRunAgent: vi.fn().mockResolvedValue({ response: "agent response", activity: "", soulVersion: 1, patternCount: 0 }),
+  mockRunAgent: vi.fn().mockResolvedValue({ response: "agent response", activity: "", activityLogId: null, soulVersion: 1, patternCount: 0 }),
   mockForceCompact: vi.fn().mockResolvedValue(undefined),
   mockSendTelegramMessage: vi.fn().mockResolvedValue(undefined),
   mockSendTelegramVoice: vi.fn().mockResolvedValue(true),
@@ -63,6 +64,7 @@ const {
     summary: "<b>Spanish Assessment</b>\nOverall: <b>3.6/5</b>",
   }),
   mockGetOuraSyncRun: vi.fn().mockResolvedValue(null),
+  mockGetActivityLog: vi.fn().mockResolvedValue(null),
   mockInsertChatMessage: vi.fn().mockResolvedValue({ inserted: true, id: 1 }),
   mockConfig: {
     config: {
@@ -137,6 +139,7 @@ vi.mock("../../src/db/queries.js", () => ({
   getSpanishAdaptiveContext: mockGetSpanishAdaptiveContext,
   getLatestSpanishAssessment: mockGetLatestSpanishAssessment,
   getOuraSyncRun: mockGetOuraSyncRun,
+  getActivityLog: mockGetActivityLog,
   insertChatMessage: mockInsertChatMessage,
 }));
 
@@ -218,7 +221,7 @@ function getHandler(): (msg: Record<string, unknown>) => Promise<void> {
 let errorSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
-  mockRunAgent.mockReset().mockResolvedValue({ response: "agent response", activity: "", soulVersion: 1, patternCount: 0 });
+  mockRunAgent.mockReset().mockResolvedValue({ response: "agent response", activity: "", activityLogId: null, soulVersion: 1, patternCount: 0 });
   mockSendTelegramMessage.mockReset().mockResolvedValue(undefined);
   mockSendTelegramVoice.mockReset().mockResolvedValue(true);
   mockSendChatAction.mockReset().mockResolvedValue(undefined);
@@ -236,6 +239,7 @@ beforeEach(() => {
   mockInsertSoulQualitySignal.mockReset().mockResolvedValue({ id: 1 });
   mockGetLastPulseCheck.mockReset().mockResolvedValue(null);
   mockGetOuraSyncRun.mockReset().mockResolvedValue(null);
+  mockGetActivityLog.mockReset().mockResolvedValue(null);
   mockConfig.config.telegram.voiceReplyMode = "off";
   mockConfig.config.telegram.voiceReplyEvery = 3;
   mockConfig.config.telegram.voiceReplyMinChars = 1;
@@ -427,6 +431,44 @@ describe("message handler", () => {
     expect(mockSendChatAction).toHaveBeenCalledWith("100", "typing");
   });
 
+  it("sends a progress notice when agent work is slow", async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveAgent:
+        | ((value: { response: string; activity: string; soulVersion: number; patternCount: number }) => void)
+        | undefined;
+      mockRunAgent.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveAgent = resolve;
+          })
+      );
+
+      const handler = getHandler();
+      const pending = handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
+
+      await vi.advanceTimersByTimeAsync(4700);
+      expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+        "100",
+        "<i>On it. Pulling data now...</i>"
+      );
+
+      expect(resolveAgent).toBeDefined();
+      if (!resolveAgent) {
+        throw new Error("resolveAgent was not initialized");
+      }
+      resolveAgent({
+        response: "agent response",
+        activity: "",
+        soulVersion: 1,
+        patternCount: 0,
+      });
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("wires text messages through agent to client", async () => {
     const handler = getHandler();
     await handler({ chatId: 100, text: "hello world", messageId: 1, date: 1000 });
@@ -464,6 +506,50 @@ describe("message handler", () => {
     expect(mockSendTelegramMessage).toHaveBeenCalledWith(
       "100",
       "Found it!\n\n<i>used 3 memories (behavior, fact) | 2 tools (search_entries, get_entry)</i>"
+    );
+  });
+
+  it("shows activity details button and removes inline details link", async () => {
+    mockRunAgent.mockResolvedValueOnce({
+      response: "Done.",
+      activity:
+        "used 3 memories (behavior, fact) | logged 2 spanish terms | <a href=\"https://example.com/api/activity/9\">details</a>",
+      activityLogId: 9,
+    });
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      "Done.\n\n<i>used 3 memories (behavior, fact) | logged 2 spanish terms</i>",
+      expect.objectContaining({
+        inline_keyboard: expect.arrayContaining([
+          expect.arrayContaining([
+            expect.objectContaining({
+              text: "Details",
+              callback_data: "activity_detail:9:3:2",
+            }),
+          ]),
+        ]),
+      })
+    );
+  });
+
+  it("removes inline details link without adding button when no memory/term summary exists", async () => {
+    mockRunAgent.mockResolvedValueOnce({
+      response: "Done.",
+      activity:
+        "2 tools (search_entries, get_entry) | <a href=\"https://example.com/api/activity/10\">details</a>",
+      activityLogId: 10,
+    });
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      "Done.\n\n<i>2 tools (search_entries, get_entry)</i>"
     );
   });
 
@@ -507,6 +593,41 @@ describe("message handler", () => {
     expect(mockSynthesizeVoiceReply).toHaveBeenCalledWith("agent response");
     expect(mockSendTelegramVoice).toHaveBeenCalledWith("100", expect.any(Buffer));
     expect(mockSendTelegramMessage).not.toHaveBeenCalledWith("100", "agent response");
+  });
+
+  it("sends voice activity text with details button when memory and term summary exists", async () => {
+    mockConfig.config.telegram.voiceReplyMode = "adaptive";
+    mockRunAgent.mockResolvedValueOnce({
+      response: "Found it.",
+      activity:
+        "used 2 memories (behavior) | logged 1 spanish terms | <a href=\"https://example.com/api/activity/7\">details</a>",
+      activityLogId: 7,
+    });
+
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "",
+      messageId: 1,
+      date: 1000,
+      voice: { fileId: "voice-123", durationSeconds: 5 },
+    });
+
+    expect(mockSendTelegramVoice).toHaveBeenCalled();
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      "<i>used 2 memories (behavior) | logged 1 spanish terms</i>",
+      expect.objectContaining({
+        inline_keyboard: expect.arrayContaining([
+          expect.arrayContaining([
+            expect.objectContaining({
+              text: "Details",
+              callback_data: "activity_detail:7:2:1",
+            }),
+          ]),
+        ]),
+      })
+    );
   });
 
   it("falls back to text when voice send fails", async () => {
@@ -1594,6 +1715,176 @@ describe("/soul command", () => {
       expect.stringContaining("string error")
     );
     expect(mockRunAgent).not.toHaveBeenCalled();
+  });
+});
+
+describe("activity_detail callback", () => {
+  it("sends formatted detail message for a valid activity log", async () => {
+    mockGetActivityLog.mockResolvedValueOnce({
+      id: 9,
+      chat_id: "100",
+      memories: [
+        {
+          id: 1,
+          content:
+            "I am building stronger routines around sleep and focus, and this sentence is intentionally long so the detail formatter has to truncate the preview output for Telegram.",
+          kind: "behavior",
+          confidence: 0.9,
+          score: 0.95,
+        },
+        {
+          id: 2,
+          content: "Short memory note.",
+          kind: "fact",
+          confidence: 0.8,
+          score: 0.88,
+        },
+      ],
+      tool_calls: [
+        {
+          name: "search_entries",
+          args: { query: "sleep" },
+          result: "raw tool result",
+          truncated_result: "truncated",
+        },
+      ],
+      cost_usd: 0.123,
+      created_at: new Date("2026-02-22T08:30:00Z"),
+    });
+
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "activity_detail:9:3:2",
+      messageId: 10,
+      date: 1000,
+      callbackData: "activity_detail:9:3:2",
+    });
+
+    expect(mockGetActivityLog).toHaveBeenCalledWith(expect.anything(), 9);
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      expect.stringContaining("Activity detail #9")
+    );
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      expect.stringContaining("memories used: 3")
+    );
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      expect.stringContaining("spanish terms logged: 2")
+    );
+    expect(mockRunAgent).not.toHaveBeenCalled();
+  });
+
+  it("returns not found when activity log does not exist", async () => {
+    mockGetActivityLog.mockResolvedValueOnce(null);
+
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "activity_detail:99:1:1",
+      messageId: 10,
+      date: 1000,
+      callbackData: "activity_detail:99:1:1",
+    });
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      "Activity run #99 not found."
+    );
+    expect(mockRunAgent).not.toHaveBeenCalled();
+  });
+
+  it("returns not found when activity log belongs to another chat", async () => {
+    mockGetActivityLog.mockResolvedValueOnce({
+      id: 12,
+      chat_id: "999",
+      memories: [],
+      tool_calls: [],
+      cost_usd: null,
+      created_at: new Date("2026-02-22T08:30:00Z"),
+    });
+
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "activity_detail:12:1:0",
+      messageId: 10,
+      date: 1000,
+      callbackData: "activity_detail:12:1:0",
+    });
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      "Activity run #12 not found."
+    );
+  });
+
+  it("handles invalid activity detail IDs", async () => {
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "activity_detail:abc:1:1",
+      messageId: 10,
+      date: 1000,
+      callbackData: "activity_detail:abc:1:1",
+    });
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      "Activity detail not found."
+    );
+    expect(mockGetActivityLog).not.toHaveBeenCalled();
+  });
+
+  it("formats detail summary without sections when memories and tools are empty", async () => {
+    mockGetActivityLog.mockResolvedValueOnce({
+      id: 11,
+      chat_id: "100",
+      memories: [],
+      tool_calls: [],
+      cost_usd: null,
+      created_at: new Date("2026-02-22T08:30:00Z"),
+    });
+
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "activity_detail:11:0:0",
+      messageId: 10,
+      date: 1000,
+      callbackData: "activity_detail:11:0:0",
+    });
+
+    const sentMessage = mockSendTelegramMessage.mock.calls.find(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (c: any[]) => typeof c[1] === "string" && c[1].includes("Activity detail #11")
+    );
+    expect(sentMessage).toBeDefined();
+    const detail = sentMessage![1] as string;
+    expect(detail).toContain("memories used: 0");
+    expect(detail).toContain("spanish terms logged: 0");
+    expect(detail).not.toContain("Top memories:");
+    expect(detail).not.toContain("Tools:");
+  });
+
+  it("handles activity detail callback errors gracefully", async () => {
+    mockGetActivityLog.mockRejectedValueOnce(new Error("db down"));
+
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "activity_detail:9:1:1",
+      messageId: 10,
+      date: 1000,
+      callbackData: "activity_detail:9:1:1",
+    });
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("activity_detail callback error"),
+      expect.any(Error)
+    );
   });
 });
 

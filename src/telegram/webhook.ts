@@ -16,6 +16,8 @@ import {
   getLatestSpanishAssessment,
   insertChatMessage,
   getOuraSyncRun,
+  getActivityLog,
+  type ActivityLogRow,
 } from "../db/queries.js";
 import { runAgent, forceCompact } from "./agent.js";
 import {
@@ -54,9 +56,22 @@ import {
 // ---------------------------------------------------------------------------
 
 const MAX_TEXT_MESSAGE_VOICE_CHARS = 260;
+const TYPING_HEARTBEAT_MS = 4500;
+const SLOW_PROGRESS_NOTICE_MS = 3500;
+const SLOW_PROGRESS_NOTICE_TEXT = "<i>On it. Pulling data now...</i>";
+const ACTIVITY_DETAIL_CALLBACK_PREFIX = "activity_detail:";
 const chatModes = new Map<string, AgentMode>();
 const MODE_DISABLE_TOKENS = new Set(["off", "stop", "end", "done", "exit"]);
 const chatMessageCounters = new Map<string, number>();
+
+interface InlineKeyboardButton {
+  text: string;
+  callback_data: string;
+}
+
+interface InlineKeyboardMarkup extends Record<string, unknown> {
+  inline_keyboard: InlineKeyboardButton[][];
+}
 
 const SOUL_FEEDBACK_BUTTONS = {
   inline_keyboard: [
@@ -241,6 +256,164 @@ function shouldReplyWithVoice(
   return replyEvery === 1 || messageId % replyEvery === 0;
 }
 
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function stripActivityDetailLink(activity: string): string {
+  return activity
+    .replace(/\s*\|\s*<a\s+href="[^"]+">details<\/a>\s*$/i, "")
+    .trim();
+}
+
+function parseActivityMetric(activity: string, pattern: RegExp): number {
+  const match = pattern.exec(activity);
+  if (!match) return 0;
+  const parsed = Number(match[1]);
+  /* v8 ignore next -- defensive: regex capture is expected to be numeric */
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getActivitySummaryCounts(activity: string): {
+  memoryCount: number;
+  termCount: number;
+} {
+  return {
+    memoryCount: parseActivityMetric(activity, /used (\d+)\s+memories/i),
+    termCount: parseActivityMetric(
+      activity,
+      /logged (\d+)\s+(?:spanish\s+)?terms/i
+    ),
+  };
+}
+
+function buildActivityDetailMarkup(
+  activity: string,
+  activityLogId: number | null
+): InlineKeyboardMarkup | undefined {
+  if (!activityLogId) return undefined;
+  const { memoryCount, termCount } = getActivitySummaryCounts(activity);
+  if (memoryCount === 0 && termCount === 0) return undefined;
+
+  return {
+    inline_keyboard: [
+      [
+        {
+          text: "Details",
+          callback_data: `${ACTIVITY_DETAIL_CALLBACK_PREFIX}${activityLogId}:${memoryCount}:${termCount}`,
+        },
+      ],
+    ],
+  };
+}
+
+function mergeInlineMarkups(
+  first?: InlineKeyboardMarkup,
+  second?: InlineKeyboardMarkup
+): InlineKeyboardMarkup | undefined {
+  const inline_keyboard = [
+    ...(first?.inline_keyboard ?? []),
+    ...(second?.inline_keyboard ?? []),
+  ];
+  if (inline_keyboard.length === 0) return undefined;
+  return { inline_keyboard };
+}
+
+function truncatePreview(text: string, maxChars: number): string {
+  const compact = text.replace(/\s+/g, " ").trim();
+  if (compact.length <= maxChars) return compact;
+  return `${compact.slice(0, maxChars - 3)}...`;
+}
+
+function formatActivityDetailMessage(params: {
+  log: ActivityLogRow;
+  hintedMemoryCount: number;
+  hintedTermCount: number;
+}): string {
+  const memoryCount =
+    params.hintedMemoryCount > 0
+      ? params.hintedMemoryCount
+      : params.log.memories.length;
+  const termCount = Math.max(0, params.hintedTermCount);
+  const createdLabel = params.log.created_at.toLocaleString("en-GB", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: config.timezone,
+  });
+
+  const lines = [
+    `Activity detail #${params.log.id}`,
+    `When: ${createdLabel}`,
+    "",
+    "Summary:",
+    `  memories used: ${memoryCount}`,
+    `  spanish terms logged: ${termCount}`,
+    `  tool calls: ${params.log.tool_calls.length}`,
+  ];
+
+  if (params.log.cost_usd != null) {
+    lines.push(`  cost: $${params.log.cost_usd.toFixed(3)}`);
+  }
+
+  if (params.log.memories.length > 0) {
+    lines.push("", "Top memories:");
+    for (const [index, memory] of params.log.memories.slice(0, 3).entries()) {
+      lines.push(
+        `  ${index + 1}. [${memory.kind}] ${truncatePreview(memory.content, 120)}`
+      );
+    }
+  }
+
+  if (params.log.tool_calls.length > 0) {
+    const toolCounts = new Map<string, number>();
+    for (const toolCall of params.log.tool_calls) {
+      toolCounts.set(toolCall.name, (toolCounts.get(toolCall.name) ?? 0) + 1);
+    }
+    lines.push("", "Tools:");
+    for (const [name, count] of [...toolCounts.entries()].sort((a, b) => b[1] - a[1])) {
+      lines.push(`  ${name}: ${count}`);
+    }
+  }
+
+  return `<pre>${escapeHtml(lines.join("\n"))}</pre>`;
+}
+
+function startProgressUpdates(chatId: string): () => void {
+  let stopped = false;
+
+  const typingInterval = setInterval(() => {
+    void sendChatAction(chatId, "typing").catch(
+      /* v8 ignore next 3 -- defensive: transient network failures are non-deterministic */
+      (err: unknown) => {
+        console.error(`Telegram typing heartbeat error [chat:${chatId}]:`, err);
+      }
+    );
+  }, TYPING_HEARTBEAT_MS);
+
+  const slowNoticeTimeout = setTimeout(() => {
+    /* v8 ignore next -- defensive race guard if timer fires during teardown */
+    if (stopped) return;
+    void sendTelegramMessage(chatId, SLOW_PROGRESS_NOTICE_TEXT).catch(
+      /* v8 ignore next 3 -- defensive: transient network failures are non-deterministic */
+      (err: unknown) => {
+        console.error(`Telegram slow progress notice failed [chat:${chatId}]:`, err);
+      }
+    );
+  }, SLOW_PROGRESS_NOTICE_MS);
+
+  return () => {
+    stopped = true;
+    clearInterval(typingInterval);
+    clearTimeout(slowNoticeTimeout);
+  };
+}
+
 const POSITIVE_REACTION_EMOJIS = new Set(["👍", "❤️", "🔥", "👏", "🎉", "💯", "⚡", "🫡"]);
 const NEGATIVE_REACTION_EMOJIS = new Set(["👎", "💩"]);
 
@@ -365,6 +538,37 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
       return;
     }
 
+    // Handle activity detail callback
+    if (msg.callbackData?.startsWith(ACTIVITY_DETAIL_CALLBACK_PREFIX)) {
+      try {
+        const parts = msg.callbackData.split(":");
+        const activityLogId = Number(parts[1]);
+        const hintedMemoryCount = Number(parts[2]) || 0;
+        const hintedTermCount = Number(parts[3]) || 0;
+
+        if (!Number.isInteger(activityLogId) || activityLogId <= 0) {
+          await sendTelegramMessage(chatId, "Activity detail not found.");
+          return;
+        }
+
+        const log = await getActivityLog(pool, activityLogId);
+        if (!log || log.chat_id !== chatId) {
+          await sendTelegramMessage(chatId, `Activity run #${activityLogId} not found.`);
+          return;
+        }
+
+        const detail = formatActivityDetailMessage({
+          log,
+          hintedMemoryCount,
+          hintedTermCount,
+        });
+        await sendTelegramMessage(chatId, detail);
+      } catch (err) {
+        console.error(`Telegram activity_detail callback error [chat:${chatId}]:`, err);
+      }
+      return;
+    }
+
     // Handle Oura sync detail callback
     if (msg.callbackData?.startsWith("oura_sync:")) {
       try {
@@ -480,6 +684,7 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
 
     // Handle /digest command — Spanish learning progress summary
     if (command?.name === "digest") {
+      const stopProgress = startProgressUpdates(chatId);
       try {
         const days = 30;
         const [stats, adaptive, retention, funnel, grades, lapses, latestAssessment] =
@@ -507,14 +712,16 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
       } catch (err) {
         console.error(`Telegram /digest error [chat:${chatId}]:`, err);
         await sendTelegramMessage(chatId, "Error generating digest.");
+      } finally {
+        stopProgress();
       }
       return;
     }
 
     // Handle /assess command — LLM-as-judge Spanish quality assessment
     if (command?.name === "assess") {
+      const stopProgress = startProgressUpdates(chatId);
       try {
-        await sendChatAction(chatId, "typing");
         const OpenAI = (await import("openai")).default;
         const openai = new OpenAI({ apiKey: config.openai.apiKey });
         const client = createOpenAIAssessmentClient(openai);
@@ -524,6 +731,8 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
         const errMsg = err instanceof Error ? err.message : String(err);
         console.error(`Telegram /assess error [chat:${chatId}]:`, errMsg);
         await sendTelegramMessage(chatId, `Assessment error: ${errMsg}`);
+      } finally {
+        stopProgress();
       }
       return;
     }
@@ -575,55 +784,77 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
       text = buildMorningKickoffMessage(naturalMorningIntent.seed);
     }
 
-    const { response, activity } = await runAgent({
-      chatId,
-      message: text,
-      storedUserMessage: originalUserText,
-      messageDate: msg.date,
-      mode: getChatMode(chatId),
-      prefill,
-      /* v8 ignore next 3 -- async callback tested via agent compaction tests */
-      onCompacted: async (summary) => {
-        await sendTelegramMessage(chatId, `<i>Memory note: ${summary}</i>`);
-      },
-    });
+    const stopProgress = startProgressUpdates(chatId);
+    try {
+      const { response, activity, activityLogId } = await runAgent({
+        chatId,
+        message: text,
+        storedUserMessage: originalUserText,
+        messageDate: msg.date,
+        mode: getChatMode(chatId),
+        prefill,
+        /* v8 ignore next 3 -- async callback tested via agent compaction tests */
+        onCompacted: async (summary) => {
+          await sendTelegramMessage(chatId, `<i>Memory note: ${summary}</i>`);
+        },
+      });
 
-    if (response) {
-      const fullResponse = activity
-        ? `${response}\n\n<i>${activity}</i>`
-        : response;
+      if (response) {
+        const cleanActivity = stripActivityDetailLink(activity);
+        const activityDetailMarkup = buildActivityDetailMarkup(
+          cleanActivity,
+          activityLogId
+        );
+        const fullResponse = cleanActivity
+          ? `${response}\n\n<i>${cleanActivity}</i>`
+          : response;
 
-      // Determine if we should attach soul feedback buttons
-      const attachButtons = shouldAttachFeedbackButtons(chatId);
-      const replyMarkup = attachButtons ? SOUL_FEEDBACK_BUTTONS : undefined;
+        // Determine if we should attach soul feedback buttons
+        const attachButtons = shouldAttachFeedbackButtons(chatId);
+        const soulMarkup: InlineKeyboardMarkup | undefined = attachButtons
+          ? SOUL_FEEDBACK_BUTTONS
+          : undefined;
+        const replyMarkup = mergeInlineMarkups(activityDetailMarkup, soulMarkup);
 
-      const useVoice = shouldReplyWithVoice(
-        response,
-        Boolean(msg.voice),
-        msg.messageId
-      );
-      if (useVoice) {
-        try {
-          await sendChatAction(chatId, "record_voice");
-          const voiceAudio = await synthesizeVoiceReply(response);
-          await sendChatAction(chatId, "upload_voice");
-          const voiceSent = await sendTelegramVoice(chatId, voiceAudio);
-          if (voiceSent) {
-            if (activity) {
-              await sendTelegramMessage(chatId, `<i>${activity}</i>`);
+        const useVoice = shouldReplyWithVoice(
+          response,
+          Boolean(msg.voice),
+          msg.messageId
+        );
+        if (useVoice) {
+          try {
+            await sendChatAction(chatId, "record_voice");
+            const voiceAudio = await synthesizeVoiceReply(response);
+            await sendChatAction(chatId, "upload_voice");
+            const voiceSent = await sendTelegramVoice(chatId, voiceAudio);
+            if (voiceSent) {
+              if (cleanActivity) {
+                const activityText = `<i>${cleanActivity}</i>`;
+                if (activityDetailMarkup) {
+                  await sendTelegramMessage(
+                    chatId,
+                    activityText,
+                    activityDetailMarkup
+                  );
+                } else {
+                  await sendTelegramMessage(chatId, activityText);
+                }
+              }
+              return;
             }
-            return;
+          } catch (voiceErr) {
+            console.error(`Telegram voice reply failed [chat:${chatId}]:`, voiceErr);
           }
-        } catch (voiceErr) {
-          console.error(`Telegram voice reply failed [chat:${chatId}]:`, voiceErr);
+        }
+
+        if (replyMarkup) {
+          await sendTelegramMessage(chatId, fullResponse, replyMarkup);
+        } else {
+          await sendTelegramMessage(chatId, fullResponse);
         }
       }
-
-      if (replyMarkup) {
-        await sendTelegramMessage(chatId, fullResponse, replyMarkup);
-      } else {
-        await sendTelegramMessage(chatId, fullResponse);
-      }
+    } finally {
+      stopProgress();
     }
   } catch (err) {
     console.error(`Telegram error [chat:${chatId}]:`, err);
