@@ -1,18 +1,23 @@
 import type { OuraSummaryRow } from "../db/queries.js";
 
-function fmtDuration(seconds: number | null): string {
+export function fmtDuration(seconds: number | null): string {
   if (!seconds || seconds <= 0) return "n/a";
   const h = Math.floor(seconds / 3600);
   const m = Math.round((seconds % 3600) / 60);
   return `${h}h ${m}m`;
 }
 
+function formatDay(day: Date | string): string {
+  if (typeof day === "string") return day.slice(0, 10);
+  return day.toISOString().slice(0, 10);
+}
+
 export function formatOuraSummary(row: OuraSummaryRow): string {
   return [
-    `📅 ${row.day.toISOString().slice(0, 10)}`,
+    `📅 ${formatDay(row.day)}`,
     `Sleep ${row.sleep_score ?? "n/a"} | Readiness ${row.readiness_score ?? "n/a"} | Activity ${row.activity_score ?? "n/a"}`,
-    `HRV ${row.average_hrv ?? "n/a"}ms | Steps ${row.steps ?? "n/a"} | Stress ${row.stress ?? "n/a"}`,
-    `Sleep: ${fmtDuration(row.sleep_duration_seconds)} (Deep ${fmtDuration(row.deep_sleep_duration_seconds)}, REM ${fmtDuration(row.rem_sleep_duration_seconds)}) | Efficiency ${row.efficiency ?? "n/a"}`,
+    `HRV ${row.average_hrv != null ? Math.round(row.average_hrv) : "n/a"}ms | Steps ${row.steps?.toLocaleString() ?? "n/a"} | Stress ${row.stress ?? "n/a"}`,
+    `Sleep: ${fmtDuration(row.sleep_duration_seconds)} (Deep ${fmtDuration(row.deep_sleep_duration_seconds)}, REM ${fmtDuration(row.rem_sleep_duration_seconds)}) | Efficiency ${row.efficiency ?? "n/a"}%`,
     `Workouts: ${row.workout_count}`,
   ].join("\n");
 }
@@ -32,6 +37,6 @@ export function formatOuraWeekly(rows: OuraSummaryRow[]): string {
     `Average HRV: ${avg(rows.map((r) => r.average_hrv))}ms`,
     `Total steps: ${totalSteps.toLocaleString()} | Workouts: ${workouts}`,
     "",
-    ...rows.map((r) => `${r.day.toISOString().slice(0, 10)} — Sleep ${r.sleep_score ?? "-"}, Ready ${r.readiness_score ?? "-"}, Activity ${r.activity_score ?? "-"}, Steps ${r.steps ?? "-"}`),
+    ...rows.map((r) => `${formatDay(r.day)} — Sleep ${r.sleep_score ?? "-"}, Ready ${r.readiness_score ?? "-"}, Activity ${r.activity_score ?? "-"}, Steps ${r.steps ?? "-"}`),
   ].join("\n");
 }

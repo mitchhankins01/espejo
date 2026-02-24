@@ -2841,7 +2841,7 @@ export async function upsertOuraDailyActivity(pool: pg.Pool, row: Record<string,
       high_activity_seconds = EXCLUDED.high_activity_seconds,
       low_activity_seconds = EXCLUDED.low_activity_seconds,
       raw_json = EXCLUDED.raw_json`,
-    [row.day, row.score ?? null, row.steps ?? null, row.active_calories ?? null, row.total_calories ?? null, row.medium_activity_duration ?? null, row.high_activity_duration ?? null, row.low_activity_duration ?? null, row]
+    [row.day, row.score ?? null, row.steps ?? null, row.active_calories ?? null, row.total_calories ?? null, row.medium_activity_time ?? null, row.high_activity_time ?? null, row.low_activity_time ?? null, row]
   );
 }
 
@@ -2955,6 +2955,87 @@ export async function getOuraTrendMetric(
      WHERE d.day >= (CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day')
        AND ${columnSql[metric]} IS NOT NULL
      ORDER BY d.day ASC`,
+    [days]
+  );
+  return result.rows;
+}
+
+export async function getOuraTrendMetricForRange(
+  pool: pg.Pool,
+  metric: "sleep_score" | "hrv" | "readiness" | "activity" | "steps" | "sleep_duration",
+  startDate: string,
+  endDate: string
+): Promise<Array<{ day: Date; value: number }>> {
+  const columnSql: Record<typeof metric, string> = {
+    sleep_score: "d.score",
+    hrv: "ss.average_hrv",
+    readiness: "r.score",
+    activity: "a.score",
+    steps: "a.steps",
+    sleep_duration: "d.total_sleep_duration_seconds",
+  };
+  const result = await pool.query<{ day: Date; value: number }>(
+    `SELECT d.day, ${columnSql[metric]}::double precision AS value
+     FROM oura_daily_sleep d
+     LEFT JOIN oura_daily_readiness r ON r.day = d.day
+     LEFT JOIN oura_daily_activity a ON a.day = d.day
+     LEFT JOIN oura_sleep_sessions ss ON ss.day = d.day AND COALESCE(ss.period, 0) = 0
+     WHERE d.day >= $1::date AND d.day <= $2::date
+       AND ${columnSql[metric]} IS NOT NULL
+     ORDER BY d.day ASC`,
+    [startDate, endDate]
+  );
+  return result.rows;
+}
+
+export interface OuraSleepDetailRow {
+  day: Date;
+  score: number | null;
+  total_sleep_duration_seconds: number | null;
+  deep_sleep_duration_seconds: number | null;
+  rem_sleep_duration_seconds: number | null;
+  light_sleep_duration_seconds: number | null;
+  efficiency: number | null;
+  average_hrv: number | null;
+  average_heart_rate: number | null;
+  bedtime_start: Date | null;
+  bedtime_end: Date | null;
+  steps: number | null;
+  activity_score: number | null;
+  workout_count: number;
+}
+
+export async function getOuraSleepDetailForRange(
+  pool: pg.Pool,
+  days: number
+): Promise<OuraSleepDetailRow[]> {
+  const result = await pool.query<OuraSleepDetailRow>(
+    `SELECT d.day, d.score, d.total_sleep_duration_seconds, d.deep_sleep_duration_seconds,
+            d.rem_sleep_duration_seconds, d.light_sleep_duration_seconds, d.efficiency,
+            ss.average_hrv, ss.average_heart_rate, ss.bedtime_start, ss.bedtime_end,
+            a.steps, a.score AS activity_score,
+            COALESCE(w.workout_count, 0)::int AS workout_count
+     FROM oura_daily_sleep d
+     LEFT JOIN oura_sleep_sessions ss ON ss.day = d.day AND COALESCE(ss.period, 0) = 0
+     LEFT JOIN oura_daily_activity a ON a.day = d.day
+     LEFT JOIN (SELECT day, COUNT(*) AS workout_count FROM oura_workouts GROUP BY day) w ON w.day = d.day
+     WHERE d.day >= (CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day')
+     ORDER BY d.day ASC`,
+    [days]
+  );
+  return result.rows;
+}
+
+export async function getOuraTemperatureData(
+  pool: pg.Pool,
+  days: number
+): Promise<Array<{ day: Date; temperature_deviation: number }>> {
+  const result = await pool.query<{ day: Date; temperature_deviation: number }>(
+    `SELECT day, temperature_deviation
+     FROM oura_daily_readiness
+     WHERE day >= (CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day')
+       AND temperature_deviation IS NOT NULL
+     ORDER BY day ASC`,
     [days]
   );
   return result.rows;

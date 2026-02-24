@@ -3,6 +3,12 @@ import type { OuraApiListResponse } from "./types.js";
 
 const BASE_URL = "https://api.ouraring.com/v2/usercollection";
 
+function addDays(dateStr: string, days: number): string {
+  const date = new Date(`${dateStr}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().split("T")[0];
+}
+
 export class OuraClient {
   private readonly token: string;
 
@@ -39,7 +45,18 @@ export class OuraClient {
     return this.fetchCollection("daily_sleep", startDate, endDate);
   }
 
-  public getSleepSessions(startDate: string, endDate: string): Promise<Record<string, unknown>[]> {
+  public async getSleepSessions(startDate: string, endDate: string): Promise<Record<string, unknown>[]> {
+    if (startDate === endDate) {
+      const expanded = await this.fetchCollection<Record<string, unknown>>(
+        "sleep",
+        addDays(startDate, -1),
+        addDays(endDate, 1)
+      );
+      return expanded.filter((item) => {
+        const day = item.day as string | undefined;
+        return day != null && day >= startDate && day <= endDate;
+      });
+    }
     return this.fetchCollection("sleep", startDate, endDate);
   }
 
@@ -47,7 +64,18 @@ export class OuraClient {
     return this.fetchCollection("daily_readiness", startDate, endDate);
   }
 
-  public getDailyActivity(startDate: string, endDate: string): Promise<Record<string, unknown>[]> {
+  public async getDailyActivity(startDate: string, endDate: string): Promise<Record<string, unknown>[]> {
+    if (startDate === endDate) {
+      const expanded = await this.fetchCollection<Record<string, unknown>>(
+        "daily_activity",
+        addDays(startDate, -1),
+        addDays(endDate, 1)
+      );
+      return expanded.filter((item) => {
+        const day = item.day as string | undefined;
+        return day != null && day >= startDate && day <= endDate;
+      });
+    }
     return this.fetchCollection("daily_activity", startDate, endDate);
   }
 
@@ -55,7 +83,18 @@ export class OuraClient {
     return this.fetchCollection("daily_stress", startDate, endDate);
   }
 
-  public getWorkouts(startDate: string, endDate: string): Promise<Record<string, unknown>[]> {
+  public async getWorkouts(startDate: string, endDate: string): Promise<Record<string, unknown>[]> {
+    if (startDate === endDate) {
+      const expanded = await this.fetchCollection<Record<string, unknown>>(
+        "workout",
+        addDays(startDate, -1),
+        addDays(endDate, 1)
+      );
+      return expanded.filter((item) => {
+        const day = item.day as string | undefined;
+        return day != null && day >= startDate && day <= endDate;
+      });
+    }
     return this.fetchCollection("workout", startDate, endDate);
   }
 }

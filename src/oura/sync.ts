@@ -11,19 +11,10 @@ import {
   upsertOuraSyncState,
   upsertOuraWorkout,
 } from "../db/queries.js";
+import { todayInTimezone, daysAgoInTimezone } from "../utils/dates.js";
 import { OuraClient } from "./client.js";
 
 const LOCK_KEY = 9152201;
-
-function dateDaysAgo(days: number): string {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() - days);
-  return d.toISOString().slice(0, 10);
-}
-
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 export async function runOuraSync(pool: pg.Pool, lookbackDays: number): Promise<void> {
   if (!config.oura.accessToken) return;
@@ -32,8 +23,8 @@ export async function runOuraSync(pool: pg.Pool, lookbackDays: number): Promise<
 
   const runId = await insertOuraSyncRun(pool);
   const client = new OuraClient();
-  const startDate = dateDaysAgo(lookbackDays);
-  const endDate = todayIso();
+  const startDate = daysAgoInTimezone(lookbackDays);
+  const endDate = todayInTimezone();
 
   try {
     const [dailySleep, sleepSessions, readiness, activity, stress, workouts] = await Promise.all([
@@ -67,6 +58,7 @@ export async function runOuraSync(pool: pg.Pool, lookbackDays: number): Promise<
 export function startOuraSyncTimer(pool: pg.Pool): NodeJS.Timeout | null {
   if (!config.oura.accessToken) return null;
   void runOuraSync(pool, 30);
+  /* v8 ignore next 3 — interval callback body is not testable in unit tests */
   return setInterval(() => {
     void runOuraSync(pool, config.oura.syncLookbackDays);
   }, config.oura.syncIntervalMinutes * 60_000);

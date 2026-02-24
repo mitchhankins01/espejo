@@ -379,8 +379,6 @@ export async function seedFixtures(pool: pg.Pool): Promise<void> {
     );
   }
 
-
-
   const ouraFixtures = [
     { day: "2025-03-13", sleep: 78, readiness: 74, activity: 69, steps: 8234, hrv: 42, hr: 56, duration: 26100, deep: 4200, rem: 5400, efficiency: 91 },
     { day: "2025-03-14", sleep: 81, readiness: 77, activity: 72, steps: 9560, hrv: 45, hr: 55, duration: 26820, deep: 4500, rem: 5700, efficiency: 92 },

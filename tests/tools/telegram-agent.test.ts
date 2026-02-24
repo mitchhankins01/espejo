@@ -209,6 +209,7 @@ const {
       embeddingDimensions: 1536,
     },
     anthropic: { apiKey: "sk-ant-test", model: "claude-sonnet-4-6" },
+    oura: { accessToken: "" },
     server: { appUrl: "", mcpSecret: "" },
     timezone: "Europe/Madrid",
     apiRates: {

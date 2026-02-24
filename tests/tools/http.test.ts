@@ -23,6 +23,7 @@ vi.mock("../../src/config.js", () => ({
   config: {
     server: { port: 3000, mcpSecret: "", oauthClientId: "", oauthClientSecret: "" },
     telegram: { botToken: "", secretToken: "", allowedChatId: "" },
+    oura: { accessToken: "" },
   },
 }));
 
