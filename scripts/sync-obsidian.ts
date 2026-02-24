@@ -1,9 +1,9 @@
 import dotenv from "dotenv";
-if (process.env.NODE_ENV === "production") {
-  dotenv.config({ path: ".env" });
-  dotenv.config({ path: ".env.production.local", override: true });
-} else if (process.env.NODE_ENV !== "test") {
-  dotenv.config({ path: ".env", override: true });
+if (process.env.NODE_ENV !== "production") {
+  dotenv.config({
+    path: process.env.NODE_ENV === "test" ? ".env.test" : ".env",
+    override: true,
+  });
 }
 import crypto from "crypto";
 import fs from "fs";
@@ -61,7 +61,6 @@ interface ParsedEntry {
 interface BatchStats {
   uploaded: number;
   skipped: number;
-  missing: number;
   ignored: number;
   unresolved: number;
 }
@@ -70,7 +69,6 @@ const GENERATED_MEDIA_BLOCK_REGEX =
   /<!--\s*espejo:media:start\s*-->[\s\S]*?<!--\s*espejo:media:end\s*-->/gi;
 const WIKI_EMBED_REGEX = /!\[\[([^\]]+)\]\]/g;
 const MARKDOWN_IMAGE_REGEX = /!\[[^\]]*\]\(([^)]+)\)/g;
-const MARKDOWN_LINK_REGEX = /\[[^\]]+\]\(([^)]+)\)/g;
 const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "heic", "tiff", "webp"]);
 const VIDEO_EXTENSIONS = new Set(["mov", "mp4", "m4v", "avi", "webm"]);
 const AUDIO_EXTENSIONS = new Set(["m4a", "mp3", "wav", "aac", "caf", "ogg", "flac"]);
@@ -256,9 +254,16 @@ function normalizeText(text: string): string {
     stripGeneratedMediaBlock(text)
       // Strip null bytes (PostgreSQL rejects 0x00 in text/json columns)
       .replace(/\0/g, "")
-      // Remove media embed syntax from searchable text
-      .replace(WIKI_EMBED_REGEX, "")
-      .replace(MARKDOWN_IMAGE_REGEX, "")
+      // Strip local media embed syntax but preserve intentional remote references.
+      .replace(WIKI_EMBED_REGEX, (full, rawRef) => {
+        const ref = normalizeReference(String(rawRef ?? ""));
+        return isLikelyMediaReference(ref) ? "" : full;
+      })
+      .replace(MARKDOWN_IMAGE_REGEX, (full, rawRef) => {
+        const ref = normalizeReference(String(rawRef ?? ""));
+        if (isRemoteReference(ref)) return full;
+        return isLikelyMediaReference(ref) ? "" : full;
+      })
       // Normalize invisible unicode
       .replace(/\u2028/g, "\n")
       .replace(/[\u200B\u200D]/g, "")
@@ -329,6 +334,11 @@ function mapExtensionToMediaType(ext: string): MediaType | null {
   return null;
 }
 
+function isLikelyMediaReference(ref: string): boolean {
+  const ext = path.extname(ref.toLowerCase()).slice(1);
+  return mapExtensionToMediaType(ext) !== null;
+}
+
 function computeMd5(filePath: string): string {
   const buffer = fs.readFileSync(filePath);
   return crypto.createHash("md5").update(buffer).digest("hex");
@@ -342,7 +352,7 @@ function mediaIdentity(item: SyncedMediaItem): string {
   if (item.storageKey) return `storage:${item.storageKey}`;
   if (item.md5) return `md5:${item.type}:${item.md5}`;
   if (item.url) return `url:${item.url}`;
-  return `anon:${item.type}:${Math.random().toString(16).slice(2)}`;
+  return `anon:${item.type}:${crypto.randomUUID()}`;
 }
 
 function dedupeMedia(items: SyncedMediaItem[]): SyncedMediaItem[] {
@@ -459,7 +469,6 @@ async function enrichMediaFromBody(
   const rawRefs = [
     ...extractRefsWithRegex(WIKI_EMBED_REGEX, contentForScan),
     ...extractRefsWithRegex(MARKDOWN_IMAGE_REGEX, contentForScan),
-    ...extractRefsWithRegex(MARKDOWN_LINK_REGEX, contentForScan),
   ];
 
   const refs = Array.from(
@@ -854,20 +863,13 @@ async function syncObsidian(): Promise<void> {
     const mediaStats: BatchStats = {
       uploaded: 0,
       skipped: 0,
-      missing: 0,
       ignored: 0,
       unresolved: 0,
     };
 
+    let pendingFrontmatterWrites = 0;
     if (!skipMedia) {
       for (const entry of parsedEntries) {
-        const before = {
-          uploaded: mediaStats.uploaded,
-          skipped: mediaStats.skipped,
-          unresolved: mediaStats.unresolved,
-          ignored: mediaStats.ignored,
-        };
-
         await enrichMediaFromBody(
           entry,
           vaultPath,
@@ -888,15 +890,8 @@ async function syncObsidian(): Promise<void> {
             atomicWrite(entry.sourcePath, next);
           }
         }
-
-        // Keep per-entry stats branch explicit for future logging hooks.
-        if (
-          before.uploaded !== mediaStats.uploaded ||
-          before.skipped !== mediaStats.skipped ||
-          before.unresolved !== mediaStats.unresolved ||
-          before.ignored !== mediaStats.ignored
-        ) {
-          // no-op
+        if (entry.frontmatterUpdated && !writeFrontmatter) {
+          pendingFrontmatterWrites++;
         }
       }
     }
@@ -908,7 +903,18 @@ async function syncObsidian(): Promise<void> {
       console.log(
         `[dry-run] Media: uploaded=${mediaStats.uploaded}, already_in_r2=${mediaStats.skipped}, unresolved_refs=${mediaStats.unresolved}, ignored_refs=${mediaStats.ignored}`
       );
+      if (pendingFrontmatterWrites > 0 && !writeFrontmatter) {
+        console.log(
+          `[dry-run] ${pendingFrontmatterWrites} notes have new media metadata that was not written back (pass --write-frontmatter to persist).`
+        );
+      }
       return;
+    }
+
+    if (pendingFrontmatterWrites > 0 && !writeFrontmatter) {
+      console.log(
+        `Media metadata detected for ${pendingFrontmatterWrites} notes but not written to frontmatter (pass --write-frontmatter to persist).`
+      );
     }
 
     const connTest = process.hrtime.bigint();

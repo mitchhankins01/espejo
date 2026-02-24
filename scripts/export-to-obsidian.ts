@@ -1,9 +1,9 @@
 import dotenv from "dotenv";
-if (process.env.NODE_ENV === "production") {
-  dotenv.config({ path: ".env" });
-  dotenv.config({ path: ".env.production.local", override: true });
-} else if (process.env.NODE_ENV !== "test") {
-  dotenv.config({ path: ".env", override: true });
+if (process.env.NODE_ENV !== "production") {
+  dotenv.config({
+    path: process.env.NODE_ENV === "test" ? ".env.test" : ".env",
+    override: true,
+  });
 }
 import fs from "fs";
 import path from "path";
@@ -127,7 +127,7 @@ function buildNote(entry: ExportEntryRow): string {
   });
   if (weather) frontmatter.weather = weather;
 
-  frontmatter.media = entry.media.map((m) => ({
+  const media = entry.media.map((m) => ({
     type: m.type,
     url: m.url,
     md5: m.md5,
@@ -138,6 +138,9 @@ function buildNote(entry: ExportEntryRow): string {
     camera_info: m.camera_info,
     location: m.location,
   }));
+  if (media.length > 0) {
+    frontmatter.media = media;
+  }
 
   const bodyParts: string[] = [];
   const text = entry.text?.replace(/\r\n/g, "\n").trim() ?? "";
