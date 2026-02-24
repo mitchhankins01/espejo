@@ -3,6 +3,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockQueries = vi.hoisted(() => ({
   insertOuraSyncRun: vi.fn().mockResolvedValue(1),
   completeOuraSyncRun: vi.fn().mockResolvedValue(undefined),
+  getOuraSummaryByDay: vi.fn().mockResolvedValue(null),
+  getOuraTrendMetric: vi.fn().mockResolvedValue([]),
   upsertOuraDailySleep: vi.fn().mockResolvedValue(undefined),
   upsertOuraSleepSession: vi.fn().mockResolvedValue(undefined),
   upsertOuraDailyReadiness: vi.fn().mockResolvedValue(undefined),
@@ -50,7 +52,7 @@ vi.mock("../../src/oura/client.js", () => ({
   },
 }));
 
-import { runOuraSync, notifyOuraSync, startOuraSyncTimer } from "../../src/oura/sync.js";
+import { runOuraSync, notifyOuraSync, startOuraSyncTimer, buildOuraSyncInsight } from "../../src/oura/sync.js";
 
 function makeMockPool(lockResult = true): any {
   return {
@@ -69,6 +71,8 @@ function makeMockPool(lockResult = true): any {
 beforeEach(() => {
   vi.restoreAllMocks();
   for (const fn of Object.values(mockQueries)) fn.mockClear();
+  mockQueries.getOuraSummaryByDay.mockResolvedValue(null);
+  mockQueries.getOuraTrendMetric.mockResolvedValue([]);
   for (const fn of Object.values(mockClientInstance)) fn.mockClear().mockResolvedValue([]);
   mockQueries.insertOuraSyncRun.mockResolvedValue(1);
   mockConfig.config.oura.accessToken = "test-token";
@@ -166,7 +170,7 @@ describe("notifyOuraSync", () => {
 
     expect(mockSendTelegramMessage).toHaveBeenCalledWith(
       "100",
-      expect.stringContaining("368 records"),
+      expect.stringContaining("Oura sync updated:"),
       expect.objectContaining({
         inline_keyboard: expect.arrayContaining([
           expect.arrayContaining([
@@ -177,17 +181,55 @@ describe("notifyOuraSync", () => {
     );
   });
 
-  it("includes duration in seconds", () => {
+  it("includes only non-zero updated datasets", () => {
     notifyOuraSync({
       runId: 1,
       total: 10,
-      counts: { sleep: 1, sessions: 2, readiness: 1, activity: 2, stress: 2, workouts: 2 },
+      counts: { sleep: 1, sessions: 0, readiness: 0, activity: 2, stress: 0, workouts: 0 },
       durationMs: 3500,
     });
 
     expect(mockSendTelegramMessage).toHaveBeenCalledWith(
       "100",
-      expect.stringContaining("4s"),
+      expect.stringContaining("sleep 1, activity 2"),
+      expect.anything()
+    );
+  });
+
+  it("uses fallback text when no datasets changed", () => {
+    notifyOuraSync({
+      runId: 2,
+      total: 0,
+      counts: { sleep: 0, sessions: 0, readiness: 0, activity: 0, stress: 0, workouts: 0 },
+      durationMs: 1000,
+    });
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      expect.stringContaining("no data changes"),
+      expect.anything()
+    );
+  });
+
+  it("includes actionable insight when provided", () => {
+    notifyOuraSync(
+      {
+        runId: 3,
+        total: 1,
+        counts: { sleep: 0, sessions: 0, readiness: 0, activity: 0, stress: 1, workouts: 0 },
+        durationMs: 1000,
+      },
+      "Stress is up 45m vs yesterday. Keep today lighter and add a recovery block."
+    );
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      expect.stringContaining("Oura sync insight: Stress is up 45m vs yesterday."),
+      expect.anything()
+    );
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      expect.stringContaining("Updated: stress 1"),
       expect.anything()
     );
   });
@@ -232,5 +274,342 @@ describe("startOuraSyncTimer", () => {
     expect(timer).not.toBeNull();
     clearInterval(timer!);
     vi.useRealTimers();
+  });
+});
+
+describe("buildOuraSyncInsight", () => {
+  it("returns stress increase guidance from trend delta", async () => {
+    mockQueries.getOuraTrendMetric.mockResolvedValueOnce([
+      { day: new Date("2025-01-14"), value: 3600 },
+      { day: new Date("2025-01-15"), value: 7200 },
+    ]);
+
+    const insight = await buildOuraSyncInsight(makeMockPool(), {
+      runId: 10,
+      total: 1,
+      counts: { sleep: 0, sessions: 0, readiness: 0, activity: 0, stress: 1, workouts: 0 },
+      durationMs: 1000,
+    });
+
+    expect(insight).toContain("Stress is up 60m vs yesterday");
+    expect(mockQueries.getOuraTrendMetric).toHaveBeenCalledWith(
+      expect.anything(),
+      "stress",
+      2
+    );
+  });
+
+  it("returns stress decrease guidance from trend delta", async () => {
+    mockQueries.getOuraTrendMetric.mockResolvedValueOnce([
+      { day: new Date("2025-01-14"), value: 7200 },
+      { day: new Date("2025-01-15"), value: 3600 },
+    ]);
+
+    const insight = await buildOuraSyncInsight(makeMockPool(), {
+      runId: 24,
+      total: 1,
+      counts: { sleep: 0, sessions: 0, readiness: 0, activity: 0, stress: 1, workouts: 0 },
+      durationMs: 1000,
+    });
+
+    expect(insight).toContain("Stress is down 60m");
+  });
+
+  it("ignores non-finite trend values", async () => {
+    mockQueries.getOuraTrendMetric.mockResolvedValueOnce([
+      { day: new Date("2025-01-14"), value: Number.NaN },
+      { day: new Date("2025-01-15"), value: 3600 },
+    ]);
+    mockQueries.getOuraSummaryByDay.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+
+    const insight = await buildOuraSyncInsight(makeMockPool(), {
+      runId: 25,
+      total: 1,
+      counts: { sleep: 0, sessions: 0, readiness: 0, activity: 0, stress: 1, workouts: 0 },
+      durationMs: 1000,
+    });
+
+    expect(insight).toBeNull();
+  });
+
+  it("returns sleep decrease guidance from trend delta", async () => {
+    mockQueries.getOuraTrendMetric.mockResolvedValueOnce([
+      { day: new Date("2025-01-14"), value: 28_800 },
+      { day: new Date("2025-01-15"), value: 25_200 },
+    ]);
+
+    const insight = await buildOuraSyncInsight(makeMockPool(), {
+      runId: 18,
+      total: 1,
+      counts: { sleep: 1, sessions: 0, readiness: 0, activity: 0, stress: 0, workouts: 0 },
+      durationMs: 1000,
+    });
+
+    expect(insight).toContain("Sleep dropped 60m");
+  });
+
+  it("returns sleep increase guidance from trend delta", async () => {
+    mockQueries.getOuraTrendMetric.mockResolvedValueOnce([
+      { day: new Date("2025-01-14"), value: 25_200 },
+      { day: new Date("2025-01-15"), value: 28_800 },
+    ]);
+
+    const insight = await buildOuraSyncInsight(makeMockPool(), {
+      runId: 19,
+      total: 1,
+      counts: { sleep: 1, sessions: 0, readiness: 0, activity: 0, stress: 0, workouts: 0 },
+      durationMs: 1000,
+    });
+
+    expect(insight).toContain("Sleep increased 60m");
+  });
+
+  it("returns HRV decrease guidance when sleep delta is non-actionable", async () => {
+    mockQueries.getOuraTrendMetric
+      .mockResolvedValueOnce([
+        { day: new Date("2025-01-14"), value: 25_200 },
+        { day: new Date("2025-01-15"), value: 25_800 },
+      ])
+      .mockResolvedValueOnce([
+        { day: new Date("2025-01-14"), value: 50 },
+        { day: new Date("2025-01-15"), value: 42 },
+      ]);
+
+    const insight = await buildOuraSyncInsight(makeMockPool(), {
+      runId: 20,
+      total: 1,
+      counts: { sleep: 1, sessions: 0, readiness: 0, activity: 0, stress: 0, workouts: 0 },
+      durationMs: 1000,
+    });
+
+    expect(insight).toContain("HRV is down 8ms");
+  });
+
+  it("returns HRV increase guidance when sleep delta is non-actionable", async () => {
+    mockQueries.getOuraTrendMetric
+      .mockResolvedValueOnce([
+        { day: new Date("2025-01-14"), value: 25_200 },
+        { day: new Date("2025-01-15"), value: 25_800 },
+      ])
+      .mockResolvedValueOnce([
+        { day: new Date("2025-01-14"), value: 42 },
+        { day: new Date("2025-01-15"), value: 52 },
+      ]);
+
+    const insight = await buildOuraSyncInsight(makeMockPool(), {
+      runId: 21,
+      total: 1,
+      counts: { sleep: 1, sessions: 0, readiness: 0, activity: 0, stress: 0, workouts: 0 },
+      durationMs: 1000,
+    });
+
+    expect(insight).toContain("HRV is up 10ms");
+  });
+
+  it("returns readiness decrease guidance from trend delta", async () => {
+    mockQueries.getOuraTrendMetric.mockResolvedValueOnce([
+      { day: new Date("2025-01-14"), value: 80 },
+      { day: new Date("2025-01-15"), value: 72 },
+    ]);
+
+    const insight = await buildOuraSyncInsight(makeMockPool(), {
+      runId: 22,
+      total: 1,
+      counts: { sleep: 0, sessions: 0, readiness: 1, activity: 0, stress: 0, workouts: 0 },
+      durationMs: 1000,
+    });
+
+    expect(insight).toContain("Readiness is down 8 points");
+  });
+
+  it("returns readiness increase guidance from trend delta", async () => {
+    mockQueries.getOuraTrendMetric.mockResolvedValueOnce([
+      { day: new Date("2025-01-14"), value: 72 },
+      { day: new Date("2025-01-15"), value: 80 },
+    ]);
+
+    const insight = await buildOuraSyncInsight(makeMockPool(), {
+      runId: 23,
+      total: 1,
+      counts: { sleep: 0, sessions: 0, readiness: 1, activity: 0, stress: 0, workouts: 0 },
+      durationMs: 1000,
+    });
+
+    expect(insight).toContain("Readiness is up 8 points");
+  });
+
+  it("falls back to readiness guidance when trend delta is unavailable", async () => {
+    mockQueries.getOuraTrendMetric.mockResolvedValueOnce([]);
+    mockQueries.getOuraSummaryByDay.mockResolvedValueOnce({
+      day: new Date("2025-01-15"),
+      sleep_score: 72,
+      readiness_score: 66,
+      activity_score: 75,
+      steps: 7000,
+      stress: "normal",
+      average_hrv: 42,
+      average_heart_rate: 58,
+      sleep_duration_seconds: 25200,
+      deep_sleep_duration_seconds: 6000,
+      rem_sleep_duration_seconds: 5400,
+      efficiency: 90,
+      workout_count: 1,
+    });
+
+    const insight = await buildOuraSyncInsight(makeMockPool(), {
+      runId: 11,
+      total: 1,
+      counts: { sleep: 0, sessions: 0, readiness: 1, activity: 0, stress: 0, workouts: 0 },
+      durationMs: 1000,
+    });
+
+    expect(insight).toContain("Readiness is 66");
+  });
+
+  it("falls back to step guidance when steps are low", async () => {
+    mockQueries.getOuraTrendMetric.mockResolvedValueOnce([]);
+    mockQueries.getOuraSummaryByDay.mockResolvedValueOnce({
+      day: new Date("2025-01-15"),
+      sleep_score: 72,
+      readiness_score: 75,
+      activity_score: 65,
+      steps: 5200,
+      stress: "normal",
+      average_hrv: 40,
+      average_heart_rate: 60,
+      sleep_duration_seconds: 24000,
+      deep_sleep_duration_seconds: 5000,
+      rem_sleep_duration_seconds: 5000,
+      efficiency: 88,
+      workout_count: 0,
+    });
+
+    const insight = await buildOuraSyncInsight(makeMockPool(), {
+      runId: 12,
+      total: 1,
+      counts: { sleep: 0, sessions: 0, readiness: 0, activity: 1, stress: 0, workouts: 0 },
+      durationMs: 1000,
+    });
+
+    expect(insight).toContain("Steps are 5200");
+  });
+
+  it("returns steps decrease guidance from trend delta", async () => {
+    mockQueries.getOuraTrendMetric.mockResolvedValueOnce([
+      { day: new Date("2025-01-14"), value: 9000 },
+      { day: new Date("2025-01-15"), value: 5800 },
+    ]);
+
+    const insight = await buildOuraSyncInsight(makeMockPool(), {
+      runId: 15,
+      total: 1,
+      counts: { sleep: 0, sessions: 0, readiness: 0, activity: 1, stress: 0, workouts: 0 },
+      durationMs: 1000,
+    });
+
+    expect(insight).toContain("Steps are down 3200");
+  });
+
+  it("returns steps increase guidance from trend delta", async () => {
+    mockQueries.getOuraTrendMetric.mockResolvedValueOnce([
+      { day: new Date("2025-01-14"), value: 6000 },
+      { day: new Date("2025-01-15"), value: 9100 },
+    ]);
+
+    const insight = await buildOuraSyncInsight(makeMockPool(), {
+      runId: 16,
+      total: 1,
+      counts: { sleep: 0, sessions: 0, readiness: 0, activity: 1, stress: 0, workouts: 0 },
+      durationMs: 1000,
+    });
+
+    expect(insight).toContain("Steps are up 3100");
+  });
+
+  it("falls through non-actionable delta to sleep fallback guidance", async () => {
+    mockQueries.getOuraTrendMetric.mockResolvedValueOnce([
+      { day: new Date("2025-01-14"), value: 7000 },
+      { day: new Date("2025-01-15"), value: 7300 },
+    ]);
+    mockQueries.getOuraSummaryByDay.mockResolvedValueOnce({
+      day: new Date("2025-01-15"),
+      sleep_score: 68,
+      readiness_score: 74,
+      activity_score: 64,
+      steps: 7300,
+      stress: "normal",
+      average_hrv: 41,
+      average_heart_rate: 61,
+      sleep_duration_seconds: 22000,
+      deep_sleep_duration_seconds: 4700,
+      rem_sleep_duration_seconds: 4800,
+      efficiency: 86,
+      workout_count: 0,
+    });
+
+    const insight = await buildOuraSyncInsight(makeMockPool(), {
+      runId: 17,
+      total: 1,
+      counts: { sleep: 0, sessions: 0, readiness: 0, activity: 1, stress: 0, workouts: 0 },
+      durationMs: 1000,
+    });
+
+    expect(insight).toContain("Sleep is under 6.5h");
+  });
+
+  it("uses strong recovery fallback when sleep/readiness are high", async () => {
+    mockQueries.getOuraSummaryByDay.mockResolvedValueOnce({
+      day: new Date("2025-01-15"),
+      sleep_score: 89,
+      readiness_score: 84,
+      activity_score: 81,
+      steps: 9100,
+      stress: "normal",
+      average_hrv: 55,
+      average_heart_rate: 52,
+      sleep_duration_seconds: 27000,
+      deep_sleep_duration_seconds: 6200,
+      rem_sleep_duration_seconds: 6400,
+      efficiency: 93,
+      workout_count: 1,
+    });
+
+    const insight = await buildOuraSyncInsight(makeMockPool(), {
+      runId: 13,
+      total: 0,
+      counts: { sleep: 0, sessions: 0, readiness: 0, activity: 0, stress: 0, workouts: 0 },
+      durationMs: 1000,
+    });
+
+    expect(insight).toContain("Recovery looks strong");
+  });
+
+  it("returns null when no trend or fallback trigger is present", async () => {
+    mockQueries.getOuraSummaryByDay
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        day: new Date("2025-01-14"),
+        sleep_score: 75,
+        readiness_score: 74,
+        activity_score: 76,
+        steps: 7000,
+        stress: "normal",
+        average_hrv: 46,
+        average_heart_rate: 56,
+        sleep_duration_seconds: 24000,
+        deep_sleep_duration_seconds: 5400,
+        rem_sleep_duration_seconds: 5600,
+        efficiency: 89,
+        workout_count: 0,
+      });
+
+    const insight = await buildOuraSyncInsight(makeMockPool(), {
+      runId: 14,
+      total: 0,
+      counts: { sleep: 0, sessions: 0, readiness: 0, activity: 0, stress: 0, workouts: 0 },
+      durationMs: 1000,
+    });
+
+    expect(insight).toBeNull();
   });
 });

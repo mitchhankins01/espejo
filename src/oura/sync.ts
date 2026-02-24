@@ -2,6 +2,9 @@ import type pg from "pg";
 import { config } from "../config.js";
 import {
   completeOuraSyncRun,
+  getOuraSummaryByDay,
+  getOuraTrendMetric,
+  type OuraTrendMetric,
   insertOuraSyncRun,
   upsertOuraDailyActivity,
   upsertOuraDailyReadiness,
@@ -30,6 +33,126 @@ export interface OuraSyncResult {
     workouts: number;
   };
   durationMs: number;
+}
+
+function formatUpdatedDataSummary(counts: OuraSyncResult["counts"]): string {
+  const datasets: Array<[string, number]> = [
+    ["sleep", counts.sleep],
+    ["sessions", counts.sessions],
+    ["readiness", counts.readiness],
+    ["activity", counts.activity],
+    ["stress", counts.stress],
+    ["workouts", counts.workouts],
+  ];
+
+  const updated = datasets
+    .filter(([, count]) => count > 0)
+    .map(([name, count]) => `${name} ${count}`);
+
+  return updated.length > 0 ? updated.join(", ") : "no data changes";
+}
+
+function getDelta(points: Array<{ day: Date; value: number }>): number | null {
+  if (points.length < 2) return null;
+  const latest = points[points.length - 1]?.value;
+  const previous = points[points.length - 2]?.value;
+  if (!Number.isFinite(latest) || !Number.isFinite(previous)) return null;
+  return latest - previous;
+}
+
+function formatMinutes(seconds: number): string {
+  return `${Math.round(seconds / 60)}m`;
+}
+
+function deriveMetricHints(counts: OuraSyncResult["counts"]): OuraTrendMetric[] {
+  const metrics: OuraTrendMetric[] = [];
+  if (counts.stress > 0) metrics.push("stress");
+  if (counts.sleep > 0 || counts.sessions > 0) metrics.push("sleep_duration", "hrv");
+  if (counts.readiness > 0) metrics.push("readiness");
+  if (counts.activity > 0) metrics.push("steps");
+  return [...new Set(metrics)];
+}
+
+function insightFromDelta(metric: OuraTrendMetric, delta: number): string | null {
+  if (metric === "stress" && Math.abs(delta) >= 1800) {
+    if (delta > 0) {
+      return `Stress is up ${formatMinutes(delta)} vs yesterday. Keep today lighter and add a recovery block.`;
+    }
+    return `Stress is down ${formatMinutes(Math.abs(delta))} vs yesterday. Recovery trend is improving - keep this pace.`;
+  }
+
+  if (metric === "sleep_duration" && Math.abs(delta) >= 1800) {
+    if (delta < 0) {
+      return `Sleep dropped ${formatMinutes(Math.abs(delta))} vs yesterday. Aim for an earlier wind-down tonight.`;
+    }
+    return `Sleep increased ${formatMinutes(delta)} vs yesterday. Keep the routine that helped.`;
+  }
+
+  if (metric === "hrv" && Math.abs(delta) >= 5) {
+    if (delta < 0) {
+      return `HRV is down ${Math.round(Math.abs(delta))}ms vs yesterday. Favor low-intensity training and recovery today.`;
+    }
+    return `HRV is up ${Math.round(delta)}ms vs yesterday. Recovery looks better today.`;
+  }
+
+  if (metric === "readiness" && Math.abs(delta) >= 5) {
+    if (delta < 0) {
+      return `Readiness is down ${Math.round(Math.abs(delta))} points vs yesterday. Keep effort moderate and prioritize rest.`;
+    }
+    return `Readiness is up ${Math.round(delta)} points vs yesterday. Good window for focused work or training.`;
+  }
+
+  if (metric === "steps" && Math.abs(delta) >= 2000) {
+    if (delta < 0) {
+      return `Steps are down ${Math.round(Math.abs(delta))} vs yesterday. A 20-minute walk can close most of the gap.`;
+    }
+    return `Steps are up ${Math.round(delta)} vs yesterday. Activity momentum is strong - keep it consistent.`;
+  }
+
+  return null;
+}
+
+export async function buildOuraSyncInsight(pool: pg.Pool, result: OuraSyncResult): Promise<string | null> {
+  const metrics = deriveMetricHints(result.counts);
+
+  for (const metric of metrics) {
+    try {
+      const points = await getOuraTrendMetric(pool, metric, 2);
+      const delta = getDelta(points);
+      if (delta == null) continue;
+      const insight = insightFromDelta(metric, delta);
+      if (insight) return insight;
+      /* v8 ignore next 3 -- best-effort notification enrichment */
+    } catch {
+      continue;
+    }
+  }
+
+  // Fallback to single-day actionable guidance when trend deltas are not available.
+  const today = await getOuraSummaryByDay(pool, todayInTimezone());
+  const yesterday = today ? null : await getOuraSummaryByDay(pool, daysAgoInTimezone(1));
+  const snapshot = today ?? yesterday;
+  if (!snapshot) return null;
+
+  if (snapshot.sleep_duration_seconds != null && snapshot.sleep_duration_seconds < 23_400) {
+    return "Sleep is under 6.5h. Protect tonight's bedtime to avoid carrying fatigue into tomorrow.";
+  }
+  if (snapshot.readiness_score != null && snapshot.readiness_score < 70) {
+    return `Readiness is ${snapshot.readiness_score}. Keep load light and prioritize recovery today.`;
+  }
+  if (snapshot.steps != null && snapshot.steps < 6000) {
+    return `Steps are ${snapshot.steps}. Add one extra walk to lift activity without overloading recovery.`;
+  }
+  if (
+    snapshot.sleep_duration_seconds != null &&
+    snapshot.sleep_duration_seconds >= 25_200 &&
+    snapshot.readiness_score != null &&
+    snapshot.readiness_score >= 80
+  ) {
+    return `Recovery looks strong (sleep ${formatMinutes(snapshot.sleep_duration_seconds)}, readiness ${snapshot.readiness_score}). Good day for focused effort.`;
+  }
+
+  return null;
 }
 
 export async function runOuraSync(pool: pg.Pool, lookbackDays: number): Promise<OuraSyncResult | null> {
@@ -82,13 +205,13 @@ export async function runOuraSync(pool: pg.Pool, lookbackDays: number): Promise<
   }
 }
 
-export function notifyOuraSync(result: OuraSyncResult): void {
+export function notifyOuraSync(result: OuraSyncResult, insight: string | null = null): void {
   const chatId = config.telegram.allowedChatId;
   const token = config.telegram.botToken;
   if (!token || !chatId) return;
 
-  const secs = Math.round(result.durationMs / 1000);
-  const text = `Oura sync \u2014 ${result.total} records (${secs}s)`;
+  const updated = formatUpdatedDataSummary(result.counts);
+  const text = insight ? `Oura sync insight: ${insight}\nUpdated: ${updated}` : `Oura sync updated: ${updated}`;
   const { sleep, sessions, readiness, activity, stress, workouts } = result.counts;
   const callbackData = `oura_sync:${result.runId}:${sleep},${sessions},${readiness},${activity},${stress},${workouts}`;
   const replyMarkup = {
@@ -104,7 +227,10 @@ export function notifyOuraSync(result: OuraSyncResult): void {
 async function syncAndNotify(pool: pg.Pool, lookbackDays: number): Promise<void> {
   try {
     const result = await runOuraSync(pool, lookbackDays);
-    if (result) notifyOuraSync(result);
+    if (result) {
+      const insight = await buildOuraSyncInsight(pool, result);
+      notifyOuraSync(result, insight);
+    }
     /* v8 ignore next 3 -- background sync: errors already recorded in oura_sync_runs */
   } catch (err) {
     notifyError("Oura sync", err);
