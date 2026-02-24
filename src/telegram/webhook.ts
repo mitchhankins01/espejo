@@ -55,11 +55,12 @@ import {
 // Message handler — wires updates → agent → client
 // ---------------------------------------------------------------------------
 
-const MAX_TEXT_MESSAGE_VOICE_CHARS = 260;
 const TYPING_HEARTBEAT_MS = 4500;
 const SLOW_PROGRESS_NOTICE_MS = 3500;
 const SLOW_PROGRESS_NOTICE_TEXT = "<i>On it. Pulling data now...</i>";
 const ACTIVITY_DETAIL_CALLBACK_PREFIX = "activity_detail:";
+const TELEGRAM_VOICE_CAPTION_MAX_CHARS = 1024;
+const VOICE_TRANSCRIPT_PREFIX = "Transcript: ";
 const chatModes = new Map<string, AgentMode>();
 const MODE_DISABLE_TOKENS = new Set(["off", "stop", "end", "done", "exit"]);
 const chatMessageCounters = new Map<string, number>();
@@ -234,26 +235,19 @@ function isVoiceFriendlyResponse(response: string): boolean {
   return true;
 }
 
-function shouldReplyWithVoice(
-  response: string,
-  incomingWasVoice: boolean,
-  messageId: number
-): boolean {
+function shouldReplyWithVoice(response: string): boolean {
   if (config.telegram.voiceReplyMode === "off") return false;
-  if (!isVoiceFriendlyResponse(response)) return false;
-  if (config.telegram.voiceReplyMode === "always") return true;
+  return isVoiceFriendlyResponse(response);
+}
 
-  if (incomingWasVoice) return true;
-
-  const plainText = normalizeVoiceText(response);
-  const maxTextChars = Math.min(
-    MAX_TEXT_MESSAGE_VOICE_CHARS,
-    config.telegram.voiceReplyMaxChars
-  );
-  if (plainText.length > maxTextChars) return false;
-
-  const replyEvery = Math.max(1, config.telegram.voiceReplyEvery);
-  return replyEvery === 1 || messageId % replyEvery === 0;
+function buildVoiceTranscriptCaption(response: string): string {
+  const transcript = normalizeVoiceText(response);
+  const maxTranscriptChars =
+    TELEGRAM_VOICE_CAPTION_MAX_CHARS - VOICE_TRANSCRIPT_PREFIX.length;
+  if (transcript.length <= maxTranscriptChars) {
+    return `${VOICE_TRANSCRIPT_PREFIX}${transcript}`;
+  }
+  return `${VOICE_TRANSCRIPT_PREFIX}${transcript.slice(0, maxTranscriptChars - 3)}...`;
 }
 
 function escapeHtml(text: string): string {
@@ -816,17 +810,18 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
           : undefined;
         const replyMarkup = mergeInlineMarkups(activityDetailMarkup, soulMarkup);
 
-        const useVoice = shouldReplyWithVoice(
-          response,
-          Boolean(msg.voice),
-          msg.messageId
-        );
+        const useVoice = shouldReplyWithVoice(response);
         if (useVoice) {
           try {
             await sendChatAction(chatId, "record_voice");
             const voiceAudio = await synthesizeVoiceReply(response);
+            const transcriptCaption = buildVoiceTranscriptCaption(response);
             await sendChatAction(chatId, "upload_voice");
-            const voiceSent = await sendTelegramVoice(chatId, voiceAudio);
+            const voiceSent = await sendTelegramVoice(
+              chatId,
+              voiceAudio,
+              transcriptCaption
+            );
             if (voiceSent) {
               if (cleanActivity) {
                 const activityText = `<i>${cleanActivity}</i>`;

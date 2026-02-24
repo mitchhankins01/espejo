@@ -591,7 +591,11 @@ describe("message handler", () => {
     });
 
     expect(mockSynthesizeVoiceReply).toHaveBeenCalledWith("agent response");
-    expect(mockSendTelegramVoice).toHaveBeenCalledWith("100", expect.any(Buffer));
+    expect(mockSendTelegramVoice).toHaveBeenCalledWith(
+      "100",
+      expect.any(Buffer),
+      "Transcript: agent response"
+    );
     expect(mockSendTelegramMessage).not.toHaveBeenCalledWith("100", "agent response");
   });
 
@@ -675,7 +679,11 @@ describe("message handler", () => {
     await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
 
     expect(mockSynthesizeVoiceReply).toHaveBeenCalledWith("agent response");
-    expect(mockSendTelegramVoice).toHaveBeenCalled();
+    expect(mockSendTelegramVoice).toHaveBeenCalledWith(
+      "100",
+      expect.any(Buffer),
+      "Transcript: agent response"
+    );
   });
 
   it("uses voice for friendly responses in always mode", async () => {
@@ -686,7 +694,11 @@ describe("message handler", () => {
     await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
 
     expect(mockSynthesizeVoiceReply).toHaveBeenCalledWith("Short natural response");
-    expect(mockSendTelegramVoice).toHaveBeenCalled();
+    expect(mockSendTelegramVoice).toHaveBeenCalledWith(
+      "100",
+      expect.any(Buffer),
+      "Transcript: Short natural response"
+    );
   });
 
   it("keeps text when normalized response is empty", async () => {
@@ -784,7 +796,7 @@ describe("message handler", () => {
     expect(mockSynthesizeVoiceReply).not.toHaveBeenCalled();
   });
 
-  it("keeps text when adaptive text reply exceeds cadence max length", async () => {
+  it("uses voice when adaptive text reply is long but still voice-friendly", async () => {
     mockConfig.config.telegram.voiceReplyMode = "adaptive";
     mockConfig.config.telegram.voiceReplyEvery = 1;
     mockConfig.config.telegram.voiceReplyMaxChars = 500;
@@ -796,9 +808,13 @@ describe("message handler", () => {
     const handler = getHandler();
     await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
 
-    expect(mockSynthesizeVoiceReply).not.toHaveBeenCalled();
-    expect(mockSendTelegramVoice).not.toHaveBeenCalled();
-    expect(mockSendTelegramMessage).toHaveBeenCalledWith("100", "x".repeat(300));
+    expect(mockSynthesizeVoiceReply).toHaveBeenCalledWith("x".repeat(300));
+    expect(mockSendTelegramVoice).toHaveBeenCalledWith(
+      "100",
+      expect.any(Buffer),
+      `Transcript: ${"x".repeat(300)}`
+    );
+    expect(mockSendTelegramMessage).not.toHaveBeenCalledWith("100", "x".repeat(300));
   });
 
   it("keeps text output when response is not voice-friendly", async () => {
@@ -837,15 +853,35 @@ describe("message handler", () => {
     );
   });
 
-  it("uses text when adaptive cadence has not hit the configured interval", async () => {
+  it("uses voice in adaptive mode regardless of cadence interval setting", async () => {
     mockConfig.config.telegram.voiceReplyMode = "adaptive";
     mockConfig.config.telegram.voiceReplyEvery = 3;
 
     const handler = getHandler();
     await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
 
-    expect(mockSendTelegramVoice).not.toHaveBeenCalled();
-    expect(mockSendTelegramMessage).toHaveBeenCalledWith("100", "agent response");
+    expect(mockSendTelegramVoice).toHaveBeenCalledWith(
+      "100",
+      expect.any(Buffer),
+      "Transcript: agent response"
+    );
+    expect(mockSendTelegramMessage).not.toHaveBeenCalledWith("100", "agent response");
+  });
+
+  it("truncates transcript caption to Telegram voice caption max length", async () => {
+    mockConfig.config.telegram.voiceReplyMode = "adaptive";
+    mockConfig.config.telegram.voiceReplyMaxChars = 2000;
+    const longResponse = "a".repeat(1100);
+    mockRunAgent.mockResolvedValueOnce({ response: longResponse, activity: "" });
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
+
+    const caption = mockSendTelegramVoice.mock.calls[0]?.[2];
+    expect(typeof caption).toBe("string");
+    expect(caption).toHaveLength(1024);
+    expect(caption).toContain("Transcript: ");
+    expect(caption?.endsWith("...")).toBe(true);
   });
 
   it("extracts text from photo messages before sending to agent", async () => {
