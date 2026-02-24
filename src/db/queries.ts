@@ -1,4 +1,5 @@
 import type pg from "pg";
+import { config } from "../config.js";
 
 // ============================================================================
 // Result types
@@ -969,11 +970,14 @@ export async function getSpanishQuizStats(
 
   const reviewResult = await pool.query(
     `SELECT
-      COALESCE(SUM((reviewed_at::date = CURRENT_DATE)::int), 0)::int AS reviews_today,
+      COALESCE(
+        SUM((((reviewed_at AT TIME ZONE $2)::date = (NOW() AT TIME ZONE $2)::date)::int)),
+        0
+      )::int AS reviews_today,
       COALESCE(AVG(grade)::float, 0)::float AS average_grade
      FROM spanish_reviews
      WHERE chat_id = $1`,
-    [chatId]
+    [chatId, config.timezone]
   );
 
   const summary = summaryResult.rows[0];
@@ -1034,10 +1038,10 @@ export async function upsertSpanishProgressSnapshot(
     `SELECT
       COUNT(*)::int AS words_learned,
       COALESCE(SUM((state IN ('learning', 'review', 'relearning'))::int), 0)::int AS words_in_progress,
-      COALESCE(SUM((first_seen::date = $2::date)::int), 0)::int AS new_words_today
+      COALESCE(SUM((((first_seen AT TIME ZONE $3)::date = $2::date)::int)), 0)::int AS new_words_today
      FROM spanish_vocabulary
      WHERE chat_id = $1`,
-    [chatId, date]
+    [chatId, date, config.timezone]
   );
 
   const reviewResult = await pool.query(
@@ -1054,22 +1058,22 @@ export async function upsertSpanishProgressSnapshot(
           NULL
         ),
         '{}'::text[]
-      ) AS tenses_practiced
+     ) AS tenses_practiced
      FROM spanish_reviews
      WHERE chat_id = $1
-       AND reviewed_at::date = $2::date`,
-    [chatId, date]
+       AND (reviewed_at AT TIME ZONE $3)::date = $2::date`,
+    [chatId, date, config.timezone]
   );
 
   const streakResult = await pool.query(
     `WITH activity_days AS (
-      SELECT DISTINCT reviewed_at::date AS day
+      SELECT DISTINCT (reviewed_at AT TIME ZONE $3)::date AS day
       FROM spanish_reviews
-      WHERE chat_id = $1 AND reviewed_at::date <= $2::date
+      WHERE chat_id = $1 AND (reviewed_at AT TIME ZONE $3)::date <= $2::date
       UNION
-      SELECT DISTINCT first_seen::date AS day
+      SELECT DISTINCT (first_seen AT TIME ZONE $3)::date AS day
       FROM spanish_vocabulary
-      WHERE chat_id = $1 AND first_seen::date <= $2::date
+      WHERE chat_id = $1 AND (first_seen AT TIME ZONE $3)::date <= $2::date
     ),
     grouped AS (
       SELECT
@@ -1092,7 +1096,7 @@ export async function upsertSpanishProgressSnapshot(
       ORDER BY streak_length DESC
       LIMIT 1
     ), 0) AS streak_days`,
-    [chatId, date]
+    [chatId, date, config.timezone]
   );
 
   const vocabulary = vocabularyResult.rows[0];
