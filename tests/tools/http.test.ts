@@ -733,7 +733,7 @@ describe("startHttpServer", () => {
     );
     const handler = activityCall![1];
 
-    const mockReq = { headers: {}, params: { id: "42" } };
+    const mockReq = { headers: {}, params: { id: "42" }, query: {} };
     const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
 
     await handler(mockReq, mockRes);
@@ -755,12 +755,58 @@ describe("startHttpServer", () => {
     );
     const handler = activityCall![1];
 
-    const mockReq = { headers: { authorization: "Bearer wrong-token" }, params: { id: "42" } };
+    const mockReq = { headers: { authorization: "Bearer wrong-token" }, params: { id: "42" }, query: {} };
     const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
 
     await handler(mockReq, mockRes);
 
     expect(mockRes.status).toHaveBeenCalledWith(401);
+    (config as any).server.mcpSecret = "";
+  });
+
+  it("/api/activity/:id accepts valid query token when secret is set", async () => {
+    const mockLog = { id: 42, chat_id: "100", memories: [], tool_calls: [], cost_usd: null, created_at: new Date() };
+    mockGetActivityLog.mockResolvedValue(mockLog);
+    const { config } = await import("../../src/config.js");
+    (config as any).server.mcpSecret = "test-secret";
+
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const activityCall = mockApp.get.mock.calls.find(
+      (c: any[]) => c[0] === "/api/activity/:id"
+    );
+    const handler = activityCall![1];
+
+    const mockReq = { headers: {}, params: { id: "42" }, query: { token: "test-secret" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+
+    expect(mockGetActivityLog).toHaveBeenCalledWith(mockPool, 42);
+    expect(mockRes.json).toHaveBeenCalledWith(mockLog);
+
+    (config as any).server.mcpSecret = "";
+  });
+
+  it("/api/activity/:id rejects wrong query token", async () => {
+    const { config } = await import("../../src/config.js");
+    (config as any).server.mcpSecret = "test-secret";
+
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const activityCall = mockApp.get.mock.calls.find(
+      (c: any[]) => c[0] === "/api/activity/:id"
+    );
+    const handler = activityCall![1];
+
+    const mockReq = { headers: {}, params: { id: "42" }, query: { token: "wrong-token" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+
+    expect(mockRes.status).toHaveBeenCalledWith(401);
+    expect(mockGetActivityLog).not.toHaveBeenCalled();
+
     (config as any).server.mcpSecret = "";
   });
 

@@ -2050,7 +2050,10 @@ export async function runAgent(params: {
   }
 
   if (activityLogId && config.server.appUrl) {
-    activityParts.push(`<a href="${config.server.appUrl}/api/activity/${activityLogId}">details</a>`);
+    const detailUrl = config.server.mcpSecret
+      ? `${config.server.appUrl}/api/activity/${activityLogId}?token=${config.server.mcpSecret}`
+      : `${config.server.appUrl}/api/activity/${activityLogId}`;
+    activityParts.push(`<a href="${detailUrl}">details</a>`);
   }
 
   const activity = activityParts.join(" | ");
