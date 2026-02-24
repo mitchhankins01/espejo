@@ -29,13 +29,16 @@ A personal AI journal system built on PostgreSQL + pgvector. Started as an MCP s
 │   │                        Core Services                                │   │
 │   │                             │                                       │   │
 │   │   ┌─────────────────────────┼──────────────────────────────────┐    │   │
-│   │   │              11 MCP Tools (spec-driven)                    │    │   │
+│   │   │              17 MCP Tools (spec-driven)                    │    │   │
 │   │   │                                                            │    │   │
 │   │   │  Journal:  search · get_entry · get_entries_by_date        │    │   │
 │   │   │           on_this_day · find_similar · list_tags            │    │   │
 │   │   │           entry_stats                                      │    │   │
 │   │   │                                                            │    │   │
-│   │   │  Health:   log_weight                                      │    │   │
+│   │   │  Health:   log_weight · get_oura_summary                   │    │   │
+│   │   │           get_oura_weekly · get_oura_trends                │    │   │
+│   │   │           get_oura_analysis · oura_compare_periods         │    │   │
+│   │   │           oura_correlate                                   │    │   │
 │   │   │                                                            │    │   │
 │   │   │  Spanish:  conjugate_verb · log_vocabulary · spanish_quiz  │    │   │
 │   │   └────────────────────────────────────────────────────────────┘    │   │
@@ -50,6 +53,14 @@ A personal AI journal system built on PostgreSQL + pgvector. Started as an MCP s
 │   │   │  Evening review     ·  Morning journal                    │    │   │
 │   │   └────────────────────────────────────────────────────────────┘    │   │
 │   │                                                                     │   │
+│   │   ┌────────────────────────────────────────────────────────────┐    │   │
+│   │   │              Oura Ring Sync (hourly)                       │    │   │
+│   │   │                                                            │    │   │
+│   │   │  PG advisory lock  ·  6 endpoints in parallel              │    │   │
+│   │   │  30-day backfill   ·  3-day rolling lookback               │    │   │
+│   │   │  Idempotent upserts (ON CONFLICT DO UPDATE)                │    │   │
+│   │   └────────────────────────────────────────────────────────────┘    │   │
+│   │                                                                     │   │
 │   └─────────────────────────────────────────────────────────────────────┘   │
 │                                 │                                           │
 │                    ┌────────────┼────────────┐                              │
@@ -61,10 +72,10 @@ A personal AI journal system built on PostgreSQL + pgvector. Started as an MCP s
 │             └───────────┘ │ / TTS   │ └──────────┘                         │
 │                           └─────────┘                                      │
 │                                                                             │
-│             ┌───────────┐                                                   │
-│             │Cloudflare │                                                   │
-│             │ R2 (media)│                                                   │
-│             └───────────┘                                                   │
+│             ┌───────────┐ ┌───────────┐                                    │
+│             │Cloudflare │ │ Oura API  │                                    │
+│             │ R2 (media)│ │ (v2 REST) │                                    │
+│             └───────────┘ └───────────┘                                    │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -93,7 +104,12 @@ Phase 5 ─── Spanish Learning ────────── Verb conjugati
   │                                      LLM-as-judge assessment, analytics dashboard
   │
 Phase 6 ─── Observability ───────────── Activity logs, cost tracking
-                                         REST API endpoints, Spanish digest
+  │                                      REST API endpoints, Spanish digest
+  │
+Phase 7 ─── Oura Ring ──────────────── Hourly sync from Oura API → PostgreSQL
+                                         6 tools: summary, weekly, trends,
+                                         analysis, compare periods, correlate
+                                         1100-line analysis module (pure functions)
 ```
 
 Design documents for each phase live in `specs/`:
@@ -106,6 +122,8 @@ Design documents for each phase live in `specs/`:
 | 3 | `specs/self-healing-organism.md` | Deployed |
 | 4 | `specs/episodic-memory.md` | Deployed |
 | 5 | `specs/spanish-learning.md` | Deployed |
+| 6 | (observability — no dedicated spec) | Deployed |
+| 7 | `specs/oura-integration-plan.md` | Deployed |
 | — | `specs/ltm-research.md` | Research |
 | — | `specs/web-app.spec.md` | Early scaffold |
 | — | `specs/aws-sst-migration-plan.md` | Planned |
@@ -164,11 +182,17 @@ Every entry fits in a single embedding (max ~8K tokens). No chunking needed.
 | `list_tags` | All tags with usage counts |
 | `entry_stats` | Writing frequency, word counts, trends |
 
-### Health (1)
+### Health & Biometrics (7)
 
 | Tool | Description |
 |------|-------------|
 | `log_weight` | Daily weight logging (upserts by date) |
+| `get_oura_summary` | Single-day health snapshot: sleep, readiness, activity, HRV, stress, workouts |
+| `get_oura_weekly` | 7-day overview with daily scores, averages, best/worst days |
+| `get_oura_trends` | N-day trend analysis with rolling averages and day-of-week patterns |
+| `get_oura_analysis` | Multi-type analysis: sleep quality, anomalies, HRV trends, temperature, best sleep conditions |
+| `oura_compare_periods` | Side-by-side metrics comparison between two date ranges |
+| `oura_correlate` | Pearson correlation between any two health metrics |
 
 ### Spanish Learning (3)
 
@@ -182,11 +206,12 @@ Tool contracts are defined in `specs/tools.spec.ts` — the single source of tru
 
 ## Telegram Chatbot
 
-An optional conversational interface that wraps all 11 MCP tools in a Telegram bot with long-term memory and an evolving personality. Enabled when `TELEGRAM_BOT_TOKEN` is set.
+An optional conversational interface that wraps all 17 MCP tools in a Telegram bot with long-term memory and an evolving personality. Enabled when `TELEGRAM_BOT_TOKEN` is set.
 
 ### What It Does
 
 - Queries the journal via natural language using all MCP tools
+- Oura Ring biometrics auto-injected into context for evening reviews and morning flows
 - Accepts text, voice, photo, and document messages
 - Voice transcription via Whisper, optional TTS replies
 - Spanish language tutoring with adaptive difficulty based on real review performance
@@ -299,7 +324,7 @@ This runs `tsc --noEmit`, ESLint, and Vitest with coverage enforcement in order,
 
 Two tiers:
 
-- **Unit tests** (`tests/tools/`, `tests/formatters/`) — no database, fast, test param validation and spec conformance
+- **Unit tests** (`tests/tools/`, `tests/formatters/`, `tests/oura/`, `tests/utils/`) — no database, fast, test param validation and spec conformance
 - **Integration tests** (`tests/integration/`) — Docker Compose auto-starts a test PostgreSQL on port 5433 (tmpfs-backed, RAM only)
 
 Fixtures include pre-computed 1536-dimension embedding vectors. No OpenAI calls during tests. 100% line/function/branch/statement coverage enforced.
@@ -324,6 +349,11 @@ Deployed to Railway. Multi-stage Dockerfile: TypeScript build → slim Node.js r
 **Optional (Telegram):**
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_SECRET_TOKEN`, `TELEGRAM_ALLOWED_CHAT_ID`
 - `ANTHROPIC_API_KEY` (when `TELEGRAM_LLM_PROVIDER=anthropic`)
+
+**Optional (Oura Ring):**
+- `OURA_ACCESS_TOKEN` — personal access token from cloud.ouraring.com
+- `OURA_SYNC_INTERVAL_MINUTES` — sync frequency (default: 60)
+- `OURA_SYNC_LOOKBACK_DAYS` — rolling lookback window (default: 3)
 
 **Optional (media):**
 - `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`

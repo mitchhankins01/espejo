@@ -176,12 +176,18 @@ LEFT JOIN daily_metrics m ON m.date = d.day;
 
 ## Implementation Status (Completed)
 
-Implemented in repository:
-- Oura schema + migration `015-oura-tables` including `daily_health_snapshot` view.
-- Oura config group and `sync:oura` script.
-- Oura API client, sync runner, timer bootstrap, and advisory-lock guarded sync runs.
+All 5 phases fully implemented and passing `pnpm check` with 100% coverage (939 tests).
+
+- Oura schema + migration `015-oura-tables` including `daily_health_snapshot` view
+- Oura config group and `sync:oura` script
+- Oura API client with single-date workarounds (±1 day expansion + client-side filter)
+- Sync runner with advisory lock, timer bootstrap, timezone-aware dates via shared `todayInTimezone()`
 - 6 Oura tools wired in MCP server and tool specs:
   - `get_oura_summary`, `get_oura_weekly`, `get_oura_trends`
-  - `get_oura_analysis`, `oura_compare_periods`, `oura_correlate`
-- Telegram agent context injection via `buildOuraContextPrompt()`.
-- Oura fixtures seeded for deterministic testing.
+  - `get_oura_analysis` (sleep_quality, anomalies, hrv_trend, temperature, best_sleep)
+  - `oura_compare_periods` (parallel queries, dynamic date range)
+  - `oura_correlate` (Pearson r with p-value)
+- 1126-line analysis module ported from oura-mcp (pure statistical functions)
+- Telegram agent context injection via `buildOuraContextPrompt()` with sleep detail
+- Oura fixtures seeded for deterministic testing
+- Full test suite: `tests/oura/` (analysis, client, context, formatters, sync, types) + `tests/tools/oura-*.test.ts`
