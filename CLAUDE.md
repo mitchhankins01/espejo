@@ -84,6 +84,12 @@ src/
   spanish/
     analytics.ts    — Interface-agnostic Spanish learning analytics. Pure functions: digest building, trend analysis, formatting.
     assessment.ts   — LLM-as-judge Spanish conversation quality assessment. DI-based client interface.
+  oura/
+    client.ts       — Oura API v2 client.
+    sync.ts         — Oura sync engine: API fetch + DB upserts + advisory lock + timer.
+    context.ts      — Oura context prompt builder for Telegram agent injection.
+    formatters.ts   — Oura tool response formatting helpers.
+    analysis.ts     — Trend/correlation helpers for advanced Oura tools.
   transports/
     http.ts         — Express HTTP server. MCP StreamableHTTP transport, Telegram webhook, REST API endpoints (activity logs, Spanish dashboard/assessments).
     oauth.ts        — OAuth token validation for HTTP API authentication.
@@ -98,6 +104,7 @@ scripts/
   migrate.ts        — Runs SQL files, tracks applied migrations in _migrations table.
   import-verbs.ts   — Downloads Fred Jehle Spanish verb CSV from GitHub, bulk inserts ~11k conjugation rows.
   sync-weight.ts    — Sync weight data to production.
+  sync-oura.ts      — Backfill/sync Oura biometrics into Postgres (pnpm sync:oura).
   deploy-smoke.ts   — Post-deploy smoke test.
   telegram-setup.ts — Set/check/delete Telegram webhook.
 specs/
@@ -490,7 +497,7 @@ A Telegram chatbot with pattern-based long-term memory and an evolving personali
 
 **What it does:**
 - Conversational interface powered by Anthropic or OpenAI (configurable provider)
-- Queries the journal using all 11 MCP tools via tool_use loop (journal search/retrieval + Spanish learning + weight logging)
+- Queries the journal and biometrics using 17 MCP tools via tool_use loop (journal retrieval + Spanish learning + weight logging + Oura analytics)
 - Spanish language tutor: conducts conversations primarily in Spanish, corrects conjugation mistakes, tracks vocabulary with FSRS spaced repetition, and adapts difficulty based on real review performance
 - Logs weight via natural language ("I weighed in at 76.5 today")
 - Accepts text, voice, photo, and document messages (with OCR/text extraction for media)

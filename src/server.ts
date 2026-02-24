@@ -12,6 +12,12 @@ import { handleLogWeight } from "./tools/log-weight.js";
 import { handleConjugateVerb } from "./tools/conjugate-verb.js";
 import { handleLogVocabulary } from "./tools/log-vocabulary.js";
 import { handleSpanishQuiz } from "./tools/spanish-quiz.js";
+import { handleGetOuraSummary } from "./tools/get-oura-summary.js";
+import { handleGetOuraWeekly } from "./tools/get-oura-weekly.js";
+import { handleGetOuraTrends } from "./tools/get-oura-trends.js";
+import { handleGetOuraAnalysis } from "./tools/get-oura-analysis.js";
+import { handleOuraComparePeriods } from "./tools/oura-compare-periods.js";
+import { handleOuraCorrelate } from "./tools/oura-correlate.js";
 
 export type ToolHandler = (pool: pg.Pool, input: unknown) => Promise<string>;
 
@@ -27,6 +33,12 @@ export const toolHandlers: Record<string, ToolHandler> = {
   conjugate_verb: handleConjugateVerb,
   log_vocabulary: handleLogVocabulary,
   spanish_quiz: handleSpanishQuiz,
+  get_oura_summary: handleGetOuraSummary,
+  get_oura_weekly: handleGetOuraWeekly,
+  get_oura_trends: handleGetOuraTrends,
+  get_oura_analysis: handleGetOuraAnalysis,
+  oura_compare_periods: handleOuraComparePeriods,
+  oura_correlate: handleOuraCorrelate,
 };
 
 export function createServer(pool: pg.Pool, version: string): McpServer {

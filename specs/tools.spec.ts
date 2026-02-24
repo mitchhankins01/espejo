@@ -37,6 +37,11 @@ const limitParam = (defaultVal: number, max: number) =>
     .default(defaultVal)
     .describe(`Max results to return (default: ${defaultVal}, max: ${max})`);
 
+
+const ouraMetricParam = z.enum(["sleep_score", "hrv", "readiness", "activity", "steps", "sleep_duration"]).describe("Oura metric: sleep_score, hrv, readiness, activity, steps, sleep_duration");
+
+const ouraAnalysisTypeParam = z.enum(["sleep_quality", "anomalies", "hrv_trend", "temperature", "best_sleep"]);
+
 const spanishActionParam = z
   .string()
   .regex(/^(get_due|record_review|stats)$/, "Must be get_due, record_review, or stats")
@@ -464,6 +469,63 @@ export const toolSpecs = {
       },
     ],
   },
+
+  get_oura_summary: {
+    name: "get_oura_summary" as const,
+    description: "Get a single-day Oura biometric snapshot including sleep, readiness, activity, HRV, steps, stress, and workouts.",
+    params: z.object({
+      date: dateString.optional().describe("Optional date in YYYY-MM-DD; defaults to today"),
+    }),
+    examples: [{ input: {}, behavior: "Returns today's Oura summary" }],
+  },
+  get_oura_weekly: {
+    name: "get_oura_weekly" as const,
+    description: "Get a 7-day Oura overview with daily scores and aggregate stats.",
+    params: z.object({
+      end_date: dateString.optional().describe("Week end date (inclusive); defaults to today"),
+    }),
+    examples: [{ input: {}, behavior: "Returns the last 7 days of Oura data" }],
+  },
+  get_oura_trends: {
+    name: "get_oura_trends" as const,
+    description: "Get trend direction and rolling averages for a selected Oura metric.",
+    params: z.object({
+      metric: ouraMetricParam.default("sleep_score"),
+      days: z.number().int().min(7).max(120).default(30),
+    }),
+    examples: [{ input: { metric: "hrv", days: 30 }, behavior: "Returns HRV trend data" }],
+  },
+  get_oura_analysis: {
+    name: "get_oura_analysis" as const,
+    description: "Run an Oura analysis mode: sleep_quality, anomalies, hrv_trend, temperature, or best_sleep.",
+    params: z.object({
+      type: ouraAnalysisTypeParam,
+      days: z.number().int().min(7).max(180).default(60),
+    }),
+    examples: [{ input: { type: "sleep_quality" }, behavior: "Returns sleep-focused analysis." }],
+  },
+  oura_compare_periods: {
+    name: "oura_compare_periods" as const,
+    description: "Compare biometrics between two date ranges and return percentage deltas.",
+    params: z.object({
+      from_a: dateString,
+      to_a: dateString,
+      from_b: dateString,
+      to_b: dateString,
+    }),
+    examples: [{ input: { from_a: "2025-01-01", to_a: "2025-01-07", from_b: "2025-01-08", to_b: "2025-01-14" }, behavior: "Compares week-over-week metrics." }],
+  },
+  oura_correlate: {
+    name: "oura_correlate" as const,
+    description: "Compute correlation between two Oura metrics over N days.",
+    params: z.object({
+      metric_a: ouraMetricParam,
+      metric_b: ouraMetricParam,
+      days: z.number().int().min(7).max(180).default(60),
+    }),
+    examples: [{ input: { metric_a: "hrv", metric_b: "sleep_duration", days: 60 }, behavior: "Returns Pearson correlation." }],
+  },
+
 } as const;
 
 // ============================================================================

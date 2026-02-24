@@ -173,3 +173,15 @@ LEFT JOIN daily_metrics m ON m.date = d.day;
 6. Telegram: `/evening` → system prompt includes biometric context
 7. Telegram: "how's my sleep been this week?" → bot calls `get_oura_weekly`
 8. `pnpm check` — typecheck + lint + tests with 100% coverage
+
+## Implementation Status (Completed)
+
+Implemented in repository:
+- Oura schema + migration `015-oura-tables` including `daily_health_snapshot` view.
+- Oura config group and `sync:oura` script.
+- Oura API client, sync runner, timer bootstrap, and advisory-lock guarded sync runs.
+- 6 Oura tools wired in MCP server and tool specs:
+  - `get_oura_summary`, `get_oura_weekly`, `get_oura_trends`
+  - `get_oura_analysis`, `oura_compare_periods`, `oura_correlate`
+- Telegram agent context injection via `buildOuraContextPrompt()`.
+- Oura fixtures seeded for deterministic testing.

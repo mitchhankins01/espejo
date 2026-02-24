@@ -20,6 +20,7 @@ import {
   getLatestSpanishAssessment,
 } from "../db/queries.js";
 import { registerOAuthRoutes, isValidOAuthToken } from "./oauth.js";
+import { startOuraSyncTimer } from "../oura/sync.js";
 
 type ServerFactory = () => McpServer;
 
@@ -28,6 +29,7 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
   const app = express();
 
   app.set("trust proxy", 1);
+  startOuraSyncTimer(pool);
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
 

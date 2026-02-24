@@ -81,6 +81,12 @@ const telegramPulseIntervalHours = parseIntegerEnv(
   24,
   1
 );
+const ouraSyncIntervalMinutes = parseIntegerEnv(
+  "OURA_SYNC_INTERVAL_MINUTES",
+  60,
+  1
+);
+const ouraSyncLookbackDays = parseIntegerEnv("OURA_SYNC_LOOKBACK_DAYS", 3, 1);
 
 if (telegramVoiceReplyMinChars > telegramVoiceReplyMaxChars) {
   throw new Error(
@@ -176,6 +182,11 @@ export const config = {
   anthropic: {
     apiKey: process.env.ANTHROPIC_API_KEY || "",
     model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6",
+  },
+  oura: {
+    accessToken: process.env.OURA_ACCESS_TOKEN || "",
+    syncIntervalMinutes: ouraSyncIntervalMinutes,
+    syncLookbackDays: ouraSyncLookbackDays,
   },
   timezone: process.env.TIMEZONE || "Europe/Madrid",
   apiRates: {
