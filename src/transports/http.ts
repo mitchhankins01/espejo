@@ -150,7 +150,10 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
   app.get("/api/activity/:id", async (req, res) => {
     if (secret) {
       const auth = req.headers.authorization;
-      if (!auth || !auth.startsWith("Bearer ") || auth.slice(7) !== secret) {
+      const queryToken = req.query.token;
+      if (queryToken === secret) {
+        // Allow token-based auth via query param (for Telegram detail links)
+      } else if (!auth || !auth.startsWith("Bearer ") || auth.slice(7) !== secret) {
         res.status(401).json({ error: "Unauthorized" });
         return;
       }

@@ -209,7 +209,7 @@ const {
       embeddingDimensions: 1536,
     },
     anthropic: { apiKey: "sk-ant-test", model: "claude-sonnet-4-6" },
-    server: { appUrl: "" },
+    server: { appUrl: "", mcpSecret: "" },
     timezone: "Europe/Madrid",
     apiRates: {
       "claude-sonnet-4-6": { input: 3.0, output: 15.0 },
@@ -1056,6 +1056,33 @@ describe("runAgent", () => {
     expect(result.activity).toContain("https://example.com/api/activity/1");
     expect(result.activity).toContain("details");
     mockConfig.server.appUrl = "";
+  });
+
+  it("includes token in activity link when MCP_SECRET is set", async () => {
+    mockConfig.server.appUrl = "https://example.com";
+    mockConfig.server.mcpSecret = "my-secret";
+    mockAnthropicCreate
+      .mockResolvedValueOnce({
+        content: [
+          { type: "tool_use", id: "tu-token", name: "list_tags", input: {} },
+        ],
+        usage: { input_tokens: 50, output_tokens: 10 },
+      })
+      .mockResolvedValueOnce({
+        content: [{ type: "text", text: "Tags here." }],
+        usage: { input_tokens: 60, output_tokens: 10 },
+      });
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "show tags",
+      externalMessageId: "update:link-token",
+      messageDate: 1000,
+    });
+
+    expect(result.activity).toContain("https://example.com/api/activity/1?token=my-secret");
+    mockConfig.server.appUrl = "";
+    mockConfig.server.mcpSecret = "";
   });
 
   it("returns null when openai returns no choices", async () => {
