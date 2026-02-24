@@ -29,6 +29,7 @@ const {
   mockGetSpanishAdaptiveContext,
   mockGetLatestSpanishAssessment,
   mockAssessSpanishQuality,
+  mockGetOuraSyncRun,
   mockInsertChatMessage,
   mockConfig,
 } = vi.hoisted(() => ({
@@ -61,6 +62,7 @@ const {
     assessment: { id: 1, overall_score: 3.6, assessed_at: new Date() },
     summary: "<b>Spanish Assessment</b>\nOverall: <b>3.6/5</b>",
   }),
+  mockGetOuraSyncRun: vi.fn().mockResolvedValue(null),
   mockInsertChatMessage: vi.fn().mockResolvedValue({ inserted: true, id: 1 }),
   mockConfig: {
     config: {
@@ -134,6 +136,7 @@ vi.mock("../../src/db/queries.js", () => ({
   getSpanishQuizStats: mockGetSpanishQuizStats,
   getSpanishAdaptiveContext: mockGetSpanishAdaptiveContext,
   getLatestSpanishAssessment: mockGetLatestSpanishAssessment,
+  getOuraSyncRun: mockGetOuraSyncRun,
   insertChatMessage: mockInsertChatMessage,
 }));
 
@@ -232,6 +235,7 @@ beforeEach(() => {
   mockGetLastAssistantMessageId.mockReset().mockResolvedValue(42);
   mockInsertSoulQualitySignal.mockReset().mockResolvedValue({ id: 1 });
   mockGetLastPulseCheck.mockReset().mockResolvedValue(null);
+  mockGetOuraSyncRun.mockReset().mockResolvedValue(null);
   mockConfig.config.telegram.voiceReplyMode = "off";
   mockConfig.config.telegram.voiceReplyEvery = 3;
   mockConfig.config.telegram.voiceReplyMinChars = 1;
@@ -1588,6 +1592,127 @@ describe("/soul command", () => {
     expect(mockSendTelegramMessage).toHaveBeenCalledWith(
       "100",
       expect.stringContaining("string error")
+    );
+    expect(mockRunAgent).not.toHaveBeenCalled();
+  });
+});
+
+describe("oura_sync callback", () => {
+  it("sends detail message with sync run info", async () => {
+    mockGetOuraSyncRun.mockResolvedValueOnce({
+      id: 42,
+      started_at: "2025-06-15T14:00:00Z",
+      finished_at: "2025-06-15T14:00:08Z",
+      status: "success",
+      records_synced: 368,
+      error: null,
+    });
+
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "oura_sync:42:31,72,31,30,31,173",
+      messageId: 10,
+      date: 1000,
+      callbackData: "oura_sync:42:31,72,31,30,31,173",
+    });
+
+    expect(mockGetOuraSyncRun).toHaveBeenCalledWith(expect.anything(), 42);
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      expect.stringContaining("Oura sync #42")
+    );
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      expect.stringContaining("sleep: 31")
+    );
+    expect(mockRunAgent).not.toHaveBeenCalled();
+  });
+
+  it("handles null finished_at", async () => {
+    mockGetOuraSyncRun.mockResolvedValueOnce({
+      id: 43,
+      started_at: "2025-06-15T14:00:00Z",
+      finished_at: null,
+      status: "running",
+      records_synced: 0,
+      error: null,
+    });
+
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "oura_sync:43:0,0,0,0,0,0",
+      messageId: 10,
+      date: 1000,
+      callbackData: "oura_sync:43:0,0,0,0,0,0",
+    });
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      expect.stringContaining("in progress")
+    );
+  });
+
+  it("shows not found when run is missing", async () => {
+    mockGetOuraSyncRun.mockResolvedValueOnce(null);
+
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "oura_sync:999:0,0,0,0,0,0",
+      messageId: 10,
+      date: 1000,
+      callbackData: "oura_sync:999:0,0,0,0,0,0",
+    });
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      "Oura sync run #999 not found."
+    );
+    expect(mockRunAgent).not.toHaveBeenCalled();
+  });
+
+  it("includes error in detail when present", async () => {
+    mockGetOuraSyncRun.mockResolvedValueOnce({
+      id: 44,
+      started_at: "2025-06-15T14:00:00Z",
+      finished_at: "2025-06-15T14:00:02Z",
+      status: "failed",
+      records_synced: 0,
+      error: "API rate limited",
+    });
+
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "oura_sync:44:0,0,0,0,0,0",
+      messageId: 10,
+      date: 1000,
+      callbackData: "oura_sync:44:0,0,0,0,0,0",
+    });
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      expect.stringContaining("API rate limited")
+    );
+  });
+
+  it("handles error in callback gracefully", async () => {
+    mockGetOuraSyncRun.mockRejectedValueOnce(new Error("db down"));
+
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "oura_sync:42:0,0,0,0,0,0",
+      messageId: 10,
+      date: 1000,
+      callbackData: "oura_sync:42:0,0,0,0,0,0",
+    });
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("oura_sync callback error"),
+      expect.any(Error)
     );
     expect(mockRunAgent).not.toHaveBeenCalled();
   });

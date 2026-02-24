@@ -1,4 +1,5 @@
 import { answerCallbackQuery } from "./client.js";
+import { notifyError } from "./notify.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -154,6 +155,7 @@ export function enqueue(chatId: string, fn: () => Promise<void>): void {
     chatId,
     prev.then(fn).catch((err) => {
       console.error("Telegram enqueue error:", err);
+      notifyError("Telegram queue", err);
     })
   );
 }

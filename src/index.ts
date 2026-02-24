@@ -18,6 +18,17 @@ const args = process.argv.slice(2);
 const useHttp = args.includes("--http");
 
 async function main(): Promise<void> {
+  const { notifyError } = await import("./telegram/notify.js");
+  /* v8 ignore next 7 -- process-level handlers: not testable in unit tests */
+  process.on("uncaughtException", (err) => {
+    console.error("Uncaught exception:", err);
+    notifyError("uncaughtException", err);
+  });
+  process.on("unhandledRejection", (reason) => {
+    console.error("Unhandled rejection:", reason);
+    notifyError("unhandledRejection", reason);
+  });
+
   if (useHttp) {
     const { startHttpServer } = await import("./transports/http.js");
     await startHttpServer(() => createServer(pool, VERSION));

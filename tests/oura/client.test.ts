@@ -9,10 +9,10 @@ import { OuraClient } from "../../src/oura/client.js";
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
-function apiResponse(data: unknown[]): Response {
+function apiResponse(data: unknown[], nextToken?: string): Response {
   return {
     ok: true,
-    json: () => Promise.resolve({ data }),
+    json: () => Promise.resolve({ data, next_token: nextToken ?? null }),
     text: () => Promise.resolve(""),
   } as unknown as Response;
 }
@@ -67,6 +67,27 @@ describe("OuraClient", () => {
       } as unknown as Response);
       const result = await client.getDailySleep("2025-01-15", "2025-01-15");
       expect(result).toEqual([]);
+    });
+
+    it("follows next_token across pages", async () => {
+      mockFetch
+        .mockResolvedValueOnce(apiResponse([{ day: "2025-01-15" }], "page2"))
+        .mockResolvedValueOnce(apiResponse([{ day: "2025-01-16" }]));
+
+      const result = await client.getDailySleep("2025-01-15", "2025-01-16");
+      expect(result).toEqual([{ day: "2025-01-15" }, { day: "2025-01-16" }]);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+
+      const secondUrl = mockFetch.mock.calls[1][0] as URL;
+      expect(secondUrl.searchParams.get("next_token")).toBe("page2");
+    });
+
+    it("stops paginating when next_token is null", async () => {
+      mockFetch.mockResolvedValueOnce(apiResponse([{ day: "2025-01-15" }]));
+
+      const result = await client.getDailySleep("2025-01-15", "2025-01-15");
+      expect(result).toHaveLength(1);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
     });
   });
 

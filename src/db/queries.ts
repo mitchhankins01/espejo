@@ -2760,6 +2760,24 @@ export async function completeOuraSyncRun(
   );
 }
 
+export interface OuraSyncRun {
+  id: number;
+  started_at: string;
+  finished_at: string | null;
+  status: string;
+  records_synced: number;
+  error: string | null;
+}
+
+/* v8 ignore next 7 -- simple SELECT, tested via mocked webhook handler */
+export async function getOuraSyncRun(pool: pg.Pool, id: number): Promise<OuraSyncRun | null> {
+  const result = await pool.query<OuraSyncRun>(
+    `SELECT id, started_at, finished_at, status, records_synced, error FROM oura_sync_runs WHERE id = $1`,
+    [id]
+  );
+  return result.rows[0] ?? null;
+}
+
 export async function upsertOuraSyncState(pool: pg.Pool, endpoint: string, lastSyncedDay: string): Promise<void> {
   await pool.query(
     `INSERT INTO oura_sync_state (endpoint, last_synced_day, updated_at)

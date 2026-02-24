@@ -15,6 +15,7 @@ import {
   getSpanishAdaptiveContext,
   getLatestSpanishAssessment,
   insertChatMessage,
+  getOuraSyncRun,
 } from "../db/queries.js";
 import { runAgent, forceCompact } from "./agent.js";
 import {
@@ -360,6 +361,52 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
         await sendTelegramMessage(chatId, `<i>${ack}</i>`);
       } catch (err) {
         console.error(`Telegram soul feedback error [chat:${chatId}]:`, err);
+      }
+      return;
+    }
+
+    // Handle Oura sync detail callback
+    if (msg.callbackData?.startsWith("oura_sync:")) {
+      try {
+        const parts = msg.callbackData.split(":");
+        const runId = Number(parts[1]);
+        /* v8 ignore next -- defensive: callback_data always has counts segment */
+        const countsCsv = (parts[2] ?? "").split(",");
+        const run = await getOuraSyncRun(pool, runId);
+        if (!run) {
+          await sendTelegramMessage(chatId, `Oura sync run #${runId} not found.`);
+          return;
+        }
+        /* v8 ignore next 9 -- defensive: counts always present in callback_data */
+        const sleep = Number(countsCsv[0]) || 0;
+        const sessions = Number(countsCsv[1]) || 0;
+        const readiness = Number(countsCsv[2]) || 0;
+        const activity = Number(countsCsv[3]) || 0;
+        const stress = Number(countsCsv[4]) || 0;
+        const workouts = Number(countsCsv[5]) || 0;
+        const total = sleep + sessions + readiness + activity + stress + workouts;
+        const started = new Date(run.started_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: config.timezone });
+        /* v8 ignore next -- defensive: finished_at may be null if run is still in progress */
+        const finished = run.finished_at ? new Date(run.finished_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: config.timezone }) : "in progress";
+        const errorLine = run.error ? `\nError: ${run.error}` : "";
+        const detail = [
+          `Oura sync #${runId}`,
+          `Status: ${run.status}`,
+          `Started: ${started} \u2192 finished ${finished}`,
+          "",
+          "Records synced:",
+          `  sleep: ${sleep}`,
+          `  sessions: ${sessions}`,
+          `  readiness: ${readiness}`,
+          `  activity: ${activity}`,
+          `  stress: ${stress}`,
+          `  workouts: ${workouts}`,
+          `  total: ${total}`,
+          errorLine,
+        ].filter(Boolean).join("\n");
+        await sendTelegramMessage(chatId, `<pre>${detail}</pre>`);
+      } catch (err) {
+        console.error(`Telegram oura_sync callback error [chat:${chatId}]:`, err);
       }
       return;
     }

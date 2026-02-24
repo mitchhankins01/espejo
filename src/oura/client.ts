@@ -22,23 +22,33 @@ export class OuraClient {
     endDate: string
   ): Promise<T[]> {
     if (!this.token) return [];
-    const url = new URL(`${BASE_URL}/${endpoint}`);
-    url.searchParams.set("start_date", startDate);
-    url.searchParams.set("end_date", endDate);
+    const MAX_PAGES = 200;
+    const all: T[] = [];
+    let nextToken: string | undefined;
+    let page = 0;
 
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-      },
-    });
+    do {
+      const url = new URL(`${BASE_URL}/${endpoint}`);
+      url.searchParams.set("start_date", startDate);
+      url.searchParams.set("end_date", endDate);
+      if (nextToken) url.searchParams.set("next_token", nextToken);
 
-    if (!response.ok) {
-      const errorBody = await response.text();
-      throw new Error(`Oura API ${endpoint} failed (${response.status}): ${errorBody}`);
-    }
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${this.token}` },
+      });
 
-    const payload = (await response.json()) as OuraApiListResponse<T>;
-    return payload.data ?? [];
+      if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(`Oura API ${endpoint} failed (${response.status}): ${errorBody}`);
+      }
+
+      const payload = (await response.json()) as OuraApiListResponse<T>;
+      all.push(...(payload.data ?? []));
+      nextToken = payload.next_token ?? undefined;
+      page++;
+    } while (nextToken && page < MAX_PAGES);
+
+    return all;
   }
 
   public getDailySleep(startDate: string, endDate: string): Promise<Record<string, unknown>[]> {

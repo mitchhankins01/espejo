@@ -4,6 +4,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { z } from "zod";
 import { config } from "../config.js";
 import { pool } from "../db/client.js";
+import { notifyError } from "../telegram/notify.js";
 import {
   upsertDailyMetric,
   getActivityLog,
@@ -290,7 +291,12 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
     }
   });
 
-  app.listen(port, "0.0.0.0", () => {
+  const server = app.listen(port, "0.0.0.0", () => {
     console.error(`espejo-mcp HTTP server running on http://0.0.0.0:${port}`);
+  });
+  /* v8 ignore next 4 -- runtime-only: HTTP server errors are not unit-testable */
+  server.on("error", (err) => {
+    console.error("HTTP server error:", err);
+    notifyError("HTTP server", err);
   });
 }

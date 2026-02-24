@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+const mockServer = { on: vi.fn() };
+
 const mockApp = {
   set: vi.fn().mockReturnThis(),
   use: vi.fn().mockReturnThis(),
@@ -8,6 +10,7 @@ const mockApp = {
   listen: vi.fn().mockImplementation(
     (_port: number, _host: string, cb: () => void) => {
       cb();
+      return mockServer;
     }
   ),
 };
@@ -30,6 +33,14 @@ vi.mock("../../src/config.js", () => ({
 vi.mock("../../src/transports/oauth.js", () => ({
   registerOAuthRoutes: vi.fn(),
   isValidOAuthToken: vi.fn(() => false),
+}));
+
+vi.mock("../../src/oura/sync.js", () => ({
+  startOuraSyncTimer: vi.fn(),
+}));
+
+vi.mock("../../src/telegram/notify.js", () => ({
+  notifyError: vi.fn(),
 }));
 
 const {
@@ -109,6 +120,7 @@ describe("startHttpServer", () => {
     mockGetSpanishAdaptiveContext.mockReset();
     mockGetSpanishAssessments.mockReset();
     mockGetLatestSpanishAssessment.mockReset();
+    mockServer.on.mockReset();
     // Restore mock implementations after clearAllMocks
     mockApp.set.mockReturnThis();
     mockApp.use.mockReturnThis();
@@ -117,6 +129,7 @@ describe("startHttpServer", () => {
     mockApp.listen.mockImplementation(
       (_port: number, _host: string, cb: () => void) => {
         cb();
+        return mockServer;
       }
     );
   });

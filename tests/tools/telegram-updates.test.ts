@@ -8,6 +8,10 @@ vi.mock("../../src/telegram/client.js", () => ({
   answerCallbackQuery: mockAnswerCallbackQuery,
 }));
 
+vi.mock("../../src/telegram/notify.js", () => ({
+  notifyError: vi.fn(),
+}));
+
 import {
   processUpdate,
   setMessageHandler,

@@ -12,9 +12,12 @@ const mockQueries = vi.hoisted(() => ({
   upsertOuraSyncState: vi.fn().mockResolvedValue(undefined),
 }));
 
+const mockSendTelegramMessage = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+
 const mockConfig = vi.hoisted(() => ({
   config: {
     oura: { accessToken: "test-token", syncIntervalMinutes: 60, syncLookbackDays: 7 },
+    telegram: { botToken: "test-bot-token", allowedChatId: "100" },
     timezone: "Europe/Madrid",
   },
 }));
@@ -30,6 +33,12 @@ const mockClientInstance = vi.hoisted(() => ({
 
 vi.mock("../../src/db/queries.js", () => mockQueries);
 vi.mock("../../src/config.js", () => mockConfig);
+vi.mock("../../src/telegram/client.js", () => ({
+  sendTelegramMessage: mockSendTelegramMessage,
+}));
+vi.mock("../../src/telegram/notify.js", () => ({
+  notifyError: vi.fn(),
+}));
 vi.mock("../../src/oura/client.js", () => ({
   OuraClient: class {
     getDailySleep = mockClientInstance.getDailySleep;
@@ -41,7 +50,7 @@ vi.mock("../../src/oura/client.js", () => ({
   },
 }));
 
-import { runOuraSync, startOuraSyncTimer } from "../../src/oura/sync.js";
+import { runOuraSync, notifyOuraSync, startOuraSyncTimer } from "../../src/oura/sync.js";
 
 function makeMockPool(lockResult = true): any {
   return {
@@ -63,19 +72,24 @@ beforeEach(() => {
   for (const fn of Object.values(mockClientInstance)) fn.mockClear().mockResolvedValue([]);
   mockQueries.insertOuraSyncRun.mockResolvedValue(1);
   mockConfig.config.oura.accessToken = "test-token";
+  mockConfig.config.telegram.botToken = "test-bot-token";
+  mockConfig.config.telegram.allowedChatId = "100";
+  mockSendTelegramMessage.mockReset().mockResolvedValue(undefined);
 });
 
 describe("runOuraSync", () => {
   it("skips when no access token", async () => {
     mockConfig.config.oura.accessToken = "";
     const pool = makeMockPool();
-    await runOuraSync(pool, 7);
+    const result = await runOuraSync(pool, 7);
+    expect(result).toBeNull();
     expect(pool.query).not.toHaveBeenCalled();
   });
 
   it("skips when advisory lock is not acquired", async () => {
     const pool = makeMockPool(false);
-    await runOuraSync(pool, 7);
+    const result = await runOuraSync(pool, 7);
+    expect(result).toBeNull();
     expect(mockQueries.insertOuraSyncRun).not.toHaveBeenCalled();
   });
 
@@ -88,8 +102,13 @@ describe("runOuraSync", () => {
     mockClientInstance.getWorkouts.mockResolvedValue([{ day: "2025-01-15" }]);
 
     const pool = makeMockPool();
-    await runOuraSync(pool, 7);
+    const result = await runOuraSync(pool, 7);
 
+    expect(result).not.toBeNull();
+    expect(result!.total).toBe(6);
+    expect(result!.counts.sleep).toBe(1);
+    expect(result!.runId).toBe(1);
+    expect(result!.durationMs).toBeGreaterThanOrEqual(0);
     expect(mockQueries.insertOuraSyncRun).toHaveBeenCalledOnce();
     expect(mockQueries.upsertOuraDailySleep).toHaveBeenCalledOnce();
     expect(mockQueries.upsertOuraSleepSession).toHaveBeenCalledOnce();
@@ -133,6 +152,68 @@ describe("runOuraSync", () => {
       "SELECT pg_advisory_unlock($1)",
       [9152201]
     );
+  });
+});
+
+describe("notifyOuraSync", () => {
+  it("sends message with inline keyboard", () => {
+    notifyOuraSync({
+      runId: 42,
+      total: 368,
+      counts: { sleep: 31, sessions: 72, readiness: 31, activity: 30, stress: 31, workouts: 173 },
+      durationMs: 8000,
+    });
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      expect.stringContaining("368 records"),
+      expect.objectContaining({
+        inline_keyboard: expect.arrayContaining([
+          expect.arrayContaining([
+            expect.objectContaining({ text: "Details", callback_data: expect.stringContaining("oura_sync:42:") }),
+          ]),
+        ]),
+      })
+    );
+  });
+
+  it("includes duration in seconds", () => {
+    notifyOuraSync({
+      runId: 1,
+      total: 10,
+      counts: { sleep: 1, sessions: 2, readiness: 1, activity: 2, stress: 2, workouts: 2 },
+      durationMs: 3500,
+    });
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      expect.stringContaining("4s"),
+      expect.anything()
+    );
+  });
+
+  it("skips when no botToken", () => {
+    mockConfig.config.telegram.botToken = "";
+    notifyOuraSync({
+      runId: 1,
+      total: 10,
+      counts: { sleep: 1, sessions: 2, readiness: 1, activity: 2, stress: 2, workouts: 2 },
+      durationMs: 1000,
+    });
+
+    expect(mockSendTelegramMessage).not.toHaveBeenCalled();
+  });
+
+  it("skips when no allowedChatId", () => {
+    mockConfig.config.telegram.allowedChatId = "";
+    notifyOuraSync({
+      runId: 1,
+      total: 10,
+      counts: { sleep: 1, sessions: 2, readiness: 1, activity: 2, stress: 2, workouts: 2 },
+      durationMs: 1000,
+    });
+
+    expect(mockSendTelegramMessage).not.toHaveBeenCalled();
   });
 });
 
