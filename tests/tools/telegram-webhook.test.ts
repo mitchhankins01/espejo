@@ -29,6 +29,7 @@ const {
   mockGetSpanishAdaptiveContext,
   mockGetLatestSpanishAssessment,
   mockAssessSpanishQuality,
+  mockInsertChatMessage,
   mockConfig,
 } = vi.hoisted(() => ({
   mockRunAgent: vi.fn().mockResolvedValue({ response: "agent response", activity: "", soulVersion: 1, patternCount: 0 }),
@@ -60,6 +61,7 @@ const {
     assessment: { id: 1, overall_score: 3.6, assessed_at: new Date() },
     summary: "<b>Spanish Assessment</b>\nOverall: <b>3.6/5</b>",
   }),
+  mockInsertChatMessage: vi.fn().mockResolvedValue({ inserted: true, id: 1 }),
   mockConfig: {
     config: {
       telegram: {
@@ -132,6 +134,7 @@ vi.mock("../../src/db/queries.js", () => ({
   getSpanishQuizStats: mockGetSpanishQuizStats,
   getSpanishAdaptiveContext: mockGetSpanishAdaptiveContext,
   getLatestSpanishAssessment: mockGetLatestSpanishAssessment,
+  insertChatMessage: mockInsertChatMessage,
 }));
 
 vi.mock("../../src/spanish/assessment.js", () => ({
@@ -428,12 +431,21 @@ describe("message handler", () => {
       expect.objectContaining({
         chatId: "100",
         message: "hello world",
-        externalMessageId: "1",
         messageDate: 1000,
         onCompacted: expect.any(Function),
       })
     );
     expect(mockSendTelegramMessage).toHaveBeenCalledWith("100", "agent response");
+  });
+
+  it("skips processing when user message is a duplicate (webhook retry after restart)", async () => {
+    mockInsertChatMessage.mockResolvedValueOnce({ inserted: false, id: null });
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
+
+    expect(mockRunAgent).not.toHaveBeenCalled();
+    expect(mockSendTelegramMessage).not.toHaveBeenCalled();
   });
 
   it("appends activity line when present", async () => {

@@ -169,7 +169,7 @@ function buildSystemPrompt(
   let prompt = `Today is ${today}.
 You are a personal chatbot with long-term memory. Your role:
 1. Answer conversational questions naturally
-2. Help log weight measurements when mentioned (e.g. "I weighed 76.5 today" → call log_weight tool)
+2. Log weight only when the user explicitly reports a new measurement in their current message (e.g. "I weighed 76.5 today" → call log_weight). Never re-log weight from earlier conversation history.
 3. Query the user's journal for information about past experiences
 4. Remember patterns from past conversations and reference them when relevant
 
@@ -219,6 +219,7 @@ Important guidelines:
 - Do not claim you cannot send or generate voice messages. This assistant's replies may be delivered as Telegram voice notes by the system.
 - Use Spanish learning tools proactively: conjugate_verb for corrections, log_vocabulary to silently track new words, spanish_quiz to weave due reviews into conversation. Grade the user's vocabulary usage in real time (grade=3 for correct use, grade=1-2 for struggles).
 - Keep responses concise and natural.
+- When the user references something you have no context for (a score, result, or event not in your conversation history), say so honestly rather than guessing or calling unrelated tools.
 - Format responses for Telegram HTML: use <b>bold</b> for emphasis, <i>italic</i> for asides, and plain line breaks for separation. Never use markdown formatting (**bold**, *italic*, ---, ###, etc).`;
 
   return prompt;
@@ -1911,7 +1912,6 @@ export async function runAgent(params: {
   chatId: string;
   message: string;
   storedUserMessage?: string;
-  externalMessageId: string;
   messageDate: number;
   mode?: AgentMode;
   prefill?: string;
@@ -1921,19 +1921,12 @@ export async function runAgent(params: {
     chatId,
     message,
     storedUserMessage,
-    externalMessageId,
     mode = "default",
     prefill,
     onCompacted,
   } = params;
 
-  // 1. Store user message
-  await insertChatMessage(pool, {
-    chatId,
-    externalMessageId,
-    role: "user",
-    content: storedUserMessage ?? message,
-  });
+  // User message is now stored by handleMessage() in webhook.ts before calling runAgent().
 
   let autoLoggedVocabulary = 0;
   try {

@@ -14,6 +14,7 @@ import {
   getSpanishQuizStats,
   getSpanishAdaptiveContext,
   getLatestSpanishAssessment,
+  insertChatMessage,
 } from "../db/queries.js";
 import { runAgent, forceCompact } from "./agent.js";
 import {
@@ -242,6 +243,19 @@ function shouldReplyWithVoice(
 const POSITIVE_REACTION_EMOJIS = new Set(["👍", "❤️", "🔥", "👏", "🎉", "💯", "⚡", "🫡"]);
 const NEGATIVE_REACTION_EMOJIS = new Set(["👎", "💩"]);
 
+async function sendAndStoreResponse(
+  chatId: string,
+  text: string
+): Promise<void> {
+  await sendTelegramMessage(chatId, text);
+  await insertChatMessage(pool, {
+    chatId,
+    externalMessageId: null,
+    role: "assistant",
+    content: text,
+  });
+}
+
 async function handleMessage(msg: AssembledMessage): Promise<void> {
   const chatId = String(msg.chatId);
 
@@ -312,6 +326,16 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
     }
 
     if (!text) return;
+
+    // Store user message. Dedup: if already stored (webhook retry after restart), skip.
+    const { inserted } = await insertChatMessage(pool, {
+      chatId,
+      externalMessageId: String(msg.messageId),
+      role: "user",
+      content: text,
+    });
+    if (!inserted) return;
+
     const originalUserText = text;
 
     const command = parseSlashCommand(text);
@@ -343,7 +367,7 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
     // Handle /compact command
     if (command?.name === "compact") {
       await forceCompact(chatId, async (summary) => {
-        await sendTelegramMessage(chatId, `<i>Memory note: ${summary}</i>`);
+        await sendAndStoreResponse(chatId, `<i>Memory note: ${summary}</i>`);
       });
       return;
     }
@@ -399,7 +423,7 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
             lines.push(`  Repairs: ${lastPulse.repairs_applied.length} applied`);
           }
         }
-        await sendTelegramMessage(chatId, lines.join("\n"));
+        await sendAndStoreResponse(chatId, lines.join("\n"));
       } catch (err) {
         console.error(`Telegram /soul error [chat:${chatId}]:`, err);
         await sendTelegramMessage(chatId, "Error loading soul state.");
@@ -432,7 +456,7 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
           assessment_summary: buildAssessmentSummary(latestAssessment),
         };
 
-        await sendTelegramMessage(chatId, formatDigestText(digest));
+        await sendAndStoreResponse(chatId, formatDigestText(digest));
       } catch (err) {
         console.error(`Telegram /digest error [chat:${chatId}]:`, err);
         await sendTelegramMessage(chatId, "Error generating digest.");
@@ -448,7 +472,7 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
         const openai = new OpenAI({ apiKey: config.openai.apiKey });
         const client = createOpenAIAssessmentClient(openai);
         const { summary } = await assessSpanishQuality(pool, chatId, client);
-        await sendTelegramMessage(chatId, summary);
+        await sendAndStoreResponse(chatId, summary);
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         console.error(`Telegram /assess error [chat:${chatId}]:`, errMsg);
@@ -469,7 +493,7 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
       const firstArg = command.argText.split(/\s+/)[0].toLowerCase();
       if (MODE_DISABLE_TOKENS.has(firstArg)) {
         chatModes.delete(chatId);
-        await sendTelegramMessage(chatId, "<i>Evening review mode off.</i>");
+        await sendAndStoreResponse(chatId, "<i>Evening review mode off.</i>");
         return;
       }
 
@@ -477,7 +501,7 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
       text = buildEveningKickoffMessage(command.argText || null);
     } else if (naturalEveningIntent?.type === "disable") {
       chatModes.delete(chatId);
-      await sendTelegramMessage(chatId, "<i>Evening review mode off.</i>");
+      await sendAndStoreResponse(chatId, "<i>Evening review mode off.</i>");
       return;
     } else if (naturalEveningIntent?.type === "enable") {
       chatModes.set(chatId, "evening_review");
@@ -489,7 +513,7 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
       const firstArg = command.argText.split(/\s+/)[0].toLowerCase();
       if (MODE_DISABLE_TOKENS.has(firstArg)) {
         chatModes.delete(chatId);
-        await sendTelegramMessage(chatId, "<i>Morning flow mode off.</i>");
+        await sendAndStoreResponse(chatId, "<i>Morning flow mode off.</i>");
         return;
       }
 
@@ -497,7 +521,7 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
       text = buildMorningKickoffMessage(command.argText || null);
     } else if (naturalMorningIntent?.type === "disable") {
       chatModes.delete(chatId);
-      await sendTelegramMessage(chatId, "<i>Morning flow mode off.</i>");
+      await sendAndStoreResponse(chatId, "<i>Morning flow mode off.</i>");
       return;
     } else if (naturalMorningIntent?.type === "enable") {
       chatModes.set(chatId, "morning_flow");
@@ -508,7 +532,6 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
       chatId,
       message: text,
       storedUserMessage: originalUserText,
-      externalMessageId: String(msg.messageId),
       messageDate: msg.date,
       mode: getChatMode(chatId),
       prefill,

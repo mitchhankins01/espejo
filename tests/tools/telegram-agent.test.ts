@@ -514,24 +514,14 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "Hi",
-      externalMessageId: "update:1",
       messageDate: 1000,
     });
 
     expect(result.response).toBe("Hello! How are you?");
     expect(result.activity).toBe("");
 
-    // Stores user message
-    expect(mockInsertChatMessage).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        role: "user",
-        content: "Hi",
-        externalMessageId: "update:1",
-      })
-    );
-
-    // Stores assistant message
+    // User message is now stored by handleMessage() in webhook.ts, not runAgent().
+    // runAgent() only stores the assistant message.
     expect(mockInsertChatMessage).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -573,7 +563,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "Hi",
-      externalMessageId: "update:1b",
       messageDate: 1000,
     });
 
@@ -605,7 +594,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "status?",
-      externalMessageId: "update:cost-1",
       messageDate: 1000,
     });
 
@@ -632,7 +620,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "quick ping",
-      externalMessageId: "update:cost-throttle",
       messageDate: 1000,
     });
 
@@ -655,7 +642,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "status?",
-      externalMessageId: "update:cost-2",
       messageDate: 1000,
     });
 
@@ -674,7 +660,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "status?",
-      externalMessageId: "update:cost-first",
       messageDate: 1000,
     });
 
@@ -709,7 +694,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "quick update",
-      externalMessageId: "update:soul-activity",
       messageDate: 1000,
     });
 
@@ -727,7 +711,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "quick update",
-      externalMessageId: "update:soul-stats-error",
       messageDate: 1000,
     });
 
@@ -744,7 +727,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "Hi",
-      externalMessageId: "update:1b-usage",
       messageDate: 1000,
     });
 
@@ -787,7 +769,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "When did I mention stress?",
-      externalMessageId: "update:1c",
       messageDate: 1000,
     });
 
@@ -831,7 +812,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "trigger error",
-      externalMessageId: "update:1c-err",
       messageDate: 1000,
     });
 
@@ -873,7 +853,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "test invalid tool args",
-      externalMessageId: "update:1d",
       messageDate: 1000,
     });
 
@@ -916,7 +895,6 @@ describe("runAgent", () => {
     await runAgent({
       chatId: "100",
       message: "empty args",
-      externalMessageId: "update:1d-empty",
       messageDate: 1000,
     });
 
@@ -964,7 +942,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "show tags repeatedly",
-      externalMessageId: "update:1e",
       messageDate: 1000,
     });
 
@@ -994,7 +971,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "What does my morning routine look like?",
-      externalMessageId: "update:activity-1",
       messageDate: 1000,
     });
 
@@ -1023,7 +999,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "Hey",
-      externalMessageId: "update:no-activity",
       messageDate: 1000,
     });
 
@@ -1049,7 +1024,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "show tags",
-      externalMessageId: "update:link-1",
       messageDate: 1000,
     });
 
@@ -1076,7 +1050,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "show tags",
-      externalMessageId: "update:link-token",
       messageDate: 1000,
     });
 
@@ -1095,7 +1068,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "hello",
-      externalMessageId: "update:1f",
       messageDate: 1000,
     });
 
@@ -1122,7 +1094,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "many tools",
-      externalMessageId: "update:1max",
       messageDate: 1000,
     });
 
@@ -1144,7 +1115,6 @@ describe("runAgent", () => {
     await runAgent({
       chatId: "100",
       message: "continue",
-      externalMessageId: "update:1g",
       messageDate: 1000,
     });
 
@@ -1175,7 +1145,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "When have I been stressed?",
-      externalMessageId: "update:2",
       messageDate: 1000,
     });
 
@@ -1211,7 +1180,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "search for test",
-      externalMessageId: "update:3",
       messageDate: 1000,
     });
 
@@ -1233,7 +1201,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "Do lots of things",
-      externalMessageId: "update:4",
       messageDate: 1000,
     });
 
@@ -1262,7 +1229,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "search something",
-      externalMessageId: "update:5",
       messageDate: 1000,
     });
 
@@ -1281,7 +1247,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "hello",
-      externalMessageId: "update:6",
       messageDate: 1000,
     });
 
@@ -1333,7 +1298,6 @@ describe("runAgent", () => {
     await runAgent({
       chatId: "100",
       message: "I'm feeling really overwhelmed by everything going on",
-      externalMessageId: "update:7",
       messageDate: 1000,
     });
 
@@ -1354,7 +1318,6 @@ describe("runAgent", () => {
     await runAgent({
       chatId: "100",
       message: "write the entry",
-      externalMessageId: "update:compose-1",
       messageDate: 1000,
     });
 
@@ -1371,7 +1334,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "Write the entry now.",
-      externalMessageId: "update:prefill-1",
       messageDate: 1000,
       prefill: "#",
     });
@@ -1395,7 +1357,6 @@ describe("runAgent", () => {
     await runAgent({
       chatId: "100",
       message: "Hey",
-      externalMessageId: "update:short-1",
       messageDate: 1000,
     });
 
@@ -1412,7 +1373,6 @@ describe("runAgent", () => {
     await runAgent({
       chatId: "100",
       message: "Give me the full journal entry",
-      externalMessageId: "update:directive-no-retrieval",
       messageDate: 1000,
     });
 
@@ -1429,7 +1389,6 @@ describe("runAgent", () => {
     await runAgent({
       chatId: "100",
       message: "/compose this should be handled without memory retrieval",
-      externalMessageId: "update:slash-no-retrieval",
       messageDate: 1000,
     });
 
@@ -1446,7 +1405,6 @@ describe("runAgent", () => {
     await runAgent({
       chatId: "100",
       message: "Today I weigh 85kg and want this logged for today only",
-      externalMessageId: "update:weight-no-retrieval",
       messageDate: 1000,
     });
 
@@ -1463,7 +1421,6 @@ describe("runAgent", () => {
     await runAgent({
       chatId: "100",
       message: "show me the latest journal draft now",
-      externalMessageId: "update:imperative-no-retrieval",
       messageDate: 1000,
     });
 
@@ -1498,7 +1455,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "memory recall around nicotine relapse lately",
-      externalMessageId: "update:short-threshold",
       messageDate: 1000,
     });
 
@@ -1523,7 +1479,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "Tell me what patterns from this month matter most to me",
-      externalMessageId: "update:embedding-log-fail",
       messageDate: 1000,
     });
 
@@ -1562,7 +1517,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "I want you to remember this important detail about me",
-      externalMessageId: "update:blank-kind",
       messageDate: 1000,
     });
 
@@ -1590,7 +1544,6 @@ describe("runAgent", () => {
     await runAgent({
       chatId: "100",
       message: "Need you to be more real",
-      externalMessageId: "update:soul-1",
       messageDate: 1000,
     });
 
@@ -1612,7 +1565,6 @@ describe("runAgent", () => {
     await runAgent({
       chatId: "100",
       message: "Start evening review now",
-      externalMessageId: "update:evening-1",
       messageDate: 1000,
       mode: "evening_review",
     });
@@ -1631,7 +1583,6 @@ describe("runAgent", () => {
     await runAgent({
       chatId: "100",
       message: "Start morning flow now",
-      externalMessageId: "update:morning-1",
       messageDate: 1000,
       mode: "morning_flow",
     });
@@ -1666,7 +1617,6 @@ describe("runAgent", () => {
     await runAgent({
       chatId: "100",
       message: "/evening",
-      externalMessageId: "update:evening-anchor",
       messageDate: 1000,
       mode: "evening_review",
     });
@@ -1691,7 +1641,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "/evening",
-      externalMessageId: "update:evening-anchor-fail",
       messageDate: 1000,
       mode: "evening_review",
     });
@@ -1746,7 +1695,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "Please remember and respect my language preferences every time we chat.",
-      externalMessageId: "update:anchor-dedupe",
       messageDate: 1000,
     });
 
@@ -1794,7 +1742,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "explain quantum mechanics to a software engineer in 3 sentences",
-      externalMessageId: "update:lang-rewrite-1",
       messageDate: 1000,
     });
 
@@ -1830,7 +1777,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "Start my morning flow now. Pull my last 3 days first, then ask the first question in Spanish.",
-      externalMessageId: "update:lang-rewrite-morning",
       messageDate: 1000,
       mode: "morning_flow",
     });
@@ -1868,7 +1814,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "explain quantum mechanics briefly",
-      externalMessageId: "update:lang-rewrite-profile-fallback",
       messageDate: 1000,
     });
 
@@ -1902,7 +1847,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "Explain quantum mechanics in English only in 3 sentences",
-      externalMessageId: "update:lang-rewrite-2",
       messageDate: 1000,
     });
 
@@ -1958,7 +1902,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "Explain quantum mechanics briefly",
-      externalMessageId: "update:lang-rewrite-openai",
       messageDate: 1000,
     });
 
@@ -1977,7 +1920,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "En Honduras uso chamo y maje con mis amigos.",
-      externalMessageId: "update:spanish-auto-1",
       messageDate: 1000,
     });
 
@@ -2017,7 +1959,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "Hola chamo, vamos con esto.",
-      externalMessageId: "update:spanish-auto-no-region",
       messageDate: 1000,
     });
 
@@ -2063,7 +2004,6 @@ describe("runAgent", () => {
     await runAgent({
       chatId: "100",
       message: "hola chamo chamo con enfoque",
-      externalMessageId: "update:spanish-dedupe",
       messageDate: 1000,
     });
 
@@ -2098,7 +2038,6 @@ describe("runAgent", () => {
     await runAgent({
       chatId: "100",
       message: "Hola, ¿cómo vas?",
-      externalMessageId: "update:spanish-context-mixed-regions",
       messageDate: 1000,
     });
 
@@ -2114,7 +2053,6 @@ describe("runAgent", () => {
     await runAgent({
       chatId: "100",
       message: "¿¡",
-      externalMessageId: "update:spanish-empty-token",
       messageDate: 1000,
     });
 
@@ -2147,7 +2085,6 @@ describe("runAgent", () => {
     await runAgent({
       chatId: "100",
       message: "Hola",
-      externalMessageId: "update:spanish-profile-default",
       messageDate: 1000,
     });
 
@@ -2177,7 +2114,6 @@ describe("runAgent", () => {
     await runAgent({
       chatId: "100",
       message: "Hola, ¿cómo estás?",
-      externalMessageId: "update:adaptive-struggling",
       messageDate: 1000,
     });
 
@@ -2204,7 +2140,6 @@ describe("runAgent", () => {
     await runAgent({
       chatId: "100",
       message: "Hola, ¿qué hacemos hoy?",
-      externalMessageId: "update:adaptive-strong",
       messageDate: 1000,
     });
 
@@ -2230,7 +2165,6 @@ describe("runAgent", () => {
     await runAgent({
       chatId: "100",
       message: "Hola, ¿seguimos?",
-      externalMessageId: "update:adaptive-moderate",
       messageDate: 1000,
     });
 
@@ -2256,7 +2190,6 @@ describe("runAgent", () => {
     await runAgent({
       chatId: "100",
       message: "¿Qué más podemos hacer?",
-      externalMessageId: "update:adaptive-healthy",
       messageDate: 1000,
     });
 
@@ -2275,7 +2208,6 @@ describe("runAgent", () => {
     await runAgent({
       chatId: "100",
       message: "Hola",
-      externalMessageId: "update:adaptive-no-data",
       messageDate: 1000,
     });
 
@@ -2298,7 +2230,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "Hola, chamo en Honduras con maje.",
-      externalMessageId: "update:spanish-error-path",
       messageDate: 1000,
     });
 
@@ -2341,7 +2272,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "Explain quantum mechanics in 3 sentences",
-      externalMessageId: "update:lang-rewrite-fail",
       messageDate: 1000,
     });
 
@@ -2383,7 +2313,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "Explain quantum mechanics simply",
-      externalMessageId: "update:lang-rewrite-spanish-already",
       messageDate: 1000,
     });
 
@@ -2422,7 +2351,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "Explain quantum mechanics in 3 sentences",
-      externalMessageId: "update:lang-rewrite-openai-empty",
       messageDate: 1000,
     });
 
@@ -2461,7 +2389,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "Explain quantum mechanics in 3 sentences",
-      externalMessageId: "update:lang-rewrite-anthropic-empty",
       messageDate: 1000,
     });
 
@@ -2500,7 +2427,6 @@ describe("runAgent", () => {
     await runAgent({
       chatId: "100",
       message: "Explain quantum mechanics in 0 sentences",
-      externalMessageId: "update:lang-rewrite-invalid-sentence-count",
       messageDate: 1000,
     });
 
@@ -2533,18 +2459,12 @@ describe("runAgent", () => {
       message:
         "Start my evening review now. Pull my last 7 days first, then ask the first question in Spanish.",
       storedUserMessage: "/evening",
-      externalMessageId: "update:evening-raw",
       messageDate: 1000,
       mode: "evening_review",
     });
 
-    expect(mockInsertChatMessage).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        role: "user",
-        content: "/evening",
-      })
-    );
+    // User message ("/evening") is now stored by handleMessage() in webhook.ts.
+    // runAgent() receives the transformed text and uses storedUserMessage for context replacement.
 
     const call = mockAnthropicCreate.mock.calls[0][0];
     expect(call.messages).toEqual(
@@ -2573,7 +2493,6 @@ describe("runAgent", () => {
     await runAgent({
       chatId: "100",
       message: "hello",
-      externalMessageId: "update:soul-2",
       messageDate: 1000,
     });
 
@@ -2602,7 +2521,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "be more concise",
-      externalMessageId: "update:soul-write-fail",
       messageDate: 1000,
     });
 
@@ -2624,7 +2542,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "Tell me what patterns you remember about me from our conversations",
-      externalMessageId: "update:8",
       messageDate: 1000,
     });
 
@@ -2650,7 +2567,6 @@ describe("runAgent", () => {
     await runAgent({
       chatId: "100",
       message: "continue",
-      externalMessageId: "update:9",
       messageDate: 1000,
     });
 
@@ -2686,7 +2602,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "test",
-      externalMessageId: "update:10",
       messageDate: 1000,
     });
 
@@ -2708,7 +2623,6 @@ describe("runAgent", () => {
     const result = await runAgent({
       chatId: "100",
       message: "How am I doing overall with my goals and habits lately?",
-      externalMessageId: "update:11",
       messageDate: 1000,
     });
 
@@ -2853,7 +2767,6 @@ describe("compactIfNeeded — additional coverage", () => {
     await runAgent({
       chatId: "100",
       message: "hello",
-      externalMessageId: "update:20",
       messageDate: 1000,
     });
 
