@@ -256,12 +256,21 @@ describe("getOuraTrendMetric", () => {
   });
 
   it("handles all metric types", async () => {
-    const metrics = ["sleep_score", "hrv", "readiness", "activity", "steps", "sleep_duration"] as const;
+    const metrics = ["sleep_score", "hrv", "readiness", "activity", "steps", "sleep_duration", "stress", "resting_heart_rate", "temperature", "active_calories", "heart_rate", "efficiency"] as const;
     for (const metric of metrics) {
       const pool = mockPool([]);
       await getOuraTrendMetric(pool, metric, 30);
       expect(pool.query).toHaveBeenCalledOnce();
     }
+  });
+
+  it("includes stress join for stress metric", async () => {
+    const pool = mockPool([]);
+    await getOuraTrendMetric(pool, "stress", 30);
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.stringContaining("oura_daily_stress"),
+      [30]
+    );
   });
 });
 

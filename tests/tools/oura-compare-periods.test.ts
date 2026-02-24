@@ -38,6 +38,12 @@ describe("handleOuraComparePeriods", () => {
     expect(parsed.sleep_score.change_percent).toBeCloseTo(12.35, 1);
     expect(parsed.hrv).toBeDefined();
     expect(parsed.steps).toBeDefined();
+    expect(parsed.stress).toBeDefined();
+    expect(parsed.resting_heart_rate).toBeDefined();
+    expect(parsed.temperature).toBeDefined();
+    expect(parsed.active_calories).toBeDefined();
+    expect(parsed.heart_rate).toBeDefined();
+    expect(parsed.efficiency).toBeDefined();
   });
 
   it("uses min/max dates for the query range", async () => {

@@ -38,7 +38,7 @@ const limitParam = (defaultVal: number, max: number) =>
     .describe(`Max results to return (default: ${defaultVal}, max: ${max})`);
 
 
-const ouraMetricParam = z.enum(["sleep_score", "hrv", "readiness", "activity", "steps", "sleep_duration"]).describe("Oura metric: sleep_score, hrv, readiness, activity, steps, sleep_duration");
+const ouraMetricParam = z.enum(["sleep_score", "hrv", "readiness", "activity", "steps", "sleep_duration", "stress", "resting_heart_rate", "temperature", "active_calories", "heart_rate", "efficiency"]).describe("Oura metric: sleep_score, hrv, readiness, activity, steps, sleep_duration, stress, resting_heart_rate, temperature, active_calories, heart_rate, efficiency");
 
 const ouraAnalysisTypeParam = z.enum(["sleep_quality", "anomalies", "hrv_trend", "temperature", "best_sleep"]);
 
@@ -480,7 +480,7 @@ export const toolSpecs = {
   },
   get_oura_weekly: {
     name: "get_oura_weekly" as const,
-    description: "Get a 7-day Oura overview with daily scores and aggregate stats.",
+    description: "Get a 7-day Oura overview with daily scores, stress, efficiency, and aggregate stats.",
     params: z.object({
       end_date: dateString.optional().describe("Week end date (inclusive); defaults to today"),
     }),
@@ -488,7 +488,7 @@ export const toolSpecs = {
   },
   get_oura_trends: {
     name: "get_oura_trends" as const,
-    description: "Get trend direction and rolling averages for a selected Oura metric.",
+    description: "Get trend direction and rolling averages for a selected Oura metric. Supports: sleep_score, hrv, readiness, activity, steps, sleep_duration, stress, resting_heart_rate, temperature, active_calories, heart_rate, efficiency.",
     params: z.object({
       metric: ouraMetricParam.default("sleep_score"),
       days: z.number().int().min(7).max(120).default(30),
@@ -506,7 +506,7 @@ export const toolSpecs = {
   },
   oura_compare_periods: {
     name: "oura_compare_periods" as const,
-    description: "Compare biometrics between two date ranges and return percentage deltas.",
+    description: "Compare biometrics between two date ranges and return percentage deltas. Covers all trendable metrics including stress, resting HR, temperature, calories, heart rate, and efficiency.",
     params: z.object({
       from_a: dateString,
       to_a: dateString,
@@ -517,7 +517,7 @@ export const toolSpecs = {
   },
   oura_correlate: {
     name: "oura_correlate" as const,
-    description: "Compute correlation between two Oura metrics over N days.",
+    description: "Compute correlation between two Oura metrics over N days. Supports all trendable metrics including stress, resting HR, temperature, calories, heart rate, and efficiency.",
     params: z.object({
       metric_a: ouraMetricParam,
       metric_b: ouraMetricParam,
