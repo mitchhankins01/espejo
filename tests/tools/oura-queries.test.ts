@@ -283,6 +283,15 @@ describe("getOuraTrendMetricForRange", () => {
       ["2025-01-01", "2025-01-15"]
     );
   });
+
+  it("includes stress join for stress metric", async () => {
+    const pool = mockPool([]);
+    await getOuraTrendMetricForRange(pool, "stress", "2025-01-01", "2025-01-15");
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.stringContaining("oura_daily_stress"),
+      ["2025-01-01", "2025-01-15"]
+    );
+  });
 });
 
 describe("getOuraSleepDetailForRange", () => {
