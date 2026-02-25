@@ -205,12 +205,20 @@ export async function runOuraSync(pool: pg.Pool, lookbackDays: number): Promise<
   }
 }
 
+let lastSentInsight: string | null = null;
+
+export function _resetLastSentInsight(): void {
+  lastSentInsight = null;
+}
+
 export function notifyOuraSync(result: OuraSyncResult, insight: string | null = null): void {
   const chatId = config.telegram.allowedChatId;
   const token = config.telegram.botToken;
   if (!token || !chatId) return;
   if (!insight) return;
+  if (insight === lastSentInsight) return;
 
+  lastSentInsight = insight;
   const updated = formatUpdatedDataSummary(result.counts);
   const text = `Oura sync insight: ${insight}\nUpdated: ${updated}`;
   const { sleep, sessions, readiness, activity, stress, workouts } = result.counts;
