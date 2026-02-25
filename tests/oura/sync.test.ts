@@ -52,7 +52,7 @@ vi.mock("../../src/oura/client.js", () => ({
   },
 }));
 
-import { runOuraSync, notifyOuraSync, startOuraSyncTimer, buildOuraSyncInsight } from "../../src/oura/sync.js";
+import { runOuraSync, notifyOuraSync, startOuraSyncTimer, buildOuraSyncInsight, _resetLastSentInsight } from "../../src/oura/sync.js";
 
 function makeMockPool(lockResult = true): any {
   return {
@@ -79,6 +79,7 @@ beforeEach(() => {
   mockConfig.config.telegram.botToken = "test-bot-token";
   mockConfig.config.telegram.allowedChatId = "100";
   mockSendTelegramMessage.mockReset().mockResolvedValue(undefined);
+  _resetLastSentInsight();
 });
 
 describe("runOuraSync", () => {
@@ -264,6 +265,35 @@ describe("notifyOuraSync", () => {
     );
 
     expect(mockSendTelegramMessage).not.toHaveBeenCalled();
+  });
+
+  it("suppresses duplicate insight on consecutive calls", () => {
+    const result = {
+      runId: 5,
+      total: 1,
+      counts: { sleep: 0, sessions: 0, readiness: 1, activity: 0, stress: 0, workouts: 0 },
+      durationMs: 1000,
+    };
+    const insight = "Readiness is down 12 points vs yesterday. Keep effort moderate and prioritize rest.";
+
+    notifyOuraSync(result, insight);
+    notifyOuraSync({ ...result, runId: 6 }, insight);
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends again when insight text changes", () => {
+    const result = {
+      runId: 7,
+      total: 1,
+      counts: { sleep: 0, sessions: 0, readiness: 1, activity: 0, stress: 0, workouts: 0 },
+      durationMs: 1000,
+    };
+
+    notifyOuraSync(result, "Readiness is down 12 points vs yesterday. Keep effort moderate and prioritize rest.");
+    notifyOuraSync({ ...result, runId: 8 }, "Readiness is up 5 points vs yesterday. Good window for focused work or training.");
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledTimes(2);
   });
 });
 
