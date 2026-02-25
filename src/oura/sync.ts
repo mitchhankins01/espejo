@@ -209,9 +209,10 @@ export function notifyOuraSync(result: OuraSyncResult, insight: string | null = 
   const chatId = config.telegram.allowedChatId;
   const token = config.telegram.botToken;
   if (!token || !chatId) return;
+  if (!insight) return;
 
   const updated = formatUpdatedDataSummary(result.counts);
-  const text = insight ? `Oura sync insight: ${insight}\nUpdated: ${updated}` : `Oura sync updated: ${updated}`;
+  const text = `Oura sync insight: ${insight}\nUpdated: ${updated}`;
   const { sleep, sessions, readiness, activity, stress, workouts } = result.counts;
   const callbackData = `oura_sync:${result.runId}:${sleep},${sessions},${readiness},${activity},${stress},${workouts}`;
   const replyMarkup = {
