@@ -200,6 +200,42 @@ describe("notifyOuraSync", () => {
     );
   });
 
+  it("includes only non-zero updated datasets in summary", () => {
+    notifyOuraSync(
+      {
+        runId: 1,
+        total: 3,
+        counts: { sleep: 1, sessions: 0, readiness: 0, activity: 2, stress: 0, workouts: 0 },
+        durationMs: 3500,
+      },
+      "Sleep dropped 60m vs yesterday. Aim for an earlier wind-down tonight."
+    );
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      expect.stringContaining("Updated: sleep 1, activity 2"),
+      expect.anything()
+    );
+  });
+
+  it("uses 'no data changes' in summary when all counts are zero", () => {
+    notifyOuraSync(
+      {
+        runId: 2,
+        total: 0,
+        counts: { sleep: 0, sessions: 0, readiness: 0, activity: 0, stress: 0, workouts: 0 },
+        durationMs: 1000,
+      },
+      "Recovery looks strong (sleep 450m, readiness 84). Good day for focused effort."
+    );
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      expect.stringContaining("no data changes"),
+      expect.anything()
+    );
+  });
+
   it("skips when no botToken", () => {
     mockConfig.config.telegram.botToken = "";
     notifyOuraSync(
