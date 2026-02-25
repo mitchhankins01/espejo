@@ -160,7 +160,7 @@ describe("runOuraSync", () => {
 });
 
 describe("notifyOuraSync", () => {
-  it("sends message with inline keyboard", () => {
+  it("skips notification when no insight is provided", () => {
     notifyOuraSync({
       runId: 42,
       total: 368,
@@ -168,50 +168,10 @@ describe("notifyOuraSync", () => {
       durationMs: 8000,
     });
 
-    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
-      "100",
-      expect.stringContaining("Oura sync updated:"),
-      expect.objectContaining({
-        inline_keyboard: expect.arrayContaining([
-          expect.arrayContaining([
-            expect.objectContaining({ text: "Details", callback_data: expect.stringContaining("oura_sync:42:") }),
-          ]),
-        ]),
-      })
-    );
+    expect(mockSendTelegramMessage).not.toHaveBeenCalled();
   });
 
-  it("includes only non-zero updated datasets", () => {
-    notifyOuraSync({
-      runId: 1,
-      total: 10,
-      counts: { sleep: 1, sessions: 0, readiness: 0, activity: 2, stress: 0, workouts: 0 },
-      durationMs: 3500,
-    });
-
-    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
-      "100",
-      expect.stringContaining("sleep 1, activity 2"),
-      expect.anything()
-    );
-  });
-
-  it("uses fallback text when no datasets changed", () => {
-    notifyOuraSync({
-      runId: 2,
-      total: 0,
-      counts: { sleep: 0, sessions: 0, readiness: 0, activity: 0, stress: 0, workouts: 0 },
-      durationMs: 1000,
-    });
-
-    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
-      "100",
-      expect.stringContaining("no data changes"),
-      expect.anything()
-    );
-  });
-
-  it("includes actionable insight when provided", () => {
+  it("sends insight with inline keyboard and updated summary", () => {
     notifyOuraSync(
       {
         runId: 3,
@@ -225,7 +185,13 @@ describe("notifyOuraSync", () => {
     expect(mockSendTelegramMessage).toHaveBeenCalledWith(
       "100",
       expect.stringContaining("Oura sync insight: Stress is up 45m vs yesterday."),
-      expect.anything()
+      expect.objectContaining({
+        inline_keyboard: expect.arrayContaining([
+          expect.arrayContaining([
+            expect.objectContaining({ text: "Details", callback_data: expect.stringContaining("oura_sync:3:") }),
+          ]),
+        ]),
+      })
     );
     expect(mockSendTelegramMessage).toHaveBeenCalledWith(
       "100",
@@ -236,24 +202,30 @@ describe("notifyOuraSync", () => {
 
   it("skips when no botToken", () => {
     mockConfig.config.telegram.botToken = "";
-    notifyOuraSync({
-      runId: 1,
-      total: 10,
-      counts: { sleep: 1, sessions: 2, readiness: 1, activity: 2, stress: 2, workouts: 2 },
-      durationMs: 1000,
-    });
+    notifyOuraSync(
+      {
+        runId: 1,
+        total: 10,
+        counts: { sleep: 1, sessions: 2, readiness: 1, activity: 2, stress: 2, workouts: 2 },
+        durationMs: 1000,
+      },
+      "Some insight"
+    );
 
     expect(mockSendTelegramMessage).not.toHaveBeenCalled();
   });
 
   it("skips when no allowedChatId", () => {
     mockConfig.config.telegram.allowedChatId = "";
-    notifyOuraSync({
-      runId: 1,
-      total: 10,
-      counts: { sleep: 1, sessions: 2, readiness: 1, activity: 2, stress: 2, workouts: 2 },
-      durationMs: 1000,
-    });
+    notifyOuraSync(
+      {
+        runId: 1,
+        total: 10,
+        counts: { sleep: 1, sessions: 2, readiness: 1, activity: 2, stress: 2, workouts: 2 },
+        durationMs: 1000,
+      },
+      "Some insight"
+    );
 
     expect(mockSendTelegramMessage).not.toHaveBeenCalled();
   });
