@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("../../src/config.js", () => ({
   config: { oura: { accessToken: "test-token" } },
@@ -172,6 +172,59 @@ describe("OuraClient", () => {
       await client.getWorkouts("2025-01-14", "2025-01-16");
       const url = mockFetch.mock.calls[0][0] as URL;
       expect(url.searchParams.get("start_date")).toBe("2025-01-14");
+    });
+  });
+
+  describe("retry on transient HTTP errors", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("retries on 504 and succeeds", async () => {
+      mockFetch
+        .mockResolvedValueOnce(apiError(504, "Gateway Timeout"))
+        .mockResolvedValueOnce(apiResponse([{ day: "2025-01-15", score: 85 }]));
+
+      const promise = client.getDailySleep("2025-01-15", "2025-01-15");
+      await vi.runAllTimersAsync();
+      const result = await promise;
+      expect(result).toEqual([{ day: "2025-01-15", score: 85 }]);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("retries on 502 and 503", async () => {
+      mockFetch
+        .mockResolvedValueOnce(apiError(502, "Bad Gateway"))
+        .mockResolvedValueOnce(apiError(503, "Service Unavailable"))
+        .mockResolvedValueOnce(apiResponse([{ day: "2025-01-15" }]));
+
+      const promise = client.getDailySleep("2025-01-15", "2025-01-15");
+      await vi.runAllTimersAsync();
+      const result = await promise;
+      expect(result).toEqual([{ day: "2025-01-15" }]);
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+    });
+
+    it("throws after exhausting retries", async () => {
+      mockFetch.mockResolvedValue(apiError(504, "Timeout"));
+
+      const promise = client.getDailySleep("2025-01-15", "2025-01-15");
+      const assertion = expect(promise).rejects.toThrow("Oura API daily_sleep failed (504): Timeout");
+      await vi.runAllTimersAsync();
+      await assertion;
+      expect(mockFetch).toHaveBeenCalledTimes(4);
+    });
+
+    it("does not retry non-retryable status codes", async () => {
+      mockFetch.mockResolvedValueOnce(apiError(401, "Unauthorized"));
+      await expect(client.getDailySleep("2025-01-15", "2025-01-15")).rejects.toThrow(
+        "Oura API daily_sleep failed (401): Unauthorized"
+      );
+      expect(mockFetch).toHaveBeenCalledTimes(1);
     });
   });
 

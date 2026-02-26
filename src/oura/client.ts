@@ -2,6 +2,13 @@ import { config } from "../config.js";
 import type { OuraApiListResponse } from "./types.js";
 
 const BASE_URL = "https://api.ouraring.com/v2/usercollection";
+const MAX_RETRIES = 3;
+const BASE_DELAY_MS = 1000;
+const RETRYABLE_STATUSES = new Set([502, 503, 504]);
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function addDays(dateStr: string, days: number): string {
   const date = new Date(`${dateStr}T00:00:00Z`);
@@ -33,16 +40,21 @@ export class OuraClient {
       url.searchParams.set("end_date", endDate);
       if (nextToken) url.searchParams.set("next_token", nextToken);
 
-      const response = await fetch(url, {
-        headers: { Authorization: `Bearer ${this.token}` },
-      });
-
-      if (!response.ok) {
-        const errorBody = await response.text();
-        throw new Error(`Oura API ${endpoint} failed (${response.status}): ${errorBody}`);
+      let response: Response | undefined;
+      for (let attempt = 0; ; attempt++) {
+        response = await fetch(url, {
+          headers: { Authorization: `Bearer ${this.token}` },
+        });
+        if (response.ok || !RETRYABLE_STATUSES.has(response.status) || attempt >= MAX_RETRIES) break;
+        await sleep(BASE_DELAY_MS * 2 ** attempt);
       }
 
-      const payload = (await response.json()) as OuraApiListResponse<T>;
+      if (!response!.ok) {
+        const errorBody = await response!.text();
+        throw new Error(`Oura API ${endpoint} failed (${response!.status}): ${errorBody}`);
+      }
+
+      const payload = (await response!.json()) as OuraApiListResponse<T>;
       all.push(...(payload.data ?? []));
       nextToken = payload.next_token ?? undefined;
       page++;
