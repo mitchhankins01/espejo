@@ -132,7 +132,7 @@ specs/
   knowledge-artifacts.md — Knowledge base spec (artifacts, unified search, web app).
   ltm-research.md   — Evidence-based research on long-term memory architecture.
   aws-sst-migration-plan.md — Future AWS/SST migration plan (not implemented).
-  web-app.spec.md   — Future web dashboard spec (not implemented).
+  web-app.spec.md   — Web app spec (React + Vite knowledge base frontend).
   fixtures/
     seed.ts         — Test data with pre-computed embeddings for determinism.
 packages/
@@ -141,11 +141,11 @@ web/                — React + Vite frontend (@espejo/web workspace). Knowledge
   src/
     main.tsx        — Entry point. React Router with 3 routes: /, /new, /:id.
     api.ts          — API client for artifact CRUD and entry search.
-    pages/          — ArtifactList, ArtifactCreate, ArtifactEdit page components.
-    components/     — KindSelect, TagInput, SourcePicker reusable components.
+    index.css       — Tailwind CSS v4 entry point with custom theme (pine green accent, dark mode).
+    pages/          — ArtifactList (paginated, search+filter pills), ArtifactCreate, ArtifactEdit page components.
+    components/     — AuthGate, KindSelect, TagInput, SourcePicker, MarkdownEditor reusable components.
     hooks/          — useAutosave (debounced save with cancel).
-  src/routes/       — Page components (entries list, detail view).
-  src/lib/server/   — Server-side DB queries.
+  e2e/              — Playwright e2e tests (auth, CRUD, filters, pagination, theme).
 ```
 
 ## Key Patterns
@@ -682,7 +682,7 @@ Beyond MCP transport and Telegram webhook, the HTTP server (`src/transports/http
 | `/api/spanish/:chatId/dashboard` | GET | Aggregated Spanish learning analytics (retention, funnel, trends, assessment) |
 | `/api/spanish/:chatId/assessments` | GET | Spanish assessment history |
 | `/api/weight` | POST | Log daily weight (`{ weight_kg, date? }`) |
-| `/api/artifacts` | GET | List/search artifacts (`q` triggers RRF search, filters: `kind`, `tags`, `limit`, `offset`) |
+| `/api/artifacts` | GET | List/search artifacts. Without `q`: returns `{ items, total }` for pagination. With `q`: returns array (RRF search). Filters: `kind`, `tags`, `limit`, `offset` |
 | `/api/artifacts/:id` | GET | Get full artifact with sources and version |
 | `/api/artifacts` | POST | Create artifact (`{ kind, title, body, tags?, source_entry_uuids? }`) |
 | `/api/artifacts/:id` | PUT | Update artifact with optimistic locking (`expected_version`, 409 on conflict) |
