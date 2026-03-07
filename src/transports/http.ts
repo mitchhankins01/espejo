@@ -1,3 +1,5 @@
+import path from "path";
+import { fileURLToPath } from "url";
 import express from "express";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -19,7 +21,16 @@ import {
   getSpanishAdaptiveContext,
   getSpanishAssessments,
   getLatestSpanishAssessment,
+  createArtifact,
+  updateArtifact,
+  deleteArtifact,
+  getArtifactById,
+  listArtifacts,
+  searchArtifacts,
+  searchContent,
+  searchEntriesForPicker,
 } from "../db/queries.js";
+import { generateEmbedding } from "../db/embeddings.js";
 import { registerOAuthRoutes, isValidOAuthToken } from "./oauth.js";
 import { startOuraSyncTimer } from "../oura/sync.js";
 
@@ -37,7 +48,7 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
   // CORS
   app.use((_req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
     res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
     if (_req.method === "OPTIONS") {
       res.sendStatus(204);
@@ -263,6 +274,203 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
     }
   });
 
+  // ---------------------------------------------------------------------------
+  // Knowledge artifact endpoints
+  // ---------------------------------------------------------------------------
+
+  const requireBearerAuth = (req: express.Request, res: express.Response): boolean => {
+    if (!secret) return true;
+    const auth = req.headers.authorization;
+    if (!auth || !auth.startsWith("Bearer ") || auth.slice(7) !== secret) {
+      res.status(401).json({ error: "Unauthorized" });
+      return false;
+    }
+    /* v8 ignore next */
+    return true;
+  };
+
+  const artifactKindSchema = z.enum(["insight", "theory", "model", "reference"]);
+
+  // GET /api/artifacts — list or search
+  app.get("/api/artifacts", async (req, res) => {
+    if (!requireBearerAuth(req, res)) return;
+
+    try {
+      const q = req.query.q ? String(req.query.q) : undefined;
+      /* v8 ignore next */
+      const kind = req.query.kind ? artifactKindSchema.parse(req.query.kind) : undefined;
+      /* v8 ignore next */
+      const tags = req.query.tags ? String(req.query.tags).split(",").filter(Boolean) : undefined;
+      /* v8 ignore next */
+      const tagsMode = (req.query.tags_mode === "all" ? "all" : "any") as "any" | "all";
+      /* v8 ignore next */
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? "20"), 10) || 20, 1), q ? 50 : 100);
+      /* v8 ignore next */
+      const offset = Math.max(parseInt(String(req.query.offset ?? "0"), 10) || 0, 0);
+
+      if (q) {
+        const embedding = await generateEmbedding(q);
+        const results = await searchArtifacts(pool, embedding, q, { kind, tags, tags_mode: tagsMode }, limit);
+        res.json(results);
+      } else {
+        const results = await listArtifacts(pool, { kind, tags, tags_mode: tagsMode, limit, offset });
+        res.json(results);
+      }
+    } catch (err) {
+      console.error("Artifact list/search error:", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  // GET /api/artifacts/:id
+  app.get("/api/artifacts/:id", async (req, res) => {
+    /* v8 ignore next */
+    if (!requireBearerAuth(req, res)) return;
+
+    try {
+      const artifact = await getArtifactById(pool, req.params.id);
+      if (!artifact) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+      res.json(artifact);
+    } catch (err) {
+      console.error("Artifact get error:", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  const createArtifactSchema = z.object({
+    kind: artifactKindSchema,
+    title: z.string().min(1).max(300),
+    body: z.string().min(1),
+    tags: z.array(z.string()).optional(),
+    source_entry_uuids: z.array(z.string()).optional(),
+  });
+
+  // POST /api/artifacts
+  app.post("/api/artifacts", async (req, res) => {
+    /* v8 ignore next */
+    if (!requireBearerAuth(req, res)) return;
+
+    const parsed = createArtifactSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues });
+      return;
+    }
+
+    try {
+      const artifact = await createArtifact(pool, parsed.data);
+      res.status(201).json(artifact);
+    } catch (err) {
+      console.error("Artifact create error:", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  const updateArtifactSchema = z.object({
+    kind: artifactKindSchema.optional(),
+    title: z.string().min(1).max(300).optional(),
+    body: z.string().min(1).optional(),
+    tags: z.array(z.string()).optional(),
+    source_entry_uuids: z.array(z.string()).optional(),
+    expected_version: z.number().int().min(1),
+  });
+
+  // PUT /api/artifacts/:id
+  app.put("/api/artifacts/:id", async (req, res) => {
+    /* v8 ignore next */
+    if (!requireBearerAuth(req, res)) return;
+
+    const parsed = updateArtifactSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues });
+      return;
+    }
+
+    try {
+      const { expected_version, ...data } = parsed.data;
+      const result = await updateArtifact(pool, req.params.id, expected_version, data);
+
+      if (result === null) {
+        res.status(404).json({ error: "Not found" });
+      } else if (result === "version_conflict") {
+        res.status(409).json({ error: "Version conflict. Reload and try again." });
+      } else {
+        res.json(result);
+      }
+    } catch (err) {
+      console.error("Artifact update error:", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  // DELETE /api/artifacts/:id
+  app.delete("/api/artifacts/:id", async (req, res) => {
+    /* v8 ignore next */
+    if (!requireBearerAuth(req, res)) return;
+
+    try {
+      const deleted = await deleteArtifact(pool, req.params.id);
+      if (!deleted) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+      res.json({ status: "deleted" });
+    } catch (err) {
+      console.error("Artifact delete error:", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  // GET /api/entries/search — lightweight search for source picker
+  app.get("/api/entries/search", async (req, res) => {
+    /* v8 ignore next */
+    if (!requireBearerAuth(req, res)) return;
+
+    const q = req.query.q ? String(req.query.q) : "";
+    if (!q) {
+      res.status(400).json({ error: "Missing q parameter" });
+      return;
+    }
+
+    try {
+      /* v8 ignore next */
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? "10"), 10) || 10, 1), 50);
+      const results = await searchEntriesForPicker(pool, q, limit);
+      res.json(results);
+    } catch (err) {
+      console.error("Entry search error:", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  // GET /api/content/search — unified search
+  app.get("/api/content/search", async (req, res) => {
+    /* v8 ignore next */
+    if (!requireBearerAuth(req, res)) return;
+
+    const q = req.query.q ? String(req.query.q) : "";
+    if (!q) {
+      res.status(400).json({ error: "Missing q parameter" });
+      return;
+    }
+
+    try {
+      /* v8 ignore next */
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? "10"), 10) || 10, 1), 50);
+      const contentTypes = req.query.content_types
+        ? String(req.query.content_types).split(",").filter(Boolean) as ("journal_entry" | "knowledge_artifact")[]
+        : undefined;
+      const embedding = await generateEmbedding(q);
+      const results = await searchContent(pool, embedding, q, { content_types: contentTypes }, limit);
+      res.json(results);
+    } catch (err) {
+      console.error("Content search error:", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
   // Telegram webhook (conditional — only when bot token is configured)
   /* v8 ignore next 4 -- dynamic import tested in telegram-webhook.test.ts */
   if (config.telegram.botToken) {
@@ -289,6 +497,18 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
         });
       }
     }
+  });
+
+  // Serve web app static files from web/dist
+  /* v8 ignore next 9 -- static file serving only active when web build exists */
+  const webDistPath = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "..", "..", "web", "dist"
+  );
+  app.use(express.static(webDistPath));
+  app.get("/{*splat}", (_req, res, next) => {
+    if (_req.path.startsWith("/api") || _req.path.startsWith("/mcp")) return next();
+    res.sendFile(path.join(webDistPath, "index.html"));
   });
 
   const server = app.listen(port, "0.0.0.0", () => {

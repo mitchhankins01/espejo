@@ -556,6 +556,67 @@ CREATE TABLE IF NOT EXISTS oura_workouts (
 );
 CREATE INDEX IF NOT EXISTS idx_oura_workouts_day ON oura_workouts(day DESC);
 
+-- ============================================================================
+-- Knowledge artifacts
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS knowledge_artifacts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    kind TEXT NOT NULL CHECK (kind IN ('insight', 'theory', 'model', 'reference')),
+    title TEXT NOT NULL CHECK (char_length(title) BETWEEN 1 AND 300),
+    body TEXT NOT NULL CHECK (char_length(body) > 0),
+    tags TEXT[] NOT NULL DEFAULT '{}',
+    embedding vector(1536),
+    embedding_model TEXT NOT NULL DEFAULT 'text-embedding-3-small',
+    tsv tsvector GENERATED ALWAYS AS (
+        to_tsvector('english', coalesce(title, '') || ' ' || coalesce(body, ''))
+    ) STORED,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    version INT NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_artifacts_embedding
+    ON knowledge_artifacts USING ivfflat (embedding vector_cosine_ops) WITH (lists = 50);
+CREATE INDEX IF NOT EXISTS idx_knowledge_artifacts_tsv
+    ON knowledge_artifacts USING GIN (tsv);
+CREATE INDEX IF NOT EXISTS idx_knowledge_artifacts_kind
+    ON knowledge_artifacts (kind);
+CREATE INDEX IF NOT EXISTS idx_knowledge_artifacts_tags
+    ON knowledge_artifacts USING GIN (tags);
+CREATE INDEX IF NOT EXISTS idx_knowledge_artifacts_updated
+    ON knowledge_artifacts (updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS knowledge_artifact_sources (
+    artifact_id UUID NOT NULL REFERENCES knowledge_artifacts(id) ON DELETE CASCADE,
+    entry_uuid TEXT NOT NULL REFERENCES entries(uuid) ON DELETE RESTRICT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (artifact_id, entry_uuid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_artifact_sources_entry
+    ON knowledge_artifact_sources (entry_uuid);
+
+-- Trigger: auto-bump updated_at and version on UPDATE
+CREATE OR REPLACE FUNCTION knowledge_artifact_version_bump()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at := NOW();
+    NEW.version := OLD.version + 1;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_knowledge_artifact_version_bump ON knowledge_artifacts;
+CREATE TRIGGER trg_knowledge_artifact_version_bump
+    BEFORE UPDATE ON knowledge_artifacts
+    FOR EACH ROW
+    EXECUTE FUNCTION knowledge_artifact_version_bump();
+
+-- ============================================================================
+-- Views
+-- ============================================================================
+
 CREATE OR REPLACE VIEW daily_health_snapshot AS
 SELECT d.day,
        d.score AS sleep_score,

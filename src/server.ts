@@ -18,6 +18,10 @@ import { handleGetOuraTrends } from "./tools/get-oura-trends.js";
 import { handleGetOuraAnalysis } from "./tools/get-oura-analysis.js";
 import { handleOuraComparePeriods } from "./tools/oura-compare-periods.js";
 import { handleOuraCorrelate } from "./tools/oura-correlate.js";
+import { handleGetArtifact } from "./tools/get-artifact.js";
+import { handleListArtifacts } from "./tools/list-artifacts.js";
+import { handleSearchArtifacts } from "./tools/search-artifacts.js";
+import { handleSearchContent } from "./tools/search-content.js";
 
 export type ToolHandler = (pool: pg.Pool, input: unknown) => Promise<string>;
 
@@ -39,6 +43,10 @@ export const toolHandlers: Record<string, ToolHandler> = {
   get_oura_analysis: handleGetOuraAnalysis,
   oura_compare_periods: handleOuraComparePeriods,
   oura_correlate: handleOuraCorrelate,
+  get_artifact: handleGetArtifact,
+  list_artifacts: handleListArtifacts,
+  search_artifacts: handleSearchArtifacts,
+  search_content: handleSearchContent,
 };
 
 export function createServer(pool: pg.Pool, version: string): McpServer {

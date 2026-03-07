@@ -7,6 +7,8 @@ const mockApp = {
   use: vi.fn().mockReturnThis(),
   get: vi.fn().mockReturnThis(),
   post: vi.fn().mockReturnThis(),
+  put: vi.fn().mockReturnThis(),
+  delete: vi.fn().mockReturnThis(),
   listen: vi.fn().mockImplementation(
     (_port: number, _host: string, cb: () => void) => {
       cb();
@@ -19,6 +21,7 @@ vi.mock("express", () => {
   const fn = vi.fn(() => mockApp);
   (fn as any).json = vi.fn(() => "json-middleware");
   (fn as any).urlencoded = vi.fn(() => "urlencoded-middleware");
+  (fn as any).static = vi.fn(() => "static-middleware");
   return { default: fn };
 });
 
@@ -58,6 +61,15 @@ const {
   mockGetSpanishAdaptiveContext,
   mockGetSpanishAssessments,
   mockGetLatestSpanishAssessment,
+  mockCreateArtifact,
+  mockUpdateArtifact,
+  mockDeleteArtifact,
+  mockGetArtifactById,
+  mockListArtifacts,
+  mockSearchArtifacts,
+  mockSearchContent,
+  mockSearchEntriesForPicker,
+  mockGenerateEmbedding,
 } = vi.hoisted(() => ({
   mockPool: {},
   mockUpsertDailyMetric: vi.fn(),
@@ -73,10 +85,23 @@ const {
   mockGetSpanishAdaptiveContext: vi.fn(),
   mockGetSpanishAssessments: vi.fn(),
   mockGetLatestSpanishAssessment: vi.fn(),
+  mockCreateArtifact: vi.fn(),
+  mockUpdateArtifact: vi.fn(),
+  mockDeleteArtifact: vi.fn(),
+  mockGetArtifactById: vi.fn(),
+  mockListArtifacts: vi.fn(),
+  mockSearchArtifacts: vi.fn(),
+  mockSearchContent: vi.fn(),
+  mockSearchEntriesForPicker: vi.fn(),
+  mockGenerateEmbedding: vi.fn(),
 }));
 
 vi.mock("../../src/db/client.js", () => ({
   pool: mockPool,
+}));
+
+vi.mock("../../src/db/embeddings.js", () => ({
+  generateEmbedding: mockGenerateEmbedding,
 }));
 
 vi.mock("../../src/db/queries.js", () => ({
@@ -93,6 +118,14 @@ vi.mock("../../src/db/queries.js", () => ({
   getSpanishAdaptiveContext: mockGetSpanishAdaptiveContext,
   getSpanishAssessments: mockGetSpanishAssessments,
   getLatestSpanishAssessment: mockGetLatestSpanishAssessment,
+  createArtifact: mockCreateArtifact,
+  updateArtifact: mockUpdateArtifact,
+  deleteArtifact: mockDeleteArtifact,
+  getArtifactById: mockGetArtifactById,
+  listArtifacts: mockListArtifacts,
+  searchArtifacts: mockSearchArtifacts,
+  searchContent: mockSearchContent,
+  searchEntriesForPicker: mockSearchEntriesForPicker,
 }));
 
 const mockHandleRequest = vi.fn();
@@ -126,6 +159,8 @@ describe("startHttpServer", () => {
     mockApp.use.mockReturnThis();
     mockApp.get.mockReturnThis();
     mockApp.post.mockReturnThis();
+    mockApp.put.mockReturnThis();
+    mockApp.delete.mockReturnThis();
     mockApp.listen.mockImplementation(
       (_port: number, _host: string, cb: () => void) => {
         cb();
@@ -347,7 +382,7 @@ describe("startHttpServer", () => {
     );
     expect(mockRes.header).toHaveBeenCalledWith(
       "Access-Control-Allow-Methods",
-      "GET, POST, DELETE, OPTIONS"
+      "GET, POST, PUT, DELETE, OPTIONS"
     );
     expect(mockRes.header).toHaveBeenCalledWith(
       "Access-Control-Allow-Headers",
@@ -1072,6 +1107,432 @@ describe("startHttpServer", () => {
 
     await handler(mockReq, mockRes);
 
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  // =========================================================================
+  // Knowledge artifact endpoints
+  // =========================================================================
+
+  const mockArtifact = {
+    id: "art-001",
+    kind: "insight",
+    title: "Test",
+    body: "Body",
+    tags: ["test"],
+    has_embedding: true,
+    created_at: new Date("2025-01-15"),
+    updated_at: new Date("2025-01-15"),
+    version: 1,
+    source_entry_uuids: [],
+  };
+
+  it("registers artifact GET endpoint", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/artifacts");
+    expect(call).toBeTruthy();
+  });
+
+  it("GET /api/artifacts lists artifacts", async () => {
+    mockListArtifacts.mockResolvedValue([mockArtifact]);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/artifacts");
+    const handler = call![1];
+
+    const mockReq = { headers: {}, query: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockListArtifacts).toHaveBeenCalled();
+    expect(mockRes.json).toHaveBeenCalledWith([mockArtifact]);
+  });
+
+  it("GET /api/artifacts searches when q provided", async () => {
+    mockGenerateEmbedding.mockResolvedValue([0.1, 0.2]);
+    mockSearchArtifacts.mockResolvedValue([mockArtifact]);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/artifacts");
+    const handler = call![1];
+
+    const mockReq = { headers: {}, query: { q: "dopamine" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockGenerateEmbedding).toHaveBeenCalledWith("dopamine");
+    expect(mockSearchArtifacts).toHaveBeenCalled();
+  });
+
+  it("GET /api/artifacts returns 500 on error", async () => {
+    mockListArtifacts.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/artifacts");
+    const handler = call![1];
+
+    const mockReq = { headers: {}, query: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  it("GET /api/artifacts rejects unauthorized", async () => {
+    const { config } = await import("../../src/config.js");
+    (config as any).server.mcpSecret = "test-secret";
+
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/artifacts");
+    const handler = call![1];
+
+    const mockReq = { headers: {}, query: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(401);
+    (config as any).server.mcpSecret = "";
+  });
+
+  it("GET /api/artifacts accepts valid bearer token", async () => {
+    const { config } = await import("../../src/config.js");
+    (config as any).server.mcpSecret = "test-secret";
+    mockListArtifacts.mockResolvedValue([]);
+
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/artifacts");
+    const handler = call![1];
+
+    const mockReq = { headers: { authorization: "Bearer test-secret" }, query: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.json).toHaveBeenCalled();
+    expect(mockRes.status).not.toHaveBeenCalledWith(401);
+    (config as any).server.mcpSecret = "";
+  });
+
+  it("GET /api/artifacts/:id returns artifact", async () => {
+    mockGetArtifactById.mockResolvedValue(mockArtifact);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/artifacts/:id");
+    const handler = call![1];
+
+    const mockReq = { headers: {}, params: { id: "art-001" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.json).toHaveBeenCalledWith(mockArtifact);
+  });
+
+  it("GET /api/artifacts/:id returns 404", async () => {
+    mockGetArtifactById.mockResolvedValue(null);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/artifacts/:id");
+    const handler = call![1];
+
+    const mockReq = { headers: {}, params: { id: "missing" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(404);
+  });
+
+  it("GET /api/artifacts/:id returns 500 on error", async () => {
+    mockGetArtifactById.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/artifacts/:id");
+    const handler = call![1];
+
+    const mockReq = { headers: {}, params: { id: "art-001" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  it("POST /api/artifacts creates artifact", async () => {
+    mockCreateArtifact.mockResolvedValue(mockArtifact);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/artifacts");
+    const handler = call![1];
+
+    const mockReq = {
+      headers: {},
+      body: { kind: "insight", title: "Test", body: "Body" },
+    };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(201);
+    expect(mockRes.json).toHaveBeenCalledWith(mockArtifact);
+  });
+
+  it("POST /api/artifacts rejects invalid body", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/artifacts");
+    const handler = call![1];
+
+    const mockReq = { headers: {}, body: { kind: "invalid" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+  });
+
+  it("POST /api/artifacts returns 500 on error", async () => {
+    mockCreateArtifact.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/artifacts");
+    const handler = call![1];
+
+    const mockReq = { headers: {}, body: { kind: "insight", title: "T", body: "B" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  it("PUT /api/artifacts/:id updates artifact", async () => {
+    mockUpdateArtifact.mockResolvedValue(mockArtifact);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/artifacts/:id");
+    const handler = call![1];
+
+    const mockReq = {
+      headers: {},
+      params: { id: "art-001" },
+      body: { title: "Updated", expected_version: 1 },
+    };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.json).toHaveBeenCalledWith(mockArtifact);
+  });
+
+  it("PUT /api/artifacts/:id returns 409 on version conflict", async () => {
+    mockUpdateArtifact.mockResolvedValue("version_conflict");
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/artifacts/:id");
+    const handler = call![1];
+
+    const mockReq = {
+      headers: {},
+      params: { id: "art-001" },
+      body: { title: "Updated", expected_version: 1 },
+    };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(409);
+  });
+
+  it("PUT /api/artifacts/:id returns 404 when not found", async () => {
+    mockUpdateArtifact.mockResolvedValue(null);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/artifacts/:id");
+    const handler = call![1];
+
+    const mockReq = {
+      headers: {},
+      params: { id: "missing" },
+      body: { title: "Updated", expected_version: 1 },
+    };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(404);
+  });
+
+  it("PUT /api/artifacts/:id rejects invalid body", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/artifacts/:id");
+    const handler = call![1];
+
+    const mockReq = {
+      headers: {},
+      params: { id: "art-001" },
+      body: { title: "Updated" }, // missing expected_version
+    };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+  });
+
+  it("PUT /api/artifacts/:id returns 500 on error", async () => {
+    mockUpdateArtifact.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/artifacts/:id");
+    const handler = call![1];
+
+    const mockReq = {
+      headers: {},
+      params: { id: "art-001" },
+      body: { title: "Updated", expected_version: 1 },
+    };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  it("DELETE /api/artifacts/:id deletes artifact", async () => {
+    mockDeleteArtifact.mockResolvedValue(true);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.delete.mock.calls.find((c: any[]) => c[0] === "/api/artifacts/:id");
+    const handler = call![1];
+
+    const mockReq = { headers: {}, params: { id: "art-001" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.json).toHaveBeenCalledWith({ status: "deleted" });
+  });
+
+  it("DELETE /api/artifacts/:id returns 404 when not found", async () => {
+    mockDeleteArtifact.mockResolvedValue(false);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.delete.mock.calls.find((c: any[]) => c[0] === "/api/artifacts/:id");
+    const handler = call![1];
+
+    const mockReq = { headers: {}, params: { id: "missing" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(404);
+  });
+
+  it("DELETE /api/artifacts/:id returns 500 on error", async () => {
+    mockDeleteArtifact.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.delete.mock.calls.find((c: any[]) => c[0] === "/api/artifacts/:id");
+    const handler = call![1];
+
+    const mockReq = { headers: {}, params: { id: "art-001" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  it("GET /api/entries/search returns results", async () => {
+    const entries = [{ uuid: "ENTRY-001", created_at: new Date(), preview: "Test" }];
+    mockSearchEntriesForPicker.mockResolvedValue(entries);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/entries/search");
+    const handler = call![1];
+
+    const mockReq = { headers: {}, query: { q: "test" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.json).toHaveBeenCalledWith(entries);
+  });
+
+  it("GET /api/entries/search rejects missing q", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/entries/search");
+    const handler = call![1];
+
+    const mockReq = { headers: {}, query: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+  });
+
+  it("GET /api/entries/search returns 500 on error", async () => {
+    mockSearchEntriesForPicker.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/entries/search");
+    const handler = call![1];
+
+    const mockReq = { headers: {}, query: { q: "test" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  it("GET /api/content/search returns unified results", async () => {
+    mockGenerateEmbedding.mockResolvedValue([0.1, 0.2]);
+    mockSearchContent.mockResolvedValue([{ content_type: "journal_entry", id: "ENTRY-001" }]);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/content/search");
+    const handler = call![1];
+
+    const mockReq = { headers: {}, query: { q: "test" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockSearchContent).toHaveBeenCalled();
+  });
+
+  it("GET /api/content/search passes content_types filter", async () => {
+    mockGenerateEmbedding.mockResolvedValue([0.1, 0.2]);
+    mockSearchContent.mockResolvedValue([]);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/content/search");
+    const handler = call![1];
+
+    const mockReq = { headers: {}, query: { q: "test", content_types: "journal_entry,knowledge_artifact" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockSearchContent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "test",
+      { content_types: ["journal_entry", "knowledge_artifact"] },
+      10
+    );
+  });
+
+  it("GET /api/content/search rejects missing q", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/content/search");
+    const handler = call![1];
+
+    const mockReq = { headers: {}, query: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+  });
+
+  it("GET /api/content/search returns 500 on error", async () => {
+    mockGenerateEmbedding.mockResolvedValue([0.1, 0.2]);
+    mockSearchContent.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/content/search");
+    const handler = call![1];
+
+    const mockReq = { headers: {}, query: { q: "test" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
     expect(mockRes.status).toHaveBeenCalledWith(500);
   });
 });

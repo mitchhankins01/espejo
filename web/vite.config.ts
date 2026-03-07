@@ -1,7 +1,11 @@
-import { sveltekit } from "@sveltejs/kit/vite";
-import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
 
 export default defineConfig({
-  plugins: [tailwindcss(), sveltekit()],
+  plugins: [react()],
+  server: {
+    proxy: {
+      "/api": "http://127.0.0.1:3000",
+    },
+  },
 });

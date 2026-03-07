@@ -306,6 +306,41 @@ export const fixturePatterns: FixturePattern[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Artifact fixtures
+// ---------------------------------------------------------------------------
+
+const artifactNicotineBase = generateBaseEmbedding(900);
+const artifactSleepBase = generateBaseEmbedding(1000);
+
+export interface FixtureArtifact {
+  kind: string;
+  title: string;
+  body: string;
+  tags: string[];
+  embedding: number[];
+  source_entry_uuids?: string[];
+}
+
+export const fixtureArtifacts: FixtureArtifact[] = [
+  {
+    kind: "insight",
+    title: "Nicotine crashes dopamine baseline for 24-48 hours",
+    body: "Observed pattern: nicotine use leads to a measurable crash in dopamine baseline the following day. Readiness scores drop 20-30 points. The short-term focus boost is not worth the multi-day recovery cost. This aligns with Huberman's dopamine regulation model.",
+    tags: ["dopamine", "nicotine", "health"],
+    embedding: artifactNicotineBase,
+    source_entry_uuids: ["ENTRY-006-HEALTH-NICOTINE"],
+  },
+  {
+    kind: "theory",
+    title: "Sleep quality is primarily determined by pre-sleep habits",
+    body: "Theory: sleep quality correlates more strongly with evening behavior (screen time, caffeine timing, stress) than with sleep environment factors. Evidence from journal entries and HRV data suggests a 2pm caffeine cutoff and 9pm screen cutoff are the two highest-leverage interventions.",
+    tags: ["sleep", "health", "habits"],
+    embedding: artifactSleepBase,
+    source_entry_uuids: ["ENTRY-008-HEALTH-SLEEP"],
+  },
+];
+
+// ---------------------------------------------------------------------------
 // Seed function for test setup
 // ---------------------------------------------------------------------------
 
@@ -391,6 +426,28 @@ export async function seedFixtures(pool: pg.Pool): Promise<void> {
     await pool.query(`INSERT INTO oura_daily_stress (day, stress_high_seconds, recovery_high_seconds, day_summary, raw_json) VALUES ($1,$2,$3,$4,$5)`, [o.day, 7200, 5400, "normal", { day: o.day }]);
     await pool.query(`INSERT INTO oura_sleep_sessions (oura_id, day, period, average_hrv, average_heart_rate, total_sleep_duration_seconds, efficiency, raw_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [`sleep-${o.day}`, o.day, 0, o.hrv, o.hr, o.duration, o.efficiency, { day: o.day }]);
     await pool.query(`INSERT INTO oura_workouts (oura_id, day, activity, calories, distance, duration_seconds, average_heart_rate, max_heart_rate, raw_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [`workout-${o.day}`, o.day, "running", 450, 6.2, 2400, 132, 164, { day: o.day }]);
+  }
+
+  // Seed knowledge artifacts
+  for (const artifact of fixtureArtifacts) {
+    const embeddingStr = `[${artifact.embedding.join(",")}]`;
+    const result = await pool.query(
+      `INSERT INTO knowledge_artifacts (kind, title, body, tags, embedding)
+       VALUES ($1, $2, $3, $4, $5::vector)
+       RETURNING id`,
+      [artifact.kind, artifact.title, artifact.body, artifact.tags, embeddingStr]
+    );
+    const artifactId = result.rows[0].id as string;
+
+    if (artifact.source_entry_uuids) {
+      for (const uuid of artifact.source_entry_uuids) {
+        await pool.query(
+          `INSERT INTO knowledge_artifact_sources (artifact_id, entry_uuid)
+           VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+          [artifactId, uuid]
+        );
+      }
+    }
   }
 
   // Seed patterns

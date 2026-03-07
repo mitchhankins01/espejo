@@ -128,6 +128,91 @@ async function embedEntries(force: boolean): Promise<void> {
   }
 
   console.log(`Done. Embedded ${processed} entries. [${elapsed(t0)}]`);
+
+  // ---------------------------------------------------------------------------
+  // Phase 2: Embed knowledge artifacts
+  // ---------------------------------------------------------------------------
+  const artifactWhere = force
+    ? "WHERE body IS NOT NULL"
+    : "WHERE embedding IS NULL AND body IS NOT NULL";
+  const artifactCountResult = await pool.query(
+    `SELECT COUNT(*)::int AS count FROM knowledge_artifacts ${artifactWhere}`
+  );
+  const artifactCount = artifactCountResult.rows[0].count as number;
+
+  if (artifactCount === 0) {
+    console.log("All artifacts already have embeddings.");
+  } else {
+    const artifactBatches = Math.ceil(artifactCount / BATCH_SIZE);
+    console.log(`\nEmbedding ${artifactCount} artifacts (${artifactBatches} batches)...`);
+
+    let artProcessed = 0;
+    let artBatchNum = 0;
+
+    while (artProcessed < artifactCount) {
+      artBatchNum++;
+      const batchStart = process.hrtime.bigint();
+
+      const batch = await pool.query(
+        `SELECT id, title, body FROM knowledge_artifacts ${artifactWhere}
+         ORDER BY created_at
+         LIMIT $1`,
+        [BATCH_SIZE]
+      );
+
+      if (batch.rows.length === 0) break;
+
+      const texts = batch.rows.map(
+        (row) => `${row.title as string}\n\n${row.body as string}`
+      );
+      const ids = batch.rows.map((row) => row.id as string);
+
+      try {
+        const apiStart = process.hrtime.bigint();
+        const response = await openai.embeddings.create({
+          model: EMBEDDING_MODEL,
+          input: texts,
+          dimensions: EMBEDDING_DIMENSIONS,
+        });
+        const apiTime = elapsed(apiStart);
+
+        const sorted = response.data.sort((a, b) => a.index - b.index);
+
+        const dbStart = process.hrtime.bigint();
+        const embeddingStrs = sorted.map(
+          (d) => `[${d.embedding.join(",")}]`
+        );
+        await pool.query(
+          `UPDATE knowledge_artifacts SET embedding = data.emb::vector
+           FROM unnest($1::uuid[], $2::text[]) AS data(id, emb)
+           WHERE knowledge_artifacts.id = data.id`,
+          [ids, embeddingStrs]
+        );
+        const dbTime = elapsed(dbStart);
+
+        artProcessed += batch.rows.length;
+        const remaining = artifactCount - artProcessed;
+        const batchMs = Number(process.hrtime.bigint() - batchStart) / 1e6;
+        const etaMin = (remaining / BATCH_SIZE) * (batchMs + SLEEP_MS) / 60000;
+        console.log(
+          `  Batch ${artBatchNum}/${artifactBatches}: ${artProcessed}/${artifactCount} [API: ${apiTime}, DB: ${dbTime}, ETA: ${etaMin.toFixed(1)}min]`
+        );
+      } catch (err) {
+        console.error(
+          `  Error embedding artifact batch at ${artProcessed}: ${err instanceof Error ? err.message : err}`
+        );
+        break;
+      }
+
+      if (artProcessed < artifactCount) {
+        await new Promise((resolve) => setTimeout(resolve, SLEEP_MS));
+      }
+    }
+
+    console.log(`Done. Embedded ${artProcessed} artifacts.`);
+  }
+
+  console.log(`Total time: ${elapsed(t0)}`);
   await pool.end();
 }
 

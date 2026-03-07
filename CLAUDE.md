@@ -70,6 +70,10 @@ src/
     conjugate-verb.ts — Spanish verb conjugation lookup from reference DB.
     log-vocabulary.ts — Track Spanish vocabulary with SRS state per chat.
     spanish-quiz.ts — Spaced-repetition quiz: get due cards, record reviews, stats.
+    get-artifact.ts — Single artifact by ID with sources and version.
+    list-artifacts.ts — List/filter artifacts by kind, tags, pagination.
+    search-artifacts.ts — Hybrid RRF search over knowledge artifacts.
+    search-content.ts — Unified cross-type search over entries + artifacts.
     get-oura-summary.ts — Single-day Oura health snapshot.
     get-oura-weekly.ts — 7-day Oura overview with averages.
     get-oura-trends.ts — N-day trend analysis for a metric.
@@ -125,6 +129,7 @@ specs/
   self-healing-organism.md — Autonomous quality loop design (pulse checks, soul repairs).
   episodic-memory.md — Implemented episodic memory + hardening notes (fact + event).
   oura-integration-plan.md — Oura Ring integration design (5 phases, all implemented).
+  knowledge-artifacts.md — Knowledge base spec (artifacts, unified search, web app).
   ltm-research.md   — Evidence-based research on long-term memory architecture.
   aws-sst-migration-plan.md — Future AWS/SST migration plan (not implemented).
   web-app.spec.md   — Future web dashboard spec (not implemented).
@@ -132,7 +137,13 @@ specs/
     seed.ts         — Test data with pre-computed embeddings for determinism.
 packages/
   shared/           — @espejo/shared workspace. Shared TypeScript types between MCP server and web frontend.
-web/                — SvelteKit frontend (@espejo/web workspace). Early/partial — not production-ready.
+web/                — React + Vite frontend (@espejo/web workspace). Knowledge base CRUD editor.
+  src/
+    main.tsx        — Entry point. React Router with 3 routes: /, /new, /:id.
+    api.ts          — API client for artifact CRUD and entry search.
+    pages/          — ArtifactList, ArtifactCreate, ArtifactEdit page components.
+    components/     — KindSelect, TagInput, SourcePicker reusable components.
+    hooks/          — useAutosave (debounced save with cancel).
   src/routes/       — Page components (entries list, detail view).
   src/lib/server/   — Server-side DB queries.
 ```
@@ -671,6 +682,13 @@ Beyond MCP transport and Telegram webhook, the HTTP server (`src/transports/http
 | `/api/spanish/:chatId/dashboard` | GET | Aggregated Spanish learning analytics (retention, funnel, trends, assessment) |
 | `/api/spanish/:chatId/assessments` | GET | Spanish assessment history |
 | `/api/weight` | POST | Log daily weight (`{ weight_kg, date? }`) |
+| `/api/artifacts` | GET | List/search artifacts (`q` triggers RRF search, filters: `kind`, `tags`, `limit`, `offset`) |
+| `/api/artifacts/:id` | GET | Get full artifact with sources and version |
+| `/api/artifacts` | POST | Create artifact (`{ kind, title, body, tags?, source_entry_uuids? }`) |
+| `/api/artifacts/:id` | PUT | Update artifact with optimistic locking (`expected_version`, 409 on conflict) |
+| `/api/artifacts/:id` | DELETE | Delete artifact and cascade source links |
+| `/api/entries/search` | GET | Lightweight entry search for source picker (`{ uuid, created_at, preview }`) |
+| `/api/content/search` | GET | Unified search across entries + artifacts |
 | `/api/telegram` | POST | Telegram webhook endpoint (validated via `X-Telegram-Bot-Api-Secret-Token`) |
 
 ## What's Out of Scope
@@ -678,8 +696,7 @@ Beyond MCP transport and Telegram webhook, the HTTP server (`src/transports/http
 Do not implement these (they're planned future work, not part of the current build):
 
 - Clustering analysis (HDBSCAN/k-means over embeddings)
-- Write/update/delete tools (this server is read-only for journal entries)
-- Web UI or dashboard (spec at `specs/web-app.spec.md`, early SvelteKit scaffold in `web/` — not production-ready)
+- Write/update/delete tools (this server is read-only for journal entries; artifacts have CRUD via REST API)
 - Multi-user support or auth beyond MCP SDK defaults
 - Chunking strategies (entries fit in single embeddings)
 - Auto-purge of compacted messages (function exists in `queries.ts`, not wired up)

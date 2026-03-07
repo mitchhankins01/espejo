@@ -3073,3 +3073,654 @@ export async function getOuraTemperatureData(
   );
   return result.rows;
 }
+
+// ============================================================================
+// Knowledge artifact queries
+// ============================================================================
+
+export type ArtifactKind = "insight" | "theory" | "model" | "reference";
+
+export interface ArtifactRow {
+  id: string;
+  kind: ArtifactKind;
+  title: string;
+  body: string;
+  tags: string[];
+  has_embedding: boolean;
+  created_at: Date;
+  updated_at: Date;
+  version: number;
+  source_entry_uuids: string[];
+}
+
+export interface ArtifactSearchResultRow {
+  id: string;
+  kind: ArtifactKind;
+  title: string;
+  body: string;
+  tags: string[];
+  has_embedding: boolean;
+  rrf_score: number;
+  has_semantic: boolean;
+  has_fulltext: boolean;
+  created_at: Date;
+  updated_at: Date;
+  version: number;
+}
+
+export interface UnifiedSearchResultRow {
+  content_type: "journal_entry" | "knowledge_artifact";
+  id: string;
+  title_or_label: string;
+  snippet: string;
+  rrf_score: number;
+  match_sources: ("semantic" | "fulltext")[];
+}
+
+/**
+ * Normalize tags: trim, lowercase, dedupe, stable sort.
+ */
+export function normalizeTags(tags: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const tag of tags) {
+    const normalized = tag.trim().toLowerCase();
+    if (normalized.length > 0 && !seen.has(normalized)) {
+      seen.add(normalized);
+      result.push(normalized);
+    }
+  }
+  return result.sort();
+}
+
+export async function createArtifact(
+  pool: pg.Pool,
+  data: {
+    kind: ArtifactKind;
+    title: string;
+    body: string;
+    tags?: string[];
+    source_entry_uuids?: string[];
+  }
+): Promise<ArtifactRow> {
+  const tags = normalizeTags(data.tags ?? []);
+
+  const result = await pool.query(
+    `INSERT INTO knowledge_artifacts (kind, title, body, tags)
+     VALUES ($1, $2, $3, $4)
+     RETURNING id, kind, title, body, tags, (embedding IS NOT NULL) AS has_embedding,
+               created_at, updated_at, version`,
+    [data.kind, data.title, data.body, tags]
+  );
+
+  const row = result.rows[0];
+  const id = row.id as string;
+
+  if (data.source_entry_uuids && data.source_entry_uuids.length > 0) {
+    for (const uuid of data.source_entry_uuids) {
+      await pool.query(
+        `INSERT INTO knowledge_artifact_sources (artifact_id, entry_uuid)
+         VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [id, uuid]
+      );
+    }
+  }
+
+  return {
+    id,
+    kind: row.kind as ArtifactKind,
+    title: row.title as string,
+    body: row.body as string,
+    /* v8 ignore next */
+    tags: (row.tags as string[]) || [],
+    has_embedding: row.has_embedding as boolean,
+    created_at: row.created_at as Date,
+    updated_at: row.updated_at as Date,
+    version: row.version as number,
+    source_entry_uuids: data.source_entry_uuids ?? [],
+  };
+}
+
+export async function updateArtifact(
+  pool: pg.Pool,
+  id: string,
+  expectedVersion: number,
+  data: {
+    kind?: ArtifactKind;
+    title?: string;
+    body?: string;
+    tags?: string[];
+    source_entry_uuids?: string[];
+  }
+): Promise<ArtifactRow | "version_conflict" | null> {
+  // Fetch current state to detect what changed
+  const current = await pool.query(
+    `SELECT title, body, kind, tags, version FROM knowledge_artifacts WHERE id = $1`,
+    [id]
+  );
+  if (current.rows.length === 0) return null;
+
+  const currentRow = current.rows[0];
+  if ((currentRow.version as number) !== expectedVersion) return "version_conflict";
+
+  const newTitle = data.title ?? (currentRow.title as string);
+  const newBody = data.body ?? (currentRow.body as string);
+  const newKind = data.kind ?? (currentRow.kind as ArtifactKind);
+  const newTags = data.tags !== undefined ? normalizeTags(data.tags) : (currentRow.tags as string[]);
+
+  const titleChanged = newTitle !== (currentRow.title as string);
+  const bodyChanged = newBody !== (currentRow.body as string);
+  const contentChanged = titleChanged || bodyChanged;
+
+  // Build SET clauses
+  const setClauses: string[] = [];
+  const setParams: unknown[] = [id];
+  let paramIdx = 1;
+
+  paramIdx++;
+  setClauses.push(`kind = $${paramIdx}`);
+  setParams.push(newKind);
+
+  paramIdx++;
+  setClauses.push(`title = $${paramIdx}`);
+  setParams.push(newTitle);
+
+  paramIdx++;
+  setClauses.push(`body = $${paramIdx}`);
+  setParams.push(newBody);
+
+  paramIdx++;
+  setClauses.push(`tags = $${paramIdx}`);
+  setParams.push(newTags);
+
+  // Invalidate embedding if content changed
+  if (contentChanged) {
+    setClauses.push(`embedding = NULL`);
+    setClauses.push(`embedding_model = 'text-embedding-3-small'`);
+  }
+
+  const result = await pool.query(
+    `UPDATE knowledge_artifacts
+     SET ${setClauses.join(", ")}
+     WHERE id = $1
+     RETURNING id, kind, title, body, tags, (embedding IS NOT NULL) AS has_embedding,
+               created_at, updated_at, version`,
+    setParams
+  );
+
+  const row = result.rows[0];
+
+  // Update source links if provided
+  if (data.source_entry_uuids !== undefined) {
+    await pool.query(
+      `DELETE FROM knowledge_artifact_sources WHERE artifact_id = $1`,
+      [id]
+    );
+    for (const uuid of data.source_entry_uuids) {
+      await pool.query(
+        `INSERT INTO knowledge_artifact_sources (artifact_id, entry_uuid)
+         VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [id, uuid]
+      );
+    }
+  }
+
+  // Fetch source UUIDs
+  const sources = await pool.query(
+    `SELECT entry_uuid FROM knowledge_artifact_sources WHERE artifact_id = $1 ORDER BY entry_uuid`,
+    [id]
+  );
+
+  return {
+    id: row.id as string,
+    kind: row.kind as ArtifactKind,
+    title: row.title as string,
+    body: row.body as string,
+    /* v8 ignore next */
+    tags: (row.tags as string[]) || [],
+    has_embedding: row.has_embedding as boolean,
+    created_at: row.created_at as Date,
+    updated_at: row.updated_at as Date,
+    version: row.version as number,
+    source_entry_uuids: sources.rows.map((r) => r.entry_uuid as string),
+  };
+}
+
+export async function deleteArtifact(
+  pool: pg.Pool,
+  id: string
+): Promise<boolean> {
+  const result = await pool.query(
+    `DELETE FROM knowledge_artifacts WHERE id = $1`,
+    [id]
+  );
+  /* v8 ignore next */
+  return (result.rowCount ?? 0) > 0;
+}
+
+export async function getArtifactById(
+  pool: pg.Pool,
+  id: string
+): Promise<ArtifactRow | null> {
+  const result = await pool.query(
+    `SELECT id, kind, title, body, tags, (embedding IS NOT NULL) AS has_embedding,
+            created_at, updated_at, version
+     FROM knowledge_artifacts WHERE id = $1`,
+    [id]
+  );
+
+  if (result.rows.length === 0) return null;
+
+  const row = result.rows[0];
+  const sources = await pool.query(
+    `SELECT entry_uuid FROM knowledge_artifact_sources WHERE artifact_id = $1 ORDER BY entry_uuid`,
+    [id]
+  );
+
+  return {
+    id: row.id as string,
+    kind: row.kind as ArtifactKind,
+    title: row.title as string,
+    body: row.body as string,
+    /* v8 ignore next */
+    tags: (row.tags as string[]) || [],
+    has_embedding: row.has_embedding as boolean,
+    created_at: row.created_at as Date,
+    updated_at: row.updated_at as Date,
+    version: row.version as number,
+    source_entry_uuids: sources.rows.map((r) => r.entry_uuid as string),
+  };
+}
+
+export interface ListArtifactsFilters {
+  kind?: ArtifactKind;
+  tags?: string[];
+  tags_mode?: "any" | "all";
+  limit?: number;
+  offset?: number;
+}
+
+export async function listArtifacts(
+  pool: pg.Pool,
+  filters: ListArtifactsFilters
+): Promise<ArtifactRow[]> {
+  const whereClauses: string[] = [];
+  const params: unknown[] = [];
+  let paramIdx = 0;
+
+  if (filters.kind) {
+    paramIdx++;
+    whereClauses.push(`kind = $${paramIdx}`);
+    params.push(filters.kind);
+  }
+
+  if (filters.tags && filters.tags.length > 0) {
+    paramIdx++;
+    const mode = filters.tags_mode ?? "any";
+    if (mode === "all") {
+      whereClauses.push(`tags @> $${paramIdx}::text[]`);
+    } else {
+      whereClauses.push(`tags && $${paramIdx}::text[]`);
+    }
+    params.push(normalizeTags(filters.tags));
+  }
+
+  const whereClause = whereClauses.length > 0 ? "WHERE " + whereClauses.join(" AND ") : "";
+  const limit = Math.min(filters.limit ?? 20, 100);
+  const offset = filters.offset ?? 0;
+
+  paramIdx++;
+  params.push(limit);
+  const limitParam = paramIdx;
+
+  paramIdx++;
+  params.push(offset);
+  const offsetParam = paramIdx;
+
+  const result = await pool.query(
+    `SELECT id, kind, title, body, tags, (embedding IS NOT NULL) AS has_embedding,
+            created_at, updated_at, version
+     FROM knowledge_artifacts
+     ${whereClause}
+     ORDER BY updated_at DESC
+     LIMIT $${limitParam} OFFSET $${offsetParam}`,
+    params
+  );
+
+  // Batch-fetch source UUIDs
+  const ids = result.rows.map((r) => r.id as string);
+  const sourcesMap = await getArtifactSourcesMap(pool, ids);
+
+  return result.rows.map((row) => ({
+    id: row.id as string,
+    kind: row.kind as ArtifactKind,
+    title: row.title as string,
+    body: row.body as string,
+    /* v8 ignore next */
+    tags: (row.tags as string[]) || [],
+    has_embedding: row.has_embedding as boolean,
+    created_at: row.created_at as Date,
+    updated_at: row.updated_at as Date,
+    version: row.version as number,
+    /* v8 ignore next */
+    source_entry_uuids: sourcesMap.get(row.id as string) ?? [],
+  }));
+}
+
+async function getArtifactSourcesMap(
+  pool: pg.Pool,
+  artifactIds: string[]
+): Promise<Map<string, string[]>> {
+  const map = new Map<string, string[]>();
+  /* v8 ignore next */
+  if (artifactIds.length === 0) return map;
+
+  const result = await pool.query(
+    `SELECT artifact_id, entry_uuid FROM knowledge_artifact_sources
+     WHERE artifact_id = ANY($1::uuid[])
+     ORDER BY artifact_id, entry_uuid`,
+    [artifactIds]
+  );
+
+  for (const row of result.rows) {
+    const aid = row.artifact_id as string;
+    if (!map.has(aid)) map.set(aid, []);
+    map.get(aid)!.push(row.entry_uuid as string);
+  }
+
+  return map;
+}
+
+export async function searchArtifacts(
+  pool: pg.Pool,
+  queryEmbedding: number[],
+  queryText: string,
+  filters: { kind?: ArtifactKind; tags?: string[]; tags_mode?: "any" | "all" },
+  limit: number
+): Promise<ArtifactSearchResultRow[]> {
+  const embeddingStr = `[${queryEmbedding.join(",")}]`;
+
+  const filterClauses: string[] = [];
+  const filterParams: unknown[] = [];
+  let paramIdx = 3; // $1=embedding, $2=query text, $3=limit
+
+  if (filters.kind) {
+    paramIdx++;
+    filterClauses.push(`a.kind = $${paramIdx}`);
+    filterParams.push(filters.kind);
+  }
+
+  if (filters.tags && filters.tags.length > 0) {
+    paramIdx++;
+    const mode = filters.tags_mode ?? "any";
+    if (mode === "all") {
+      filterClauses.push(`a.tags @> $${paramIdx}::text[]`);
+    } else {
+      filterClauses.push(`a.tags && $${paramIdx}::text[]`);
+    }
+    filterParams.push(normalizeTags(filters.tags));
+  }
+
+  const filterWhere = filterClauses.length > 0 ? "AND " + filterClauses.join(" AND ") : "";
+
+  const sql = `
+    WITH params AS (
+      SELECT $1::vector AS query_embedding, plainto_tsquery('english', $2) AS ts_query
+    ),
+    semantic AS (
+      SELECT a.id,
+             ROW_NUMBER() OVER (ORDER BY a.embedding <=> p.query_embedding) AS rank_s
+      FROM knowledge_artifacts a, params p
+      WHERE a.embedding IS NOT NULL
+      ${filterWhere}
+      ORDER BY a.embedding <=> p.query_embedding
+      LIMIT 20
+    ),
+    fulltext AS (
+      SELECT a.id,
+             ROW_NUMBER() OVER (ORDER BY ts_rank(a.tsv, p.ts_query) DESC) AS rank_f
+      FROM knowledge_artifacts a, params p
+      WHERE a.tsv @@ p.ts_query
+      ${filterWhere}
+      LIMIT 20
+    )
+    SELECT
+      a.id, a.kind, a.title, a.body, a.tags,
+      (a.embedding IS NOT NULL) AS has_embedding,
+      a.created_at, a.updated_at, a.version,
+      COALESCE(1.0 / (60 + s.rank_s), 0) + COALESCE(1.0 / (60 + f.rank_f), 0) AS rrf_score,
+      s.id IS NOT NULL AS has_semantic,
+      f.id IS NOT NULL AS has_fulltext
+    FROM knowledge_artifacts a
+    LEFT JOIN semantic s ON a.id = s.id
+    LEFT JOIN fulltext f ON a.id = f.id
+    WHERE s.id IS NOT NULL OR f.id IS NOT NULL
+    ORDER BY rrf_score DESC
+    LIMIT $3
+  `;
+
+  const result = await pool.query(sql, [
+    embeddingStr,
+    queryText,
+    limit,
+    ...filterParams,
+  ]);
+
+  return result.rows.map((row) => ({
+    id: row.id as string,
+    kind: row.kind as ArtifactKind,
+    title: row.title as string,
+    body: row.body as string,
+    /* v8 ignore next */
+    tags: (row.tags as string[]) || [],
+    has_embedding: row.has_embedding as boolean,
+    rrf_score: parseFloat(row.rrf_score as string),
+    has_semantic: row.has_semantic as boolean,
+    has_fulltext: row.has_fulltext as boolean,
+    created_at: row.created_at as Date,
+    updated_at: row.updated_at as Date,
+    version: row.version as number,
+  }));
+}
+
+export async function searchContent(
+  pool: pg.Pool,
+  queryEmbedding: number[],
+  queryText: string,
+  filters: {
+    content_types?: ("journal_entry" | "knowledge_artifact")[];
+    date_from?: string;
+    date_to?: string;
+    city?: string;
+    entry_tags?: string[];
+    artifact_kind?: ArtifactKind;
+    artifact_tags?: string[];
+  },
+  limit: number
+): Promise<UnifiedSearchResultRow[]> {
+  const embeddingStr = `[${queryEmbedding.join(",")}]`;
+  const contentTypes = filters.content_types ?? ["journal_entry", "knowledge_artifact"];
+  const includeEntries = contentTypes.includes("journal_entry");
+  const includeArtifacts = contentTypes.includes("knowledge_artifact");
+
+  const allResults: UnifiedSearchResultRow[] = [];
+
+  if (includeEntries) {
+    // Build entry filter clauses
+    const entryClauses: string[] = [];
+    const entryParams: unknown[] = [];
+    let entryIdx = 3;
+
+    if (filters.date_from) {
+      entryIdx++;
+      entryClauses.push(`e.created_at >= $${entryIdx}::timestamptz`);
+      entryParams.push(filters.date_from);
+    }
+    if (filters.date_to) {
+      entryIdx++;
+      entryClauses.push(`e.created_at < ($${entryIdx}::date + interval '1 day')`);
+      entryParams.push(filters.date_to);
+    }
+    if (filters.city) {
+      entryIdx++;
+      entryClauses.push(`e.city ILIKE $${entryIdx}`);
+      entryParams.push(filters.city);
+    }
+    if (filters.entry_tags && filters.entry_tags.length > 0) {
+      entryIdx++;
+      entryClauses.push(
+        `EXISTS (SELECT 1 FROM entry_tags et JOIN tags t ON t.id = et.tag_id WHERE et.entry_id = e.id AND t.name = ANY($${entryIdx}::text[]))`
+      );
+      entryParams.push(filters.entry_tags);
+    }
+    const entryFilterWhere = entryClauses.length > 0 ? "AND " + entryClauses.join(" AND ") : "";
+
+    const entrySql = `
+      WITH params AS (
+        SELECT $1::vector AS query_embedding, plainto_tsquery('english', $2) AS ts_query
+      ),
+      semantic AS (
+        SELECT e.id,
+               ROW_NUMBER() OVER (ORDER BY e.embedding <=> p.query_embedding) AS rank_s
+        FROM entries e, params p
+        WHERE e.embedding IS NOT NULL
+        ${entryFilterWhere}
+        ORDER BY e.embedding <=> p.query_embedding
+        LIMIT 20
+      ),
+      fulltext AS (
+        SELECT e.id,
+               ROW_NUMBER() OVER (ORDER BY ts_rank(e.text_search, p.ts_query) DESC) AS rank_f
+        FROM entries e, params p
+        WHERE e.text_search @@ p.ts_query
+        ${entryFilterWhere}
+        LIMIT 20
+      )
+      SELECT
+        'journal_entry' AS content_type,
+        e.uuid AS id,
+        COALESCE(e.city, to_char(e.created_at, 'YYYY-MM-DD')) AS title_or_label,
+        LEFT(COALESCE(e.text, ''), 200) AS snippet,
+        COALESCE(1.0 / (60 + s.rank_s), 0) + COALESCE(1.0 / (60 + f.rank_f), 0) AS rrf_score,
+        s.id IS NOT NULL AS has_semantic,
+        f.id IS NOT NULL AS has_fulltext
+      FROM entries e
+      LEFT JOIN semantic s ON e.id = s.id
+      LEFT JOIN fulltext f ON e.id = f.id
+      WHERE s.id IS NOT NULL OR f.id IS NOT NULL
+      ORDER BY rrf_score DESC
+      LIMIT $3
+    `;
+
+    const entryResult = await pool.query(entrySql, [embeddingStr, queryText, limit, ...entryParams]);
+    for (const row of entryResult.rows) {
+      const matchSources: ("semantic" | "fulltext")[] = [];
+      if (row.has_semantic) matchSources.push("semantic");
+      if (row.has_fulltext) matchSources.push("fulltext");
+      allResults.push({
+        content_type: "journal_entry",
+        id: row.id as string,
+        title_or_label: row.title_or_label as string,
+        snippet: row.snippet as string,
+        rrf_score: parseFloat(row.rrf_score as string),
+        match_sources: matchSources,
+      });
+    }
+  }
+
+  if (includeArtifacts) {
+    // Build artifact filter clauses
+    const artClauses: string[] = [];
+    const artParams: unknown[] = [];
+    let artIdx = 3;
+
+    if (filters.artifact_kind) {
+      artIdx++;
+      artClauses.push(`a.kind = $${artIdx}`);
+      artParams.push(filters.artifact_kind);
+    }
+    if (filters.artifact_tags && filters.artifact_tags.length > 0) {
+      artIdx++;
+      artClauses.push(`a.tags && $${artIdx}::text[]`);
+      artParams.push(normalizeTags(filters.artifact_tags));
+    }
+    const artFilterWhere = artClauses.length > 0 ? "AND " + artClauses.join(" AND ") : "";
+
+    const artSql = `
+      WITH params AS (
+        SELECT $1::vector AS query_embedding, plainto_tsquery('english', $2) AS ts_query
+      ),
+      semantic AS (
+        SELECT a.id,
+               ROW_NUMBER() OVER (ORDER BY a.embedding <=> p.query_embedding) AS rank_s
+        FROM knowledge_artifacts a, params p
+        WHERE a.embedding IS NOT NULL
+        ${artFilterWhere}
+        ORDER BY a.embedding <=> p.query_embedding
+        LIMIT 20
+      ),
+      fulltext AS (
+        SELECT a.id,
+               ROW_NUMBER() OVER (ORDER BY ts_rank(a.tsv, p.ts_query) DESC) AS rank_f
+        FROM knowledge_artifacts a, params p
+        WHERE a.tsv @@ p.ts_query
+        ${artFilterWhere}
+        LIMIT 20
+      )
+      SELECT
+        'knowledge_artifact' AS content_type,
+        a.id::text AS id,
+        a.title AS title_or_label,
+        LEFT(a.body, 200) AS snippet,
+        COALESCE(1.0 / (60 + s.rank_s), 0) + COALESCE(1.0 / (60 + f.rank_f), 0) AS rrf_score,
+        s.id IS NOT NULL AS has_semantic,
+        f.id IS NOT NULL AS has_fulltext
+      FROM knowledge_artifacts a
+      LEFT JOIN semantic s ON a.id = s.id
+      LEFT JOIN fulltext f ON a.id = f.id
+      WHERE s.id IS NOT NULL OR f.id IS NOT NULL
+      ORDER BY rrf_score DESC
+      LIMIT $3
+    `;
+
+    const artResult = await pool.query(artSql, [embeddingStr, queryText, limit, ...artParams]);
+    for (const row of artResult.rows) {
+      const matchSources: ("semantic" | "fulltext")[] = [];
+      if (row.has_semantic) matchSources.push("semantic");
+      if (row.has_fulltext) matchSources.push("fulltext");
+      allResults.push({
+        content_type: "knowledge_artifact",
+        id: row.id as string,
+        title_or_label: row.title_or_label as string,
+        snippet: row.snippet as string,
+        rrf_score: parseFloat(row.rrf_score as string),
+        match_sources: matchSources,
+      });
+    }
+  }
+
+  // Merge and sort by RRF score, limit
+  allResults.sort((a, b) => b.rrf_score - a.rrf_score);
+  return allResults.slice(0, limit);
+}
+
+export async function searchEntriesForPicker(
+  pool: pg.Pool,
+  queryText: string,
+  limit: number
+): Promise<Array<{ uuid: string; created_at: Date; preview: string }>> {
+  const result = await pool.query(
+    `SELECT uuid, created_at, LEFT(COALESCE(text, ''), 120) AS preview
+     FROM entries
+     WHERE text_search @@ plainto_tsquery('english', $1)
+     ORDER BY ts_rank(text_search, plainto_tsquery('english', $1)) DESC
+     LIMIT $2`,
+    [queryText, limit]
+  );
+
+  return result.rows.map((row) => ({
+    uuid: row.uuid as string,
+    created_at: row.created_at as Date,
+    preview: row.preview as string,
+  }));
+}

@@ -21,6 +21,7 @@ const databaseUrl =
 interface Migration {
   name: string;
   getSql: () => string;
+  rawStatements?: string[];
 }
 
 const migrations: Migration[] = [
@@ -636,6 +637,64 @@ const migrations: Migration[] = [
       LEFT JOIN daily_metrics m ON m.date = d.day;
     `,
   },
+  {
+    name: "016-knowledge-artifacts",
+    getSql: () => `
+      CREATE TABLE IF NOT EXISTS knowledge_artifacts (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          kind TEXT NOT NULL CHECK (kind IN ('insight', 'theory', 'model', 'reference')),
+          title TEXT NOT NULL CHECK (char_length(title) BETWEEN 1 AND 300),
+          body TEXT NOT NULL CHECK (char_length(body) > 0),
+          tags TEXT[] NOT NULL DEFAULT '{}',
+          embedding vector(1536),
+          embedding_model TEXT NOT NULL DEFAULT 'text-embedding-3-small',
+          tsv tsvector GENERATED ALWAYS AS (
+              to_tsvector('english', coalesce(title, '') || ' ' || coalesce(body, ''))
+          ) STORED,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          version INT NOT NULL DEFAULT 1
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_knowledge_artifacts_embedding
+          ON knowledge_artifacts USING ivfflat (embedding vector_cosine_ops) WITH (lists = 50);
+      CREATE INDEX IF NOT EXISTS idx_knowledge_artifacts_tsv
+          ON knowledge_artifacts USING GIN (tsv);
+      CREATE INDEX IF NOT EXISTS idx_knowledge_artifacts_kind
+          ON knowledge_artifacts (kind);
+      CREATE INDEX IF NOT EXISTS idx_knowledge_artifacts_tags
+          ON knowledge_artifacts USING GIN (tags);
+      CREATE INDEX IF NOT EXISTS idx_knowledge_artifacts_updated
+          ON knowledge_artifacts (updated_at DESC);
+
+      CREATE TABLE IF NOT EXISTS knowledge_artifact_sources (
+          artifact_id UUID NOT NULL REFERENCES knowledge_artifacts(id) ON DELETE CASCADE,
+          entry_uuid TEXT NOT NULL REFERENCES entries(uuid) ON DELETE RESTRICT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (artifact_id, entry_uuid)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_knowledge_artifact_sources_entry
+          ON knowledge_artifact_sources (entry_uuid);
+
+    `,
+    // Separate function because splitSqlStatements doesn't handle $$ quoting
+    rawStatements: [
+      `CREATE OR REPLACE FUNCTION knowledge_artifact_version_bump()
+       RETURNS TRIGGER AS $$
+       BEGIN
+           NEW.updated_at := NOW();
+           NEW.version := OLD.version + 1;
+           RETURN NEW;
+       END;
+       $$ LANGUAGE plpgsql`,
+      `DROP TRIGGER IF EXISTS trg_knowledge_artifact_version_bump ON knowledge_artifacts`,
+      `CREATE TRIGGER trg_knowledge_artifact_version_bump
+           BEFORE UPDATE ON knowledge_artifacts
+           FOR EACH ROW
+           EXECUTE FUNCTION knowledge_artifact_version_bump()`,
+    ],
+  },
 ];
 
 async function migrate(): Promise<void> {
@@ -676,6 +735,13 @@ async function migrate(): Promise<void> {
           }
         }
 
+        // Execute raw statements that can't be split (e.g. $$ quoting)
+        if (migration.rawStatements) {
+          for (const stmt of migration.rawStatements) {
+            await pool.query(stmt);
+          }
+        }
+
         // Record migration
         await pool.query("INSERT INTO _migrations (name) VALUES ($1)", [
           migration.name,
@@ -697,19 +763,31 @@ function splitSqlStatements(sql: string): string[] {
   const statements: string[] = [];
   let current = "";
   let inParens = 0;
+  let inDollarQuote = false;
 
   for (let i = 0; i < sql.length; i++) {
     const char = sql[i];
 
-    if (char === "(") inParens++;
-    if (char === ")") inParens--;
-
-    if (char === ";" && inParens === 0) {
-      statements.push(current.trim());
-      current = "";
-    } else {
-      current += char;
+    // Handle $$ dollar quoting (toggle on/off)
+    if (char === "$" && i + 1 < sql.length && sql[i + 1] === "$") {
+      inDollarQuote = !inDollarQuote;
+      current += "$$";
+      i++; // skip second $
+      continue;
     }
+
+    if (!inDollarQuote) {
+      if (char === "(") inParens++;
+      if (char === ")") inParens--;
+
+      if (char === ";" && inParens === 0) {
+        statements.push(current.trim());
+        current = "";
+        continue;
+      }
+    }
+
+    current += char;
   }
 
   if (current.trim()) {

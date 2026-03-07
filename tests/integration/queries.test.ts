@@ -75,8 +75,16 @@ import {
   insertActivityLog,
   getActivityLog,
   getRecentActivityLogs,
+  createArtifact,
+  updateArtifact,
+  deleteArtifact,
+  getArtifactById,
+  listArtifacts,
+  searchArtifacts,
+  searchContent,
+  searchEntriesForPicker,
 } from "../../src/db/queries.js";
-import { fixturePatterns } from "../../specs/fixtures/seed.js";
+import { fixturePatterns, fixtureArtifacts } from "../../specs/fixtures/seed.js";
 
 // Use the work-stress embedding as a stand-in for query embedding in search tests
 const workStressEntry = fixtureEntries.find(
@@ -2046,5 +2054,512 @@ describe("activity logs", () => {
 
     const logs = await getRecentActivityLogs(pool, { limit: 100 });
     expect(logs.length).toBeGreaterThan(0);
+  });
+});
+
+// ============================================================================
+// Knowledge Artifacts — CRUD
+// ============================================================================
+
+describe("createArtifact", () => {
+  it("creates an artifact and returns it with correct shape", async () => {
+    const art = await createArtifact(pool, {
+      kind: "insight",
+      title: "Test insight",
+      body: "Body text here",
+      tags: ["Health", " sleep "],
+      source_entry_uuids: ["ENTRY-001-WORK-STRESS"],
+    });
+
+    expect(art.id).toBeTruthy();
+    expect(art.kind).toBe("insight");
+    expect(art.title).toBe("Test insight");
+    expect(art.body).toBe("Body text here");
+    expect(art.tags).toEqual(["health", "sleep"]); // normalized
+    expect(art.has_embedding).toBe(false);
+    expect(art.version).toBe(1);
+    expect(art.source_entry_uuids).toEqual(["ENTRY-001-WORK-STRESS"]);
+    expect(art.created_at).toBeInstanceOf(Date);
+    expect(art.updated_at).toBeInstanceOf(Date);
+  });
+
+  it("creates artifact without source entries", async () => {
+    const art = await createArtifact(pool, {
+      kind: "reference",
+      title: "Standalone ref",
+      body: "No sources",
+    });
+
+    expect(art.source_entry_uuids).toEqual([]);
+    expect(art.tags).toEqual([]);
+  });
+});
+
+describe("getArtifactById", () => {
+  it("returns seeded artifact with source UUIDs", async () => {
+    // Get the ID of a seeded artifact
+    const list = await listArtifacts(pool, { kind: "insight" });
+    expect(list.length).toBeGreaterThan(0);
+
+    const art = await getArtifactById(pool, list[0].id);
+    expect(art).not.toBeNull();
+    expect(art!.kind).toBe("insight");
+    expect(art!.source_entry_uuids.length).toBeGreaterThan(0);
+    expect(art!.has_embedding).toBe(true); // seeded with embedding
+  });
+
+  it("returns null for nonexistent ID", async () => {
+    const result = await getArtifactById(pool, "00000000-0000-0000-0000-000000000000");
+    expect(result).toBeNull();
+  });
+});
+
+describe("updateArtifact", () => {
+  it("updates fields and bumps version", async () => {
+    const created = await createArtifact(pool, {
+      kind: "insight",
+      title: "Original title",
+      body: "Original body",
+    });
+
+    const updated = await updateArtifact(pool, created.id, 1, {
+      title: "New title",
+      tags: ["new-tag"],
+    });
+
+    expect(updated).not.toBe("version_conflict");
+    expect(updated).not.toBeNull();
+    const art = updated as Exclude<typeof updated, "version_conflict" | null>;
+    expect(art.title).toBe("New title");
+    expect(art.body).toBe("Original body");
+    expect(art.tags).toEqual(["new-tag"]);
+    expect(art.version).toBe(2);
+  });
+
+  it("returns version_conflict on stale version", async () => {
+    const created = await createArtifact(pool, {
+      kind: "theory",
+      title: "Conflict test",
+      body: "body",
+    });
+
+    // Update once to bump version to 2
+    await updateArtifact(pool, created.id, 1, { title: "V2" });
+
+    // Try again with stale version 1
+    const result = await updateArtifact(pool, created.id, 1, { title: "V3" });
+    expect(result).toBe("version_conflict");
+  });
+
+  it("returns null for nonexistent artifact", async () => {
+    const result = await updateArtifact(pool, "00000000-0000-0000-0000-000000000000", 1, { title: "X" });
+    expect(result).toBeNull();
+  });
+
+  it("invalidates embedding when title changes", async () => {
+    // Use a seeded artifact that has an embedding
+    const list = await listArtifacts(pool, { kind: "insight" });
+    const seeded = list[0];
+    expect(seeded.has_embedding).toBe(true);
+
+    const updated = await updateArtifact(pool, seeded.id, seeded.version, {
+      title: "Changed title invalidates embedding",
+    });
+    const art = updated as Exclude<typeof updated, "version_conflict" | null>;
+    expect(art.has_embedding).toBe(false);
+  });
+
+  it("invalidates embedding when body changes", async () => {
+    const list = await listArtifacts(pool, { kind: "theory" });
+    const seeded = list[0];
+    expect(seeded.has_embedding).toBe(true);
+
+    const updated = await updateArtifact(pool, seeded.id, seeded.version, {
+      body: "Completely new body text",
+    });
+    const art = updated as Exclude<typeof updated, "version_conflict" | null>;
+    expect(art.has_embedding).toBe(false);
+  });
+
+  it("preserves embedding when only tags/kind change", async () => {
+    // Use a seeded artifact that already has an embedding (avoids trigger version bump from manual UPDATE)
+    const list = await listArtifacts(pool, {});
+    const seeded = list.find((a) => a.has_embedding);
+    expect(seeded).toBeDefined();
+
+    const updated = await updateArtifact(pool, seeded!.id, seeded!.version, {
+      kind: "model",
+      tags: ["updated-tag"],
+    });
+    const art = updated as Exclude<typeof updated, "version_conflict" | null>;
+    expect(art.has_embedding).toBe(true);
+    expect(art.kind).toBe("model");
+  });
+
+  it("updates source entry links", async () => {
+    const created = await createArtifact(pool, {
+      kind: "model",
+      title: "Source test",
+      body: "body",
+      source_entry_uuids: ["ENTRY-001-WORK-STRESS"],
+    });
+    expect(created.source_entry_uuids).toEqual(["ENTRY-001-WORK-STRESS"]);
+
+    const updated = await updateArtifact(pool, created.id, 1, {
+      source_entry_uuids: ["ENTRY-002-WORK-BURNOUT", "ENTRY-003-MORNING-ROUTINE"],
+    });
+    const art = updated as Exclude<typeof updated, "version_conflict" | null>;
+    expect(art.source_entry_uuids).toEqual(["ENTRY-002-WORK-BURNOUT", "ENTRY-003-MORNING-ROUTINE"]);
+  });
+});
+
+describe("deleteArtifact", () => {
+  it("deletes an artifact and cascades sources", async () => {
+    const created = await createArtifact(pool, {
+      kind: "insight",
+      title: "To delete",
+      body: "body",
+      source_entry_uuids: ["ENTRY-001-WORK-STRESS"],
+    });
+
+    const deleted = await deleteArtifact(pool, created.id);
+    expect(deleted).toBe(true);
+
+    const fetched = await getArtifactById(pool, created.id);
+    expect(fetched).toBeNull();
+
+    // Verify sources also deleted
+    const sources = await pool.query(
+      `SELECT * FROM knowledge_artifact_sources WHERE artifact_id = $1`,
+      [created.id]
+    );
+    expect(sources.rows).toHaveLength(0);
+  });
+
+  it("returns false for nonexistent artifact", async () => {
+    const result = await deleteArtifact(pool, "00000000-0000-0000-0000-000000000000");
+    expect(result).toBe(false);
+  });
+});
+
+// ============================================================================
+// Knowledge Artifacts — Source FK integrity
+// ============================================================================
+
+describe("artifact source FK integrity", () => {
+  it("prevents linking to nonexistent entry UUID (RESTRICT)", async () => {
+    const created = await createArtifact(pool, {
+      kind: "insight",
+      title: "FK test",
+      body: "body",
+    });
+
+    await expect(
+      pool.query(
+        `INSERT INTO knowledge_artifact_sources (artifact_id, entry_uuid) VALUES ($1, $2)`,
+        [created.id, "NONEXISTENT-UUID"]
+      )
+    ).rejects.toThrow();
+  });
+});
+
+// ============================================================================
+// Knowledge Artifacts — List with filters
+// ============================================================================
+
+describe("listArtifacts", () => {
+  it("returns all seeded artifacts", async () => {
+    const all = await listArtifacts(pool, {});
+    expect(all.length).toBe(fixtureArtifacts.length);
+  });
+
+  it("filters by kind", async () => {
+    const insights = await listArtifacts(pool, { kind: "insight" });
+    for (const a of insights) {
+      expect(a.kind).toBe("insight");
+    }
+    expect(insights.length).toBeGreaterThan(0);
+  });
+
+  it("filters by tags with any mode (default)", async () => {
+    const results = await listArtifacts(pool, { tags: ["dopamine"] });
+    expect(results.length).toBeGreaterThan(0);
+    for (const a of results) {
+      expect(a.tags).toContain("dopamine");
+    }
+  });
+
+  it("filters by tags with all mode", async () => {
+    const results = await listArtifacts(pool, {
+      tags: ["health", "sleep"],
+      tags_mode: "all",
+    });
+    for (const a of results) {
+      expect(a.tags).toContain("health");
+      expect(a.tags).toContain("sleep");
+    }
+  });
+
+  it("respects limit and offset", async () => {
+    const page1 = await listArtifacts(pool, { limit: 1, offset: 0 });
+    const page2 = await listArtifacts(pool, { limit: 1, offset: 1 });
+
+    expect(page1).toHaveLength(1);
+    expect(page2).toHaveLength(1);
+    expect(page1[0].id).not.toBe(page2[0].id);
+  });
+
+  it("includes source_entry_uuids", async () => {
+    const all = await listArtifacts(pool, {});
+    const withSources = all.filter((a) => a.source_entry_uuids.length > 0);
+    expect(withSources.length).toBeGreaterThan(0);
+  });
+});
+
+// ============================================================================
+// Knowledge Artifacts — Search (RRF)
+// ============================================================================
+
+describe("searchArtifacts", () => {
+  it("finds artifacts by semantic + fulltext", async () => {
+    // Get the nicotine artifact's embedding to use as query vector
+    const nicotineArt = (await listArtifacts(pool, { kind: "insight" }))[0];
+    const embRow = await pool.query(
+      `SELECT embedding::text FROM knowledge_artifacts WHERE id = $1`,
+      [nicotineArt.id]
+    );
+    const embStr = embRow.rows[0].embedding as string;
+    const embedding = embStr.slice(1, -1).split(",").map(Number);
+
+    const results = await searchArtifacts(pool, embedding, "nicotine dopamine", {}, 10);
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].rrf_score).toBeGreaterThan(0);
+    expect(results[0].has_semantic || results[0].has_fulltext).toBe(true);
+  });
+
+  it("returns results in descending RRF score", async () => {
+    const emb = await pool.query(
+      `SELECT embedding::text FROM knowledge_artifacts WHERE embedding IS NOT NULL LIMIT 1`
+    );
+    const embedding = emb.rows[0].embedding.slice(1, -1).split(",").map(Number);
+
+    const results = await searchArtifacts(pool, embedding, "health", {}, 10);
+    for (let i = 1; i < results.length; i++) {
+      expect(results[i].rrf_score).toBeLessThanOrEqual(results[i - 1].rrf_score);
+    }
+  });
+
+  it("filters by kind", async () => {
+    const emb = await pool.query(
+      `SELECT embedding::text FROM knowledge_artifacts WHERE embedding IS NOT NULL LIMIT 1`
+    );
+    const embedding = emb.rows[0].embedding.slice(1, -1).split(",").map(Number);
+
+    const results = await searchArtifacts(pool, embedding, "health", { kind: "theory" }, 10);
+    for (const r of results) {
+      expect(r.kind).toBe("theory");
+    }
+  });
+
+  it("filters by tags", async () => {
+    const emb = await pool.query(
+      `SELECT embedding::text FROM knowledge_artifacts WHERE embedding IS NOT NULL LIMIT 1`
+    );
+    const embedding = emb.rows[0].embedding.slice(1, -1).split(",").map(Number);
+
+    const results = await searchArtifacts(pool, embedding, "health", { tags: ["sleep"] }, 10);
+    for (const r of results) {
+      expect(r.tags).toContain("sleep");
+    }
+  });
+
+  it("filters by tags with all mode", async () => {
+    const emb = await pool.query(
+      `SELECT embedding::text FROM knowledge_artifacts WHERE embedding IS NOT NULL LIMIT 1`
+    );
+    const embedding = emb.rows[0].embedding.slice(1, -1).split(",").map(Number);
+
+    const results = await searchArtifacts(pool, embedding, "health", { tags: ["health", "sleep"], tags_mode: "all" }, 10);
+    for (const r of results) {
+      expect(r.tags).toContain("health");
+      expect(r.tags).toContain("sleep");
+    }
+  });
+});
+
+// ============================================================================
+// Unified search — searchContent
+// ============================================================================
+
+describe("searchContent", () => {
+  it("returns both journal entries and artifacts", async () => {
+    const results = await searchContent(
+      pool,
+      workStressEntry.embedding,
+      "health nicotine dopamine",
+      {},
+      20
+    );
+    expect(results.length).toBeGreaterThan(0);
+
+    const types = new Set(results.map((r) => r.content_type));
+    // We search with terms from both entries and artifacts, should get both types
+    expect(types.size).toBeGreaterThanOrEqual(1);
+    for (const r of results) {
+      expect(["journal_entry", "knowledge_artifact"]).toContain(r.content_type);
+      expect(r.rrf_score).toBeGreaterThan(0);
+      expect(r.match_sources.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("returns results in descending RRF score", async () => {
+    const results = await searchContent(
+      pool,
+      workStressEntry.embedding,
+      "health",
+      {},
+      20
+    );
+    for (let i = 1; i < results.length; i++) {
+      expect(results[i].rrf_score).toBeLessThanOrEqual(results[i - 1].rrf_score);
+    }
+  });
+
+  it("filters by content_types to only entries", async () => {
+    const results = await searchContent(
+      pool,
+      workStressEntry.embedding,
+      "health",
+      { content_types: ["journal_entry"] },
+      20
+    );
+    for (const r of results) {
+      expect(r.content_type).toBe("journal_entry");
+    }
+  });
+
+  it("filters by content_types to only artifacts", async () => {
+    const results = await searchContent(
+      pool,
+      workStressEntry.embedding,
+      "nicotine dopamine",
+      { content_types: ["knowledge_artifact"] },
+      20
+    );
+    for (const r of results) {
+      expect(r.content_type).toBe("knowledge_artifact");
+    }
+  });
+
+  it("applies entry-specific filters", async () => {
+    const results = await searchContent(
+      pool,
+      workStressEntry.embedding,
+      "morning",
+      { city: "San Diego" },
+      20
+    );
+    // All journal entries should be from San Diego
+    const entries = results.filter((r) => r.content_type === "journal_entry");
+    for (const e of entries) {
+      // title_or_label is city for journal entries
+      expect(e.title_or_label).toBe("San Diego");
+    }
+  });
+
+  it("applies artifact-specific filters", async () => {
+    const results = await searchContent(
+      pool,
+      workStressEntry.embedding,
+      "health sleep",
+      { artifact_kind: "theory" },
+      20
+    );
+    // Any artifact results should be theories
+    const artifacts = results.filter((r) => r.content_type === "knowledge_artifact");
+    if (artifacts.length > 0) {
+      // We can verify by fetching the artifact
+      const art = await getArtifactById(pool, artifacts[0].id);
+      expect(art?.kind).toBe("theory");
+    }
+  });
+
+  it("filters entries by entry_tags", async () => {
+    const results = await searchContent(
+      pool,
+      workStressEntry.embedding,
+      "work morning",
+      { entry_tags: ["travel"] },
+      20
+    );
+    // Results should only include entries tagged with "travel" (and any artifacts)
+    // No crash is the key assertion — this exercises the entry_tags filter branch
+    expect(Array.isArray(results)).toBe(true);
+  });
+
+  it("filters artifacts by artifact_tags", async () => {
+    const results = await searchContent(
+      pool,
+      workStressEntry.embedding,
+      "health nicotine",
+      { artifact_tags: ["dopamine"] },
+      20
+    );
+    expect(Array.isArray(results)).toBe(true);
+  });
+
+  it("filters entries by date range", async () => {
+    const results = await searchContent(
+      pool,
+      workStressEntry.embedding,
+      "work deadline",
+      { date_from: "2024-03-01", date_to: "2024-03-31" },
+      20
+    );
+    expect(Array.isArray(results)).toBe(true);
+  });
+});
+
+// ============================================================================
+// searchEntriesForPicker
+// ============================================================================
+
+describe("searchEntriesForPicker", () => {
+  it("returns lightweight entry results", async () => {
+    const results = await searchEntriesForPicker(pool, "overwhelmed deadline", 10);
+    expect(results.length).toBeGreaterThan(0);
+    for (const r of results) {
+      expect(r.uuid).toBeTruthy();
+      expect(r.created_at).toBeInstanceOf(Date);
+      expect(r.preview.length).toBeGreaterThan(0);
+      expect(r.preview.length).toBeLessThanOrEqual(120);
+    }
+  });
+
+  it("returns empty for no matches", async () => {
+    const results = await searchEntriesForPicker(pool, "zyxwvutsrq", 10);
+    expect(results).toEqual([]);
+  });
+});
+
+// ============================================================================
+// searchEntries regression — unchanged by artifact additions
+// ============================================================================
+
+describe("searchEntries regression", () => {
+  it("still returns only journal entries, not artifacts", async () => {
+    // Search for terms that exist in both entries and artifacts
+    const results = await searchEntries(
+      pool,
+      workStressEntry.embedding,
+      "nicotine dopamine",
+      {},
+      10
+    );
+    // searchEntries returns entry rows with uuid field, not artifact rows
+    for (const r of results) {
+      expect(r.uuid).toBeTruthy();
+      expect(r).not.toHaveProperty("kind");
+    }
   });
 });

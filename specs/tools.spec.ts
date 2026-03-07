@@ -526,7 +526,134 @@ export const toolSpecs = {
     examples: [{ input: { metric_a: "hrv", metric_b: "sleep_duration", days: 60 }, behavior: "Returns Pearson correlation." }],
   },
 
+  get_artifact: {
+    name: "get_artifact" as const,
+    description:
+      "Get a single knowledge artifact by ID with full content, tags, source entry UUIDs, version, and embedding status.",
+    params: z.object({
+      id: z.string().min(1).describe("The artifact UUID"),
+    }),
+    examples: [
+      {
+        input: { id: "abc-123" },
+        behavior: "Returns full artifact with body, tags, source_entry_uuids, version, has_embedding",
+      },
+    ],
+  },
+
+  list_artifacts: {
+    name: "list_artifacts" as const,
+    description:
+      "List knowledge artifacts with optional filtering by kind and tags. Ordered by most recently updated.",
+    params: z.object({
+      kind: z.enum(["insight", "theory", "model", "reference"]).optional().describe("Filter by artifact kind"),
+      tags: z.array(z.string()).optional().describe("Filter by tags"),
+      tags_mode: z.enum(["any", "all"]).default("any").describe("Tag filter mode: 'any' (overlap) or 'all' (contains all)"),
+      limit: limitParam(20, 100),
+      offset: z.number().int().min(0).default(0).describe("Pagination offset"),
+    }),
+    examples: [
+      {
+        input: { kind: "insight" },
+        behavior: "Returns up to 20 insight artifacts ordered by updated_at DESC",
+      },
+      {
+        input: { tags: ["sleep", "dopamine"], tags_mode: "all" },
+        behavior: "Returns artifacts tagged with both 'sleep' AND 'dopamine'",
+      },
+    ],
+  },
+
+  search_artifacts: {
+    name: "search_artifacts" as const,
+    description:
+      "Hybrid semantic + keyword search across knowledge artifacts using Reciprocal Rank Fusion. " +
+      "Same RRF approach as search_entries but scoped to artifacts only.",
+    params: z.object({
+      query: z.string().min(1).describe("Search query"),
+      kind: z.enum(["insight", "theory", "model", "reference"]).optional().describe("Filter by artifact kind"),
+      tags: z.array(z.string()).optional().describe("Filter by tags"),
+      tags_mode: z.enum(["any", "all"]).default("any").describe("Tag filter mode"),
+      limit: limitParam(10, 50),
+    }),
+    examples: [
+      {
+        input: { query: "dopamine regulation" },
+        behavior: "Returns artifacts about dopamine regulation ranked by RRF score",
+      },
+    ],
+  },
+
+  search_content: {
+    name: "search_content" as const,
+    description:
+      "Unified search across both journal entries and knowledge artifacts using Reciprocal Rank Fusion. " +
+      "Returns results with a content_type discriminator. Use this when you want to search across all content types.",
+    params: z.object({
+      query: z.string().min(1).describe("Search query"),
+      content_types: z.array(z.enum(["journal_entry", "knowledge_artifact"])).optional()
+        .describe("Content types to include (default: both)"),
+      date_from: dateString.optional().describe("Filter entries from this date"),
+      date_to: dateString.optional().describe("Filter entries up to this date"),
+      city: z.string().optional().describe("Filter entries by city"),
+      entry_tags: z.array(z.string()).optional().describe("Filter entries by tags"),
+      artifact_kind: z.enum(["insight", "theory", "model", "reference"]).optional()
+        .describe("Filter artifacts by kind"),
+      artifact_tags: z.array(z.string()).optional().describe("Filter artifacts by tags"),
+      limit: limitParam(10, 50),
+    }),
+    examples: [
+      {
+        input: { query: "sleep quality" },
+        behavior: "Returns both journal entries and artifacts about sleep quality, merged by RRF score",
+      },
+      {
+        input: { query: "dopamine", content_types: ["knowledge_artifact"] },
+        behavior: "Searches only knowledge artifacts for dopamine content",
+      },
+    ],
+  },
+
 } as const;
+
+// ============================================================================
+// Artifact result types
+// ============================================================================
+
+export interface ArtifactResult {
+  id: string;
+  kind: string;
+  title: string;
+  body: string;
+  tags: string[];
+  has_embedding: boolean;
+  source_entry_uuids: string[];
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ArtifactSearchResult {
+  id: string;
+  kind: string;
+  title: string;
+  body: string;
+  tags: string[];
+  has_embedding: boolean;
+  rrf_score: number;
+  match_sources: ("semantic" | "fulltext")[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UnifiedSearchResult {
+  content_type: "journal_entry" | "knowledge_artifact";
+  id: string;
+  title_or_label: string;
+  snippet: string;
+  rrf_score: number;
+  match_sources: ("semantic" | "fulltext")[];
+}
 
 // ============================================================================
 // Type helpers for implementation
@@ -660,6 +787,16 @@ function zodToJsonSchema(schema: z.ZodTypeAny): Record<string, unknown> {
   // ZodBoolean
   if (schema instanceof z.ZodBoolean) {
     const result: Record<string, unknown> = { type: "boolean" };
+    if (schema.description) result.description = schema.description;
+    return result;
+  }
+
+  // ZodEnum
+  if (schema instanceof z.ZodEnum) {
+    const result: Record<string, unknown> = {
+      type: "string",
+      enum: schema._def.values,
+    };
     if (schema.description) result.description = schema.description;
     return result;
   }

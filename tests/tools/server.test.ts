@@ -14,6 +14,10 @@ const { mockRegisterTool, mockHandlers } = vi.hoisted(() => ({
     handleConjugateVerb: vi.fn(),
     handleLogVocabulary: vi.fn(),
     handleSpanishQuiz: vi.fn(),
+    handleGetArtifact: vi.fn(),
+    handleListArtifacts: vi.fn(),
+    handleSearchArtifacts: vi.fn(),
+    handleSearchContent: vi.fn(),
   },
 }));
 
@@ -55,6 +59,18 @@ vi.mock("../../src/tools/log-vocabulary.js", () => ({
 }));
 vi.mock("../../src/tools/spanish-quiz.js", () => ({
   handleSpanishQuiz: mockHandlers.handleSpanishQuiz,
+}));
+vi.mock("../../src/tools/get-artifact.js", () => ({
+  handleGetArtifact: mockHandlers.handleGetArtifact,
+}));
+vi.mock("../../src/tools/list-artifacts.js", () => ({
+  handleListArtifacts: mockHandlers.handleListArtifacts,
+}));
+vi.mock("../../src/tools/search-artifacts.js", () => ({
+  handleSearchArtifacts: mockHandlers.handleSearchArtifacts,
+}));
+vi.mock("../../src/tools/search-content.js", () => ({
+  handleSearchContent: mockHandlers.handleSearchContent,
 }));
 
 import { createServer, toolHandlers } from "../../src/server.js";

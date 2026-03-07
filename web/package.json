@@ -4,31 +4,23 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite dev",
-    "build": "vite build",
-    "preview": "vite preview",
-    "start": "node build",
-    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && vitest run",
-    "check:e2e": "playwright test"
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
   },
   "dependencies": {
-    "@espejo/shared": "workspace:*",
-    "@sveltejs/adapter-node": "^5.5.0",
-    "@sveltejs/kit": "^2.50.0",
-    "@tiptap/core": "^3.19.0",
-    "@tiptap/pm": "^3.19.0",
-    "@tiptap/starter-kit": "^3.19.0",
-    "pg": "^8.13.1",
-    "svelte": "^5.50.0"
+    "@mdxeditor/editor": "^3.52.4",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-markdown": "^10.1.0",
+    "react-router-dom": "^7.6.1",
+    "rehype-sanitize": "^6.0.0"
   },
   "devDependencies": {
-    "@sveltejs/vite-plugin-svelte": "^6.2.0",
-    "@tailwindcss/vite": "^4.1.0",
-    "@types/pg": "^8.11.11",
-    "svelte-check": "^4.3.0",
-    "tailwindcss": "^4.1.0",
+    "@types/react": "^19.1.6",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.5.2",
     "typescript": "^5.7.3",
-    "vite": "^7.3.0",
-    "vitest": "^2.1.8"
+    "vite": "^6.3.5"
   }
 }
