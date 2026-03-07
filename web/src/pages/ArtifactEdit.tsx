@@ -24,6 +24,9 @@ export function ArtifactEdit() {
   const [version, setVersion] = useState(0);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [deleting, setDeleting] = useState(false);
+
+  // Track the last-saved body to distinguish MDXEditor normalization from real edits
+  const savedBody = useRef("");
   const dirty = useRef(false);
 
   const load = useCallback(async () => {
@@ -40,8 +43,8 @@ export function ArtifactEdit() {
       setSources(a.source_entry_uuids);
       setVersion(a.version);
       setSaveStatus("idle");
+      savedBody.current = a.body;
       dirty.current = false;
-      bodyInitialized.current = false;
     } catch (err) {
       setError(String(err));
     } finally {
@@ -68,6 +71,8 @@ export function ArtifactEdit() {
       });
       setVersion(updated.version);
       setArtifact(updated);
+      savedBody.current = updated.body;
+      dirty.current = false;
       setSaveStatus("saved");
     } catch (err) {
       const status = (err as Error & { status?: number }).status;
@@ -92,16 +97,13 @@ export function ArtifactEdit() {
     };
   }
 
-  // MDXEditor fires onChange on mount with normalized markdown.
-  // Suppress that first spurious change by tracking body initialization.
-  const bodyInitialized = useRef(false);
   function handleBodyChange(value: string) {
     if (saveStatus === "conflict") return;
     setBody(value);
-    if (!bodyInitialized.current) {
-      bodyInitialized.current = true;
-      return;
-    }
+    // MDXEditor may normalize markdown on mount (whitespace, line breaks).
+    // Only mark dirty and autosave if the trimmed content actually differs
+    // from what was last loaded/saved.
+    if (value.trim() === savedBody.current.trim()) return;
     dirty.current = true;
     setSaveStatus("idle");
     triggerAutosave();
