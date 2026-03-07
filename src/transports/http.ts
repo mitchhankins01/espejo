@@ -26,7 +26,9 @@ import {
   deleteArtifact,
   getArtifactById,
   listArtifacts,
+  countArtifacts,
   searchArtifacts,
+  listArtifactTags,
   searchContent,
   searchEntriesForPicker,
 } from "../db/queries.js";
@@ -313,11 +315,28 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
         const results = await searchArtifacts(pool, embedding, q, { kind, tags, tags_mode: tagsMode }, limit);
         res.json(results);
       } else {
-        const results = await listArtifacts(pool, { kind, tags, tags_mode: tagsMode, limit, offset });
-        res.json(results);
+        const [results, total] = await Promise.all([
+          listArtifacts(pool, { kind, tags, tags_mode: tagsMode, limit, offset }),
+          countArtifacts(pool, { kind, tags, tags_mode: tagsMode }),
+        ]);
+        res.json({ items: results, total });
       }
     } catch (err) {
       console.error("Artifact list/search error:", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  // GET /api/artifacts/tags — list tags used on artifacts with counts
+  app.get("/api/artifacts/tags", async (req, res) => {
+    /* v8 ignore next */
+    if (!requireBearerAuth(req, res)) return;
+
+    try {
+      const tags = await listArtifactTags(pool);
+      res.json(tags);
+    } catch (err) {
+      console.error("Artifact tags error:", err);
       res.status(500).json({ error: String(err) });
     }
   });

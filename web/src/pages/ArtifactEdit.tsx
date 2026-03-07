@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { getArtifact, updateArtifact, deleteArtifact, type Artifact } from "../api.ts";
+import { getArtifact, updateArtifact, deleteArtifact, listArtifactTags, type Artifact } from "../api.ts";
 import { KindSelect } from "../components/KindSelect.tsx";
 import { TagInput } from "../components/TagInput.tsx";
 import { SourcePicker } from "../components/SourcePicker.tsx";
@@ -24,8 +24,12 @@ export function ArtifactEdit() {
   const [version, setVersion] = useState(0);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [deleting, setDeleting] = useState(false);
+  const [tagSuggestions, setTagSuggestions] = useState<string[]>([]);
 
-  // Track the last-saved body to distinguish MDXEditor normalization from real edits
+  useEffect(() => {
+    listArtifactTags().then((t) => setTagSuggestions(t.map((x) => x.name))).catch(() => {});
+  }, []);
+
   const savedBody = useRef("");
   const dirty = useRef(false);
 
@@ -100,9 +104,6 @@ export function ArtifactEdit() {
   function handleBodyChange(value: string) {
     if (saveStatus === "conflict") return;
     setBody(value);
-    // MDXEditor may normalize markdown on mount (whitespace, line breaks).
-    // Only mark dirty and autosave if the trimmed content actually differs
-    // from what was last loaded/saved.
     if (value.trim() === savedBody.current.trim()) return;
     dirty.current = true;
     setSaveStatus("idle");
@@ -126,17 +127,26 @@ export function ArtifactEdit() {
     void load();
   }
 
-  if (loading) return <div className="layout"><div className="loading">Loading...</div></div>;
-  if (!artifact && error) {
+  if (loading) {
     return (
-      <div className="layout">
-        <div className="error-message">{error}</div>
-        <Link to="/">Back to list</Link>
+      <div className="max-w-3xl mx-auto px-4 py-8">
+        <div className="text-center py-16 text-text-muted">Loading...</div>
       </div>
     );
   }
 
-  const statusText: Record<SaveStatus, string> = {
+  if (!artifact && error) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-8">
+        <div className="text-red-600 dark:text-red-400 text-sm bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg px-4 py-3 mb-4">
+          {error}
+        </div>
+        <Link to="/" className="text-pine-600 dark:text-pine-400 hover:underline text-sm">Back to list</Link>
+      </div>
+    );
+  }
+
+  const statusLabel: Record<SaveStatus, string> = {
     idle: "",
     saving: "Saving...",
     saved: "Saved",
@@ -144,66 +154,69 @@ export function ArtifactEdit() {
     conflict: "",
   };
 
-  const statusClass: Record<SaveStatus, string> = {
-    idle: "",
-    saving: "saving",
-    saved: "saved",
-    error: "error",
-    conflict: "",
-  };
-
   return (
-    <div className="layout">
-      <div className="page-header">
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <Link to="/" style={{ color: "var(--text-muted)", fontSize: 20 }}>&larr;</Link>
-          <h1>Edit Artifact</h1>
+    <div className="max-w-3xl mx-auto px-4 py-8">
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <Link to="/" className="text-text-muted text-xl leading-none hover:text-text-primary transition-colors">&larr;</Link>
+          <h1 className="text-xl font-semibold text-text-primary">Edit Artifact</h1>
           {saveStatus !== "idle" && saveStatus !== "conflict" && (
-            <span className={`save-status ${statusClass[saveStatus]}`}>
-              {statusText[saveStatus]}
+            <span className={`text-xs font-medium px-2.5 py-1 rounded-full
+              ${saveStatus === "saving" ? "text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30" : ""}
+              ${saveStatus === "saved" ? "save-status saved text-pine-600 dark:text-pine-400 bg-pine-50 dark:bg-pine-950/30" : ""}
+              ${saveStatus === "error" ? "text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30" : ""}
+            `}>
+              {statusLabel[saveStatus]}
             </span>
           )}
         </div>
-        <button className="btn-danger" onClick={handleDelete} disabled={deleting}>
+        <button
+          className="px-4 py-2 rounded-lg text-red-600 dark:text-red-400 border border-red-300 dark:border-red-700 text-sm font-medium hover:bg-red-600 hover:text-white dark:hover:bg-red-500 transition-colors disabled:opacity-50"
+          onClick={handleDelete}
+          disabled={deleting}
+        >
           {deleting ? "Deleting..." : "Delete"}
         </button>
       </div>
 
       {saveStatus === "conflict" && (
-        <div className="conflict-banner">
-          <p>This artifact was modified elsewhere. Reload to get the latest version.</p>
-          <button className="btn-primary" onClick={handleReload}>
+        <div className="flex items-center justify-between gap-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg px-4 py-3 mb-4">
+          <p className="text-red-600 dark:text-red-400 text-sm">This artifact was modified elsewhere. Reload to get the latest version.</p>
+          <button
+            className="px-4 py-2 rounded-lg bg-pine-600 dark:bg-pine-500 text-white text-sm font-medium hover:bg-pine-700 dark:hover:bg-pine-400 transition-colors shrink-0"
+            onClick={handleReload}
+          >
             Reload
           </button>
         </div>
       )}
 
-      {error && saveStatus !== "conflict" && <div className="error-message">{error}</div>}
+      {error && saveStatus !== "conflict" && (
+        <div className="text-red-600 dark:text-red-400 text-sm bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg px-4 py-3 mb-4">
+          {error}
+        </div>
+      )}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        <div style={{ display: "flex", gap: 12 }}>
-          <div style={{ width: 160 }}>
-            <label style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>
-              Kind
-            </label>
-            <KindSelect value={kind} onChange={handleChange(setKind)} />
+      <div className="flex flex-col gap-5">
+        <div className="flex gap-3 max-sm:flex-col">
+          <div className="w-40 max-sm:w-full shrink-0">
+            <label htmlFor="edit-kind" className="block text-sm text-text-muted mb-1.5 font-medium">Kind</label>
+            <KindSelect id="edit-kind" value={kind} onChange={handleChange(setKind)} />
           </div>
-          <div style={{ flex: 1 }}>
-            <label style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>
-              Title
-            </label>
+          <div className="flex-1">
+            <label htmlFor="edit-title" className="block text-sm text-text-muted mb-1.5 font-medium">Title</label>
             <input
+              id="edit-title"
               value={title}
               onChange={(e) => handleChange(setTitle)(e.target.value)}
               maxLength={300}
+              className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-text-primary placeholder:text-text-muted/60 focus:outline-none focus:ring-2 focus:ring-pine-500/30 focus:border-pine-500 text-base"
             />
           </div>
         </div>
 
         <div>
-          <label style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>
-            Body (Markdown)
-          </label>
+          <label className="block text-sm text-text-muted mb-1.5 font-medium">Body (Markdown)</label>
           <MarkdownEditor
             value={body}
             onChange={handleBodyChange}
@@ -212,20 +225,16 @@ export function ArtifactEdit() {
         </div>
 
         <div>
-          <label style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>
-            Tags
-          </label>
-          <TagInput tags={tags} onChange={handleChange(setTags)} />
+          <label htmlFor="edit-tags" className="block text-sm text-text-muted mb-1.5 font-medium">Tags</label>
+          <TagInput id="edit-tags" tags={tags} onChange={handleChange(setTags)} suggestions={tagSuggestions} />
         </div>
 
         <div>
-          <label style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>
-            Source Entries
-          </label>
-          <SourcePicker selected={sources} onChange={handleChange(setSources)} />
+          <label htmlFor="edit-sources" className="block text-sm text-text-muted mb-1.5 font-medium">Source Entries</label>
+          <SourcePicker id="edit-sources" selected={sources} onChange={handleChange(setSources)} />
         </div>
 
-        <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+        <div className="text-xs text-text-muted">
           Version {version} &middot; Updated {artifact ? new Date(artifact.updated_at).toLocaleString() : ""}
         </div>
       </div>

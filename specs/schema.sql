@@ -597,6 +597,12 @@ CREATE TABLE IF NOT EXISTS knowledge_artifact_sources (
 CREATE INDEX IF NOT EXISTS idx_knowledge_artifact_sources_entry
     ON knowledge_artifact_sources (entry_uuid);
 
+CREATE TABLE IF NOT EXISTS artifact_tags (
+    artifact_id UUID REFERENCES knowledge_artifacts(id) ON DELETE CASCADE,
+    tag_id INT REFERENCES tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (artifact_id, tag_id)
+);
+
 -- Trigger: auto-bump updated_at and version on UPDATE
 CREATE OR REPLACE FUNCTION knowledge_artifact_version_bump()
 RETURNS TRIGGER AS $$

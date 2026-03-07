@@ -3133,6 +3133,65 @@ export function normalizeTags(tags: string[]): string[] {
   return result.sort();
 }
 
+async function upsertArtifactTags(
+  pool: pg.Pool,
+  artifactId: string,
+  tags: string[]
+): Promise<void> {
+  if (tags.length === 0) return;
+  for (const tag of tags) {
+    await pool.query(
+      `INSERT INTO tags (name) VALUES ($1) ON CONFLICT (name) DO NOTHING`,
+      [tag]
+    );
+    await pool.query(
+      `INSERT INTO artifact_tags (artifact_id, tag_id)
+       SELECT $1, id FROM tags WHERE name = $2
+       ON CONFLICT DO NOTHING`,
+      [artifactId, tag]
+    );
+  }
+}
+
+async function getArtifactTagsMap(
+  pool: pg.Pool,
+  artifactIds: string[]
+): Promise<Map<string, string[]>> {
+  const map = new Map<string, string[]>();
+  /* v8 ignore next */
+  if (artifactIds.length === 0) return map;
+
+  const result = await pool.query(
+    `SELECT at.artifact_id, t.name
+     FROM artifact_tags at
+     JOIN tags t ON t.id = at.tag_id
+     WHERE at.artifact_id = ANY($1::uuid[])
+     ORDER BY at.artifact_id, t.name`,
+    [artifactIds]
+  );
+
+  for (const row of result.rows) {
+    const aid = row.artifact_id as string;
+    if (!map.has(aid)) map.set(aid, []);
+    map.get(aid)!.push(row.name as string);
+  }
+
+  return map;
+}
+
+export async function listArtifactTags(
+  pool: pg.Pool
+): Promise<TagCountRow[]> {
+  const result = await pool.query(
+    `SELECT t.name, COUNT(at.artifact_id)::int AS count
+     FROM tags t
+     JOIN artifact_tags at ON at.tag_id = t.id
+     GROUP BY t.id, t.name
+     ORDER BY count DESC, t.name ASC`
+  );
+  return result.rows;
+}
+
 export async function createArtifact(
   pool: pg.Pool,
   data: {
@@ -3146,15 +3205,17 @@ export async function createArtifact(
   const tags = normalizeTags(data.tags ?? []);
 
   const result = await pool.query(
-    `INSERT INTO knowledge_artifacts (kind, title, body, tags)
-     VALUES ($1, $2, $3, $4)
-     RETURNING id, kind, title, body, tags, (embedding IS NOT NULL) AS has_embedding,
+    `INSERT INTO knowledge_artifacts (kind, title, body)
+     VALUES ($1, $2, $3)
+     RETURNING id, kind, title, body, (embedding IS NOT NULL) AS has_embedding,
                created_at, updated_at, version`,
-    [data.kind, data.title, data.body, tags]
+    [data.kind, data.title, data.body]
   );
 
   const row = result.rows[0];
   const id = row.id as string;
+
+  await upsertArtifactTags(pool, id, tags);
 
   if (data.source_entry_uuids && data.source_entry_uuids.length > 0) {
     for (const uuid of data.source_entry_uuids) {
@@ -3171,8 +3232,7 @@ export async function createArtifact(
     kind: row.kind as ArtifactKind,
     title: row.title as string,
     body: row.body as string,
-    /* v8 ignore next */
-    tags: (row.tags as string[]) || [],
+    tags,
     has_embedding: row.has_embedding as boolean,
     created_at: row.created_at as Date,
     updated_at: row.updated_at as Date,
@@ -3195,7 +3255,7 @@ export async function updateArtifact(
 ): Promise<ArtifactRow | "version_conflict" | null> {
   // Fetch current state to detect what changed
   const current = await pool.query(
-    `SELECT title, body, kind, tags, version FROM knowledge_artifacts WHERE id = $1`,
+    `SELECT title, body, kind, version FROM knowledge_artifacts WHERE id = $1`,
     [id]
   );
   if (current.rows.length === 0) return null;
@@ -3206,7 +3266,6 @@ export async function updateArtifact(
   const newTitle = data.title ?? (currentRow.title as string);
   const newBody = data.body ?? (currentRow.body as string);
   const newKind = data.kind ?? (currentRow.kind as ArtifactKind);
-  const newTags = data.tags !== undefined ? normalizeTags(data.tags) : (currentRow.tags as string[]);
 
   const titleChanged = newTitle !== (currentRow.title as string);
   const bodyChanged = newBody !== (currentRow.body as string);
@@ -3229,10 +3288,6 @@ export async function updateArtifact(
   setClauses.push(`body = $${paramIdx}`);
   setParams.push(newBody);
 
-  paramIdx++;
-  setClauses.push(`tags = $${paramIdx}`);
-  setParams.push(newTags);
-
   // Invalidate embedding if content changed
   if (contentChanged) {
     setClauses.push(`embedding = NULL`);
@@ -3243,12 +3298,19 @@ export async function updateArtifact(
     `UPDATE knowledge_artifacts
      SET ${setClauses.join(", ")}
      WHERE id = $1
-     RETURNING id, kind, title, body, tags, (embedding IS NOT NULL) AS has_embedding,
+     RETURNING id, kind, title, body, (embedding IS NOT NULL) AS has_embedding,
                created_at, updated_at, version`,
     setParams
   );
 
   const row = result.rows[0];
+
+  // Update tags if provided
+  if (data.tags !== undefined) {
+    const newTags = normalizeTags(data.tags);
+    await pool.query(`DELETE FROM artifact_tags WHERE artifact_id = $1`, [id]);
+    await upsertArtifactTags(pool, id, newTags);
+  }
 
   // Update source links if provided
   if (data.source_entry_uuids !== undefined) {
@@ -3271,13 +3333,16 @@ export async function updateArtifact(
     [id]
   );
 
+  // Fetch tags
+  const tagsMap = await getArtifactTagsMap(pool, [id]);
+
   return {
     id: row.id as string,
     kind: row.kind as ArtifactKind,
     title: row.title as string,
     body: row.body as string,
     /* v8 ignore next */
-    tags: (row.tags as string[]) || [],
+    tags: tagsMap.get(id) ?? [],
     has_embedding: row.has_embedding as boolean,
     created_at: row.created_at as Date,
     updated_at: row.updated_at as Date,
@@ -3303,7 +3368,7 @@ export async function getArtifactById(
   id: string
 ): Promise<ArtifactRow | null> {
   const result = await pool.query(
-    `SELECT id, kind, title, body, tags, (embedding IS NOT NULL) AS has_embedding,
+    `SELECT id, kind, title, body, (embedding IS NOT NULL) AS has_embedding,
             created_at, updated_at, version
      FROM knowledge_artifacts WHERE id = $1`,
     [id]
@@ -3316,6 +3381,7 @@ export async function getArtifactById(
     `SELECT entry_uuid FROM knowledge_artifact_sources WHERE artifact_id = $1 ORDER BY entry_uuid`,
     [id]
   );
+  const tagsMap = await getArtifactTagsMap(pool, [id]);
 
   return {
     id: row.id as string,
@@ -3323,7 +3389,7 @@ export async function getArtifactById(
     title: row.title as string,
     body: row.body as string,
     /* v8 ignore next */
-    tags: (row.tags as string[]) || [],
+    tags: tagsMap.get(id) ?? [],
     has_embedding: row.has_embedding as boolean,
     created_at: row.created_at as Date,
     updated_at: row.updated_at as Date,
@@ -3358,9 +3424,13 @@ export async function listArtifacts(
     paramIdx++;
     const mode = filters.tags_mode ?? "any";
     if (mode === "all") {
-      whereClauses.push(`tags @> $${paramIdx}::text[]`);
+      whereClauses.push(
+        `(SELECT COUNT(DISTINCT t.name) FROM artifact_tags at2 JOIN tags t ON t.id = at2.tag_id WHERE at2.artifact_id = ka.id AND t.name = ANY($${paramIdx}::text[])) = array_length($${paramIdx}::text[], 1)`
+      );
     } else {
-      whereClauses.push(`tags && $${paramIdx}::text[]`);
+      whereClauses.push(
+        `EXISTS (SELECT 1 FROM artifact_tags at2 JOIN tags t ON t.id = at2.tag_id WHERE at2.artifact_id = ka.id AND t.name = ANY($${paramIdx}::text[]))`
+      );
     }
     params.push(normalizeTags(filters.tags));
   }
@@ -3378,18 +3448,21 @@ export async function listArtifacts(
   const offsetParam = paramIdx;
 
   const result = await pool.query(
-    `SELECT id, kind, title, body, tags, (embedding IS NOT NULL) AS has_embedding,
+    `SELECT id, kind, title, body, (embedding IS NOT NULL) AS has_embedding,
             created_at, updated_at, version
-     FROM knowledge_artifacts
+     FROM knowledge_artifacts ka
      ${whereClause}
      ORDER BY updated_at DESC
      LIMIT $${limitParam} OFFSET $${offsetParam}`,
     params
   );
 
-  // Batch-fetch source UUIDs
+  // Batch-fetch source UUIDs and tags
   const ids = result.rows.map((r) => r.id as string);
-  const sourcesMap = await getArtifactSourcesMap(pool, ids);
+  const [sourcesMap, tagsMap] = await Promise.all([
+    getArtifactSourcesMap(pool, ids),
+    getArtifactTagsMap(pool, ids),
+  ]);
 
   return result.rows.map((row) => ({
     id: row.id as string,
@@ -3397,7 +3470,7 @@ export async function listArtifacts(
     title: row.title as string,
     body: row.body as string,
     /* v8 ignore next */
-    tags: (row.tags as string[]) || [],
+    tags: tagsMap.get(row.id as string) ?? [],
     has_embedding: row.has_embedding as boolean,
     created_at: row.created_at as Date,
     updated_at: row.updated_at as Date,
@@ -3405,6 +3478,43 @@ export async function listArtifacts(
     /* v8 ignore next */
     source_entry_uuids: sourcesMap.get(row.id as string) ?? [],
   }));
+}
+
+export async function countArtifacts(
+  pool: pg.Pool,
+  filters: Pick<ListArtifactsFilters, "kind" | "tags" | "tags_mode">
+): Promise<number> {
+  const whereClauses: string[] = [];
+  const params: unknown[] = [];
+  let paramIdx = 0;
+
+  if (filters.kind) {
+    paramIdx++;
+    whereClauses.push(`kind = $${paramIdx}`);
+    params.push(filters.kind);
+  }
+
+  if (filters.tags && filters.tags.length > 0) {
+    paramIdx++;
+    const mode = filters.tags_mode ?? "any";
+    if (mode === "all") {
+      whereClauses.push(
+        `(SELECT COUNT(DISTINCT t.name) FROM artifact_tags at2 JOIN tags t ON t.id = at2.tag_id WHERE at2.artifact_id = ka.id AND t.name = ANY($${paramIdx}::text[])) = array_length($${paramIdx}::text[], 1)`
+      );
+    } else {
+      whereClauses.push(
+        `EXISTS (SELECT 1 FROM artifact_tags at2 JOIN tags t ON t.id = at2.tag_id WHERE at2.artifact_id = ka.id AND t.name = ANY($${paramIdx}::text[]))`
+      );
+    }
+    params.push(normalizeTags(filters.tags));
+  }
+
+  const whereClause = whereClauses.length > 0 ? "WHERE " + whereClauses.join(" AND ") : "";
+  const result = await pool.query(
+    `SELECT count(*)::int AS total FROM knowledge_artifacts ka ${whereClause}`,
+    params
+  );
+  return result.rows[0].total as number;
 }
 
 async function getArtifactSourcesMap(
@@ -3454,9 +3564,13 @@ export async function searchArtifacts(
     paramIdx++;
     const mode = filters.tags_mode ?? "any";
     if (mode === "all") {
-      filterClauses.push(`a.tags @> $${paramIdx}::text[]`);
+      filterClauses.push(
+        `(SELECT COUNT(DISTINCT t.name) FROM artifact_tags at2 JOIN tags t ON t.id = at2.tag_id WHERE at2.artifact_id = a.id AND t.name = ANY($${paramIdx}::text[])) = array_length($${paramIdx}::text[], 1)`
+      );
     } else {
-      filterClauses.push(`a.tags && $${paramIdx}::text[]`);
+      filterClauses.push(
+        `EXISTS (SELECT 1 FROM artifact_tags at2 JOIN tags t ON t.id = at2.tag_id WHERE at2.artifact_id = a.id AND t.name = ANY($${paramIdx}::text[]))`
+      );
     }
     filterParams.push(normalizeTags(filters.tags));
   }
@@ -3485,7 +3599,7 @@ export async function searchArtifacts(
       LIMIT 20
     )
     SELECT
-      a.id, a.kind, a.title, a.body, a.tags,
+      a.id, a.kind, a.title, a.body,
       (a.embedding IS NOT NULL) AS has_embedding,
       a.created_at, a.updated_at, a.version,
       COALESCE(1.0 / (60 + s.rank_s), 0) + COALESCE(1.0 / (60 + f.rank_f), 0) AS rrf_score,
@@ -3506,13 +3620,16 @@ export async function searchArtifacts(
     ...filterParams,
   ]);
 
+  const ids = result.rows.map((r) => r.id as string);
+  const tagsMap = await getArtifactTagsMap(pool, ids);
+
   return result.rows.map((row) => ({
     id: row.id as string,
     kind: row.kind as ArtifactKind,
     title: row.title as string,
     body: row.body as string,
     /* v8 ignore next */
-    tags: (row.tags as string[]) || [],
+    tags: tagsMap.get(row.id as string) ?? [],
     has_embedding: row.has_embedding as boolean,
     rrf_score: parseFloat(row.rrf_score as string),
     has_semantic: row.has_semantic as boolean,
@@ -3641,7 +3758,9 @@ export async function searchContent(
     }
     if (filters.artifact_tags && filters.artifact_tags.length > 0) {
       artIdx++;
-      artClauses.push(`a.tags && $${artIdx}::text[]`);
+      artClauses.push(
+        `EXISTS (SELECT 1 FROM artifact_tags at2 JOIN tags t ON t.id = at2.tag_id WHERE at2.artifact_id = a.id AND t.name = ANY($${artIdx}::text[]))`
+      );
       artParams.push(normalizeTags(filters.artifact_tags));
     }
     const artFilterWhere = artClauses.length > 0 ? "AND " + artClauses.join(" AND ") : "";

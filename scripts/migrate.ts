@@ -695,6 +695,42 @@ const migrations: Migration[] = [
            EXECUTE FUNCTION knowledge_artifact_version_bump()`,
     ],
   },
+  {
+    name: "017-artifact-tags-junction",
+    getSql: () => `
+      CREATE TABLE IF NOT EXISTS artifact_tags (
+          artifact_id UUID REFERENCES knowledge_artifacts(id) ON DELETE CASCADE,
+          tag_id INT REFERENCES tags(id) ON DELETE CASCADE,
+          PRIMARY KEY (artifact_id, tag_id)
+      );
+
+      DROP INDEX IF EXISTS idx_knowledge_artifacts_tags;
+    `,
+    rawStatements: [
+      // Migrate data from TEXT[] column if it exists (production), skip on fresh DB
+      `DO $$
+       BEGIN
+         IF EXISTS (
+           SELECT 1 FROM information_schema.columns
+           WHERE table_name = 'knowledge_artifacts' AND column_name = 'tags'
+         ) THEN
+           INSERT INTO tags (name)
+           SELECT DISTINCT unnest(tags) FROM knowledge_artifacts
+           WHERE array_length(tags, 1) > 0
+           ON CONFLICT (name) DO NOTHING;
+
+           INSERT INTO artifact_tags (artifact_id, tag_id)
+           SELECT ka.id, t.id
+           FROM knowledge_artifacts ka, unnest(ka.tags) AS tag_name
+           JOIN tags t ON t.name = tag_name
+           ON CONFLICT DO NOTHING;
+
+           ALTER TABLE knowledge_artifacts DROP COLUMN tags;
+         END IF;
+       END
+       $$`,
+    ],
+  },
 ];
 
 async function migrate(): Promise<void> {

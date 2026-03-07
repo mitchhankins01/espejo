@@ -80,7 +80,9 @@ import {
   deleteArtifact,
   getArtifactById,
   listArtifacts,
+  countArtifacts,
   searchArtifacts,
+  listArtifactTags,
   searchContent,
   searchEntriesForPicker,
 } from "../../src/db/queries.js";
@@ -2313,6 +2315,60 @@ describe("listArtifacts", () => {
     const all = await listArtifacts(pool, {});
     const withSources = all.filter((a) => a.source_entry_uuids.length > 0);
     expect(withSources.length).toBeGreaterThan(0);
+  });
+});
+
+// ============================================================================
+// Knowledge Artifacts — Tag listing
+// ============================================================================
+
+describe("listArtifactTags", () => {
+  it("returns tags used on artifacts with counts", async () => {
+    const tags = await listArtifactTags(pool);
+    expect(tags.length).toBeGreaterThan(0);
+    for (const t of tags) {
+      expect(t.name).toBeTruthy();
+      expect(t.count).toBeGreaterThan(0);
+    }
+    // Should be sorted by count descending
+    for (let i = 1; i < tags.length; i++) {
+      expect(tags[i].count).toBeLessThanOrEqual(tags[i - 1].count);
+    }
+  });
+
+  it("includes health tag from seeded artifacts", async () => {
+    const tags = await listArtifactTags(pool);
+    const healthTag = tags.find((t) => t.name === "health");
+    expect(healthTag).toBeDefined();
+    expect(healthTag!.count).toBe(2); // both seeded artifacts have "health"
+  });
+});
+
+// ============================================================================
+// Knowledge Artifacts — Count
+// ============================================================================
+
+describe("countArtifacts", () => {
+  it("counts all artifacts", async () => {
+    const total = await countArtifacts(pool, {});
+    expect(total).toBe(fixtureArtifacts.length);
+  });
+
+  it("counts filtered by kind", async () => {
+    const total = await countArtifacts(pool, { kind: "insight" });
+    const expected = fixtureArtifacts.filter((a) => a.kind === "insight").length;
+    expect(total).toBe(expected);
+  });
+
+  it("counts filtered by tags", async () => {
+    const total = await countArtifacts(pool, { tags: ["dopamine"] });
+    expect(total).toBeGreaterThan(0);
+  });
+
+  it("counts filtered by tags with all mode", async () => {
+    const total = await countArtifacts(pool, { tags: ["health", "sleep"], tags_mode: "all" });
+    const list = await listArtifacts(pool, { tags: ["health", "sleep"], tags_mode: "all" });
+    expect(total).toBe(list.length);
   });
 });
 

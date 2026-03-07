@@ -57,7 +57,7 @@ export function listArtifacts(params?: {
   tags?: string;
   limit?: number;
   offset?: number;
-}): Promise<Artifact[]> {
+}): Promise<{ items: Artifact[]; total: number }> {
   const qs = new URLSearchParams();
   if (params?.kind) qs.set("kind", params.kind);
   if (params?.tags) qs.set("tags", params.tags);
@@ -67,8 +67,10 @@ export function listArtifacts(params?: {
   return apiFetch(`/api/artifacts${query ? `?${query}` : ""}`);
 }
 
-export function searchArtifacts(q: string): Promise<Artifact[]> {
-  return apiFetch(`/api/artifacts?q=${encodeURIComponent(q)}`);
+export function searchArtifacts(q: string, kind?: string): Promise<Artifact[]> {
+  const qs = new URLSearchParams({ q });
+  if (kind) qs.set("kind", kind);
+  return apiFetch(`/api/artifacts?${qs.toString()}`);
 }
 
 export function getArtifact(id: string): Promise<Artifact> {
@@ -107,6 +109,10 @@ export function updateArtifact(
 
 export function deleteArtifact(id: string): Promise<void> {
   return apiFetch(`/api/artifacts/${id}`, { method: "DELETE" });
+}
+
+export function listArtifactTags(): Promise<{ name: string; count: number }[]> {
+  return apiFetch("/api/artifacts/tags");
 }
 
 export function searchEntries(q: string): Promise<EntrySearchResult[]> {

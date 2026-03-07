@@ -432,12 +432,31 @@ export async function seedFixtures(pool: pg.Pool): Promise<void> {
   for (const artifact of fixtureArtifacts) {
     const embeddingStr = `[${artifact.embedding.join(",")}]`;
     const result = await pool.query(
-      `INSERT INTO knowledge_artifacts (kind, title, body, tags, embedding)
-       VALUES ($1, $2, $3, $4, $5::vector)
+      `INSERT INTO knowledge_artifacts (kind, title, body, embedding)
+       VALUES ($1, $2, $3, $4::vector)
        RETURNING id`,
-      [artifact.kind, artifact.title, artifact.body, artifact.tags, embeddingStr]
+      [artifact.kind, artifact.title, artifact.body, embeddingStr]
     );
     const artifactId = result.rows[0].id as string;
+
+    if (artifact.tags && artifact.tags.length > 0) {
+      for (const tag of artifact.tags) {
+        await pool.query(
+          `INSERT INTO tags (name) VALUES ($1) ON CONFLICT (name) DO NOTHING`,
+          [tag]
+        );
+        const tagResult = await pool.query(
+          `SELECT id FROM tags WHERE name = $1`,
+          [tag]
+        );
+        const tagId = tagResult.rows[0].id as number;
+        await pool.query(
+          `INSERT INTO artifact_tags (artifact_id, tag_id) VALUES ($1, $2)
+           ON CONFLICT DO NOTHING`,
+          [artifactId, tagId]
+        );
+      }
+    }
 
     if (artifact.source_entry_uuids) {
       for (const uuid of artifact.source_entry_uuids) {

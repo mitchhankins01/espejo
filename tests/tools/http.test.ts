@@ -66,7 +66,9 @@ const {
   mockDeleteArtifact,
   mockGetArtifactById,
   mockListArtifacts,
+  mockCountArtifacts,
   mockSearchArtifacts,
+  mockListArtifactTags,
   mockSearchContent,
   mockSearchEntriesForPicker,
   mockGenerateEmbedding,
@@ -90,7 +92,9 @@ const {
   mockDeleteArtifact: vi.fn(),
   mockGetArtifactById: vi.fn(),
   mockListArtifacts: vi.fn(),
+  mockCountArtifacts: vi.fn(),
   mockSearchArtifacts: vi.fn(),
+  mockListArtifactTags: vi.fn(),
   mockSearchContent: vi.fn(),
   mockSearchEntriesForPicker: vi.fn(),
   mockGenerateEmbedding: vi.fn(),
@@ -123,7 +127,9 @@ vi.mock("../../src/db/queries.js", () => ({
   deleteArtifact: mockDeleteArtifact,
   getArtifactById: mockGetArtifactById,
   listArtifacts: mockListArtifacts,
+  countArtifacts: mockCountArtifacts,
   searchArtifacts: mockSearchArtifacts,
+  listArtifactTags: mockListArtifactTags,
   searchContent: mockSearchContent,
   searchEntriesForPicker: mockSearchEntriesForPicker,
 }));
@@ -1135,6 +1141,7 @@ describe("startHttpServer", () => {
 
   it("GET /api/artifacts lists artifacts", async () => {
     mockListArtifacts.mockResolvedValue([mockArtifact]);
+    mockCountArtifacts.mockResolvedValue(1);
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
 
     const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/artifacts");
@@ -1145,7 +1152,8 @@ describe("startHttpServer", () => {
 
     await handler(mockReq, mockRes);
     expect(mockListArtifacts).toHaveBeenCalled();
-    expect(mockRes.json).toHaveBeenCalledWith([mockArtifact]);
+    expect(mockCountArtifacts).toHaveBeenCalled();
+    expect(mockRes.json).toHaveBeenCalledWith({ items: [mockArtifact], total: 1 });
   });
 
   it("GET /api/artifacts searches when q provided", async () => {
@@ -1165,6 +1173,7 @@ describe("startHttpServer", () => {
   });
 
   it("GET /api/artifacts returns 500 on error", async () => {
+    mockCountArtifacts.mockResolvedValue(0);
     mockListArtifacts.mockRejectedValue(new Error("db error"));
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
 
@@ -1198,6 +1207,7 @@ describe("startHttpServer", () => {
     const { config } = await import("../../src/config.js");
     (config as any).server.mcpSecret = "test-secret";
     mockListArtifacts.mockResolvedValue([]);
+    mockCountArtifacts.mockResolvedValue(0);
 
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
     const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/artifacts");
@@ -1210,6 +1220,35 @@ describe("startHttpServer", () => {
     expect(mockRes.json).toHaveBeenCalled();
     expect(mockRes.status).not.toHaveBeenCalledWith(401);
     (config as any).server.mcpSecret = "";
+  });
+
+  it("GET /api/artifacts/tags returns tag list", async () => {
+    mockListArtifactTags.mockResolvedValue([{ name: "health", count: 3 }]);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/artifacts/tags");
+    const handler = call![1];
+
+    const mockReq = { headers: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockListArtifactTags).toHaveBeenCalled();
+    expect(mockRes.json).toHaveBeenCalledWith([{ name: "health", count: 3 }]);
+  });
+
+  it("GET /api/artifacts/tags returns 500 on error", async () => {
+    mockListArtifactTags.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/artifacts/tags");
+    const handler = call![1];
+
+    const mockReq = { headers: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
   });
 
   it("GET /api/artifacts/:id returns artifact", async () => {
