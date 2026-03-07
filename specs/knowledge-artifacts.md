@@ -80,6 +80,10 @@ Causal model connecting multiple insights/patterns, with predictions.
 
 Reusable interpretive framework (self-created or adapted) used as a lens.
 
+### `note`
+
+Personal notes, procedures, and routines — non-analytical reference material (e.g., skincare routine, packing lists, recipes).
+
 ### `reference`
 
 Curated external knowledge or structured notes (including LLM-assisted docs when tagged).
@@ -93,7 +97,7 @@ Curated external knowledge or structured notes (including LLM-assisted docs when
 ```sql
 CREATE TABLE IF NOT EXISTS knowledge_artifacts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  kind TEXT NOT NULL CHECK (kind IN ('insight', 'theory', 'model', 'reference')),
+  kind TEXT NOT NULL CHECK (kind IN ('insight', 'theory', 'model', 'reference', 'note')),
   title TEXT NOT NULL CHECK (char_length(title) BETWEEN 1 AND 300),
   body TEXT NOT NULL CHECK (char_length(body) > 0),
   tags TEXT[] NOT NULL DEFAULT '{}',
@@ -237,26 +241,25 @@ Served by existing Express app. All inputs validated with Zod.
 
 ## Web app
 
-Vite + React app served as static files from existing Express service.
+Vite + React 19 app served as static files from existing Express service. See `specs/web-app.spec.md` for full spec.
 
 ### Routes
 
 ```text
-/        -> Artifact list/search
+/        -> Artifact list (paginated, search + kind filter)
 /new     -> Artifact editor (create)
-/:id     -> Artifact editor (edit)
+/:id     -> Artifact editor (edit with autosave)
 ```
 
-### Editor behavior
+### Key behaviors
 
-- Markdown editor (MDXEditor) with live formatting shortcuts.
+- Bearer token auth gate (validates against `MCP_SECRET` via API).
+- MDXEditor for rich markdown editing with toolbar.
+- List page: paginated (`{ items, total }` response), 10 per page, kind filter pills, debounced RRF search (kind filter applies to search too).
 - Autosave in edit mode: 1500ms debounce, uses `expected_version`.
-- On `409`, pause autosave and show conflict banner with reload/merge actions.
-- Create mode uses explicit Save.
-
-### Rendering safety
-
-- Markdown preview/render must sanitize raw HTML to prevent XSS.
+- On `409`, pause autosave and show conflict banner with reload action.
+- Create mode uses explicit Save. Floating action button on list page.
+- Tailwind CSS v4 with dark mode via `prefers-color-scheme` (system preference). Pine green accent palette.
 
 ---
 
