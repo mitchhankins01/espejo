@@ -52,9 +52,7 @@ async function embedEntries(force: boolean): Promise<void> {
 
   if (totalCount === 0) {
     console.log("All entries already have embeddings. Use --force to re-embed.");
-    await pool.end();
-    return;
-  }
+  } else {
 
   const totalBatches = Math.ceil(totalCount / BATCH_SIZE);
   console.log(`Embedding ${totalCount} entries (${totalBatches} batches of ${BATCH_SIZE})...`);
@@ -127,7 +125,8 @@ async function embedEntries(force: boolean): Promise<void> {
     }
   }
 
-  console.log(`Done. Embedded ${processed} entries. [${elapsed(t0)}]`);
+    console.log(`Done. Embedded ${processed} entries. [${elapsed(t0)}]`);
+  }
 
   // ---------------------------------------------------------------------------
   // Phase 2: Embed knowledge artifacts
