@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { getArtifact, updateArtifact, deleteArtifact, type Artifact } from "../api.ts";
 import { KindSelect } from "../components/KindSelect.tsx";
@@ -24,6 +24,7 @@ export function ArtifactEdit() {
   const [version, setVersion] = useState(0);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [deleting, setDeleting] = useState(false);
+  const dirty = useRef(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -39,6 +40,8 @@ export function ArtifactEdit() {
       setSources(a.source_entry_uuids);
       setVersion(a.version);
       setSaveStatus("idle");
+      dirty.current = false;
+      bodyInitialized.current = false;
     } catch (err) {
       setError(String(err));
     } finally {
@@ -51,7 +54,7 @@ export function ArtifactEdit() {
   }, [load]);
 
   const save = useCallback(async () => {
-    if (!id || !title.trim() || !body.trim()) return;
+    if (!id || !title.trim() || !body.trim() || !dirty.current) return;
 
     setSaveStatus("saving");
     try {
@@ -83,9 +86,25 @@ export function ArtifactEdit() {
     return (value: T) => {
       if (saveStatus === "conflict") return;
       setter(value);
+      dirty.current = true;
       setSaveStatus("idle");
       triggerAutosave();
     };
+  }
+
+  // MDXEditor fires onChange on mount with normalized markdown.
+  // Suppress that first spurious change by tracking body initialization.
+  const bodyInitialized = useRef(false);
+  function handleBodyChange(value: string) {
+    if (saveStatus === "conflict") return;
+    setBody(value);
+    if (!bodyInitialized.current) {
+      bodyInitialized.current = true;
+      return;
+    }
+    dirty.current = true;
+    setSaveStatus("idle");
+    triggerAutosave();
   }
 
   async function handleDelete() {
@@ -185,7 +204,7 @@ export function ArtifactEdit() {
           </label>
           <MarkdownEditor
             value={body}
-            onChange={handleChange(setBody)}
+            onChange={handleBodyChange}
             readOnly={saveStatus === "conflict"}
           />
         </div>
