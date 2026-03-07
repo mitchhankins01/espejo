@@ -731,6 +731,60 @@ const migrations: Migration[] = [
        $$`,
     ],
   },
+  {
+    name: "018-lowercase-tags",
+    getSql: () => ``,
+    rawStatements: [
+      // Merge duplicate tags that differ only by case:
+      // 1. Re-point entry_tags and artifact_tags from uppercase duplicates to the lowercase canonical
+      // 2. Delete the now-orphaned uppercase tag rows
+      // 3. Lowercase all remaining tag names
+      // 4. Add a unique index on lower(name) to prevent future duplicates
+      `DO $$
+       DECLARE
+         dup RECORD;
+         canonical_id INT;
+       BEGIN
+         -- For each group of tags that share the same lowercase name
+         FOR dup IN
+           SELECT LOWER(name) AS lname, array_agg(id ORDER BY id) AS ids
+           FROM tags
+           GROUP BY LOWER(name)
+           HAVING COUNT(*) > 1
+         LOOP
+           -- Pick the lowest id as canonical
+           canonical_id := dup.ids[1];
+
+           -- Re-point entry_tags
+           UPDATE entry_tags SET tag_id = canonical_id
+           WHERE tag_id = ANY(dup.ids[2:])
+           AND NOT EXISTS (
+             SELECT 1 FROM entry_tags et2
+             WHERE et2.entry_id = entry_tags.entry_id AND et2.tag_id = canonical_id
+           );
+           DELETE FROM entry_tags WHERE tag_id = ANY(dup.ids[2:]);
+
+           -- Re-point artifact_tags
+           UPDATE artifact_tags SET tag_id = canonical_id
+           WHERE tag_id = ANY(dup.ids[2:])
+           AND NOT EXISTS (
+             SELECT 1 FROM artifact_tags at2
+             WHERE at2.artifact_id = artifact_tags.artifact_id AND at2.tag_id = canonical_id
+           );
+           DELETE FROM artifact_tags WHERE tag_id = ANY(dup.ids[2:]);
+
+           -- Delete the duplicate tag rows
+           DELETE FROM tags WHERE id = ANY(dup.ids[2:]);
+         END LOOP;
+
+         -- Lowercase all remaining tag names
+         UPDATE tags SET name = LOWER(name) WHERE name != LOWER(name);
+       END
+       $$`,
+      // Add case-insensitive unique index (prevents future duplicates)
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_name_lower ON tags (LOWER(name))`,
+    ],
+  },
 ];
 
 async function migrate(): Promise<void> {

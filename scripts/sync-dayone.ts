@@ -507,7 +507,7 @@ async function syncBatch(
     const allTagNames = new Set<string>();
     for (const entry of batch) {
       const tags = tagsByEntry.get(entry.Z_PK) || [];
-      for (const t of tags) allTagNames.add(t);
+      for (const t of tags) allTagNames.add(t.toLowerCase());
     }
 
     if (allTagNames.size > 0) {
@@ -532,7 +532,7 @@ async function syncBatch(
         const tags = tagsByEntry.get(entry.Z_PK) || [];
         for (const tag of tags) {
           etEntryIds.push(entryId);
-          etTagIds.push(tagIdMap.get(tag)!);
+          etTagIds.push(tagIdMap.get(tag.toLowerCase())!);
         }
       }
 
