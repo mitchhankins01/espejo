@@ -359,6 +359,14 @@ button {
   font-size: 13px;
 }
 
+.mdx-editor-wrapper .mdxeditor-root-contenteditable p {
+  margin: 0 0 12px;
+}
+
+.mdx-editor-wrapper .mdxeditor-root-contenteditable p:last-child {
+  margin-bottom: 0;
+}
+
 .mdx-editor-wrapper .mdxeditor-root-contenteditable blockquote {
   border-left: 3px solid var(--accent);
   padding-left: 12px;
@@ -371,6 +379,22 @@ button {
 .mdx-editor-wrapper .mdxeditor-root-contenteditable h3 {
   color: var(--text);
   margin: 16px 0 8px;
+}
+
+.mdx-editor-wrapper .mdxeditor-root-contenteditable ul,
+.mdx-editor-wrapper .mdxeditor-root-contenteditable ol {
+  margin: 0 0 12px;
+  padding-left: 24px;
+}
+
+.mdx-editor-wrapper .mdxeditor-root-contenteditable li {
+  margin-bottom: 4px;
+}
+
+.mdx-editor-wrapper .mdxeditor-root-contenteditable hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 16px 0;
 }
 
 .mdx-editor-wrapper .mdxeditor-root-contenteditable a {
