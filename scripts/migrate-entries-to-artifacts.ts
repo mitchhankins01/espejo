@@ -47,8 +47,8 @@ async function main(): Promise<void> {
 
   try {
     // Check which entries exist
-    const { rows: entries } = await pool.query<{ uuid: string; text: string }>(
-      `SELECT uuid, text FROM entries WHERE uuid = ANY($1)`,
+    const { rows: entries } = await pool.query<{ uuid: string; text: string; created_at: string }>(
+      `SELECT uuid, text, created_at FROM entries WHERE uuid = ANY($1)`,
       [ENTRY_UUIDS]
     );
 
@@ -78,10 +78,10 @@ async function main(): Promise<void> {
         await client.query("BEGIN");
 
         const { rows: [artifact] } = await client.query<{ id: string }>(
-          `INSERT INTO knowledge_artifacts (kind, title, body, tags)
-           VALUES ($1, $2, $3, $4)
+          `INSERT INTO knowledge_artifacts (kind, title, body, tags, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $5)
            RETURNING id`,
-          [KIND, title, body, ["llm"]]
+          [KIND, title, body, ["llm"], entry.created_at]
         );
 
         await client.query(

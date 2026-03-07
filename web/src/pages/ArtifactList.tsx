@@ -105,7 +105,7 @@ export function ArtifactList() {
                 )}
                 <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
                   <span style={{ color: "var(--text-muted)" }}>
-                    {new Date(a.updated_at).toLocaleDateString()}
+                    {new Date(a.created_at).toLocaleDateString()}
                   </span>
                   {a.tags.map((t) => (
                     <span key={t} className="tag">
