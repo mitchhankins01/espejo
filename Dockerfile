@@ -1,4 +1,4 @@
-FROM node:18 AS builder
+FROM node:20 AS builder
 WORKDIR /app
 RUN npm install -g pnpm
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -9,7 +9,7 @@ COPY . .
 RUN pnpm build
 RUN cd web && pnpm build
 
-FROM node:18-slim
+FROM node:20-slim
 WORKDIR /app
 RUN npm install -g pnpm
 COPY package.json pnpm-lock.yaml ./
