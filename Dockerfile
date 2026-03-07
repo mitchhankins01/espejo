@@ -1,10 +1,10 @@
-FROM node:18-slim AS builder
+FROM node:18 AS builder
 WORKDIR /app
 RUN npm install -g pnpm
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/ packages/
 COPY web/package.json web/package.json
-RUN pnpm install --frozen-lockfile --ignore-scripts
+RUN pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm build
 RUN cd web && pnpm build
