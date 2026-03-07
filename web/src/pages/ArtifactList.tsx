@@ -1,9 +1,25 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { listArtifacts, searchArtifacts, type Artifact } from "../api.ts";
-import { MarkdownPreview } from "../components/MarkdownPreview.tsx";
 
 const KINDS = ["", "insight", "theory", "model", "reference"] as const;
+
+/** Strip markdown syntax to get a plain text snippet */
+function plainSnippet(md: string, max: number): string {
+  return md
+    .replace(/^#+\s+/gm, "")       // headings
+    .replace(/\*{1,3}([^*]+)\*{1,3}/g, "$1") // bold/italic
+    .replace(/_{1,3}([^_]+)_{1,3}/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // links
+    .replace(/^[-*>]\s+/gm, "")    // list markers, blockquotes
+    .replace(/^---+$/gm, "")       // thematic breaks
+    .replace(/`{1,3}[^`]*`{1,3}/g, "") // inline/fenced code
+    .replace(/\n{2,}/g, " ")       // collapse blank lines
+    .replace(/\n/g, " ")           // remaining newlines
+    .replace(/\s{2,}/g, " ")       // collapse whitespace
+    .trim()
+    .slice(0, max) + (md.length > max ? "..." : "");
+}
 
 export function ArtifactList() {
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
@@ -47,7 +63,7 @@ export function ArtifactList() {
         </Link>
       </div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -76,43 +92,27 @@ export function ArtifactList() {
           {search ? "No artifacts match your search." : "No artifacts yet. Create one to get started."}
         </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+        <div className="artifact-list">
           {artifacts.map((a) => (
             <Link
               key={a.id}
               to={`/${a.id}`}
-              style={{ textDecoration: "none", color: "inherit" }}
+              className="artifact-card"
             >
-              <div
-                style={{
-                  padding: "12px 16px",
-                  background: "var(--bg-surface)",
-                  borderRadius: "var(--radius)",
-                  marginBottom: 4,
-                  transition: "background 0.15s",
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-elevated)")}
-                onMouseLeave={(e) => (e.currentTarget.style.background = "var(--bg-surface)")}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                  <span className={`kind-badge ${a.kind}`}>{a.kind}</span>
-                  <span style={{ fontWeight: 500 }}>{a.title}</span>
-                </div>
-                {a.body && (
-                  <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 4 }}>
-                    <MarkdownPreview content={a.body} maxLength={150} />
-                  </div>
-                )}
-                <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                  <span style={{ color: "var(--text-muted)" }}>
-                    {new Date(a.created_at).toLocaleDateString()}
-                  </span>
-                  {a.tags.map((t) => (
-                    <span key={t} className="tag">
-                      {t}
-                    </span>
-                  ))}
-                </div>
+              <div className="artifact-card-header">
+                <span className={`kind-badge ${a.kind}`}>{a.kind}</span>
+                <span className="artifact-card-title">{a.title}</span>
+              </div>
+              {a.body && (
+                <p className="artifact-card-snippet">
+                  {plainSnippet(a.body, 180)}
+                </p>
+              )}
+              <div className="artifact-card-meta">
+                <span>{new Date(a.created_at).toLocaleDateString()}</span>
+                {a.tags.map((t) => (
+                  <span key={t} className="tag">{t}</span>
+                ))}
               </div>
             </Link>
           ))}
