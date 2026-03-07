@@ -16,3 +16,5 @@ Journal.json
 .claude/
 .svelte-kit/
 data/
+test-results/
+playwright-report/
