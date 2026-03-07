@@ -503,7 +503,7 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
   /* v8 ignore next 9 -- static file serving only active when web build exists */
   const webDistPath = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
-    "..", "..", "web", "dist"
+    "..", "..", "..", "web", "dist"
   );
   app.use(express.static(webDistPath));
   app.get("/{*splat}", (_req, res, next) => {
