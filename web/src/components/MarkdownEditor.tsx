@@ -40,7 +40,7 @@ export function MarkdownEditor({ value, onChange, placeholder, readOnly }: Markd
   }, [value]);
 
   return (
-    <div className="mdx-editor-wrapper">
+    <div className="mdx-editor-wrapper border border-border rounded-lg overflow-hidden min-h-[300px]">
       <MDXEditor
         ref={editorRef}
         markdown={value}

@@ -27,35 +27,33 @@ export function TagInput({
     onChange(tags.filter((t) => t !== tag));
   }
 
+  const allTags = [
+    ...tags.slice().sort((a, b) => a.localeCompare(b)),
+    ...available.sort((a, b) => a.localeCompare(b)),
+  ];
+
   return (
     <div>
-      {tags.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 mb-2">
-          {tags.map((tag) => (
-            <button
-              key={tag}
-              type="button"
-              onClick={() => removeTag(tag)}
-              aria-label={`Remove tag ${tag}`}
-              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-pine-500/10 text-pine-700 dark:text-pine-300 border border-transparent hover:border-red-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors cursor-pointer"
-            >
-              {tag} <span className="text-[10px]">&times;</span>
-            </button>
-          ))}
-        </div>
-      )}
-      {available.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 mb-2">
-          {available.map((tag) => (
-            <button
-              key={tag}
-              type="button"
-              onClick={() => addTag(tag)}
-              className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-surface-elevated text-text-muted border border-border hover:border-pine-500 hover:text-pine-700 dark:hover:text-pine-300 transition-colors cursor-pointer"
-            >
-              + {tag}
-            </button>
-          ))}
+      {allTags.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-2">
+          {allTags.map((tag) => {
+            const selected = tags.includes(tag);
+            return (
+              <button
+                key={tag}
+                type="button"
+                onClick={() => (selected ? removeTag(tag) : addTag(tag))}
+                aria-label={selected ? `Remove tag ${tag}` : `Add tag ${tag}`}
+                className={`px-3 py-1 rounded-full text-sm font-medium transition-colors cursor-pointer ${
+                  selected
+                    ? "bg-pine-600 text-white dark:bg-pine-500 dark:text-white hover:bg-pine-700 dark:hover:bg-pine-600"
+                    : "bg-transparent text-text-muted border border-border hover:border-pine-500 hover:text-pine-700 dark:hover:text-pine-300"
+                }`}
+              >
+                {tag}
+              </button>
+            );
+          })}
         </div>
       )}
       <input
@@ -68,8 +66,8 @@ export function TagInput({
             addTag();
           }
         }}
-        placeholder="New tag..."
-        className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-text-primary placeholder:text-text-muted/60 focus:outline-none focus:ring-2 focus:ring-pine-500/30 focus:border-pine-500 text-base"
+        placeholder="Create new tag..."
+        className="w-full px-2.5 py-1.5 rounded-lg border border-border bg-surface text-text-primary placeholder:text-text-muted/40 focus:outline-none focus:ring-2 focus:ring-pine-500/30 focus:border-pine-500 text-sm"
       />
     </div>
   );

@@ -31,7 +31,11 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }, []);
 
   if (checking) {
-    return <div className="layout"><div className="loading">Authenticating...</div></div>;
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-surface-alt">
+        <p className="text-text-muted">Authenticating...</p>
+      </div>
+    );
   }
 
   if (authed) return <>{children}</>;
@@ -58,19 +62,31 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="layout" style={{ display: "flex", justifyContent: "center", paddingTop: 120 }}>
-      <form onSubmit={handleSubmit} style={{ width: "100%", maxWidth: 360 }}>
-        <h1 style={{ marginBottom: 24, textAlign: "center" }}>Espejo</h1>
+    <div className="flex items-center justify-center min-h-screen bg-surface-alt px-4">
+      <form onSubmit={handleSubmit} className="w-full max-w-sm">
+        <h1 className="text-2xl font-semibold text-center mb-8 text-text-primary">Espejo</h1>
+        <label htmlFor="auth-token" className="block text-sm text-text-muted mb-1.5 font-medium">
+          Access Token
+        </label>
         <input
+          id="auth-token"
           type="password"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Enter access token"
           autoFocus
-          style={{ marginBottom: 12 }}
+          aria-label="Access token"
+          className="w-full px-3 py-2.5 rounded-lg border border-border bg-surface text-text-primary placeholder:text-text-muted/60 focus:outline-none focus:ring-2 focus:ring-pine-500/30 focus:border-pine-500 mb-3 text-base"
         />
-        {error && <div className="error-message" style={{ marginBottom: 12 }}>{error}</div>}
-        <button className="btn-primary" style={{ width: "100%" }} disabled={checking}>
+        {error && (
+          <div className="text-red-600 dark:text-red-400 text-sm bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg px-3 py-2 mb-3">
+            {error}
+          </div>
+        )}
+        <button
+          className="w-full py-2.5 rounded-lg bg-pine-600 dark:bg-pine-500 text-white font-medium hover:bg-pine-700 dark:hover:bg-pine-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={checking}
+        >
           {checking ? "Checking..." : "Sign in"}
         </button>
       </form>
