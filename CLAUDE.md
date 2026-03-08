@@ -150,9 +150,9 @@ specs/
   ltm-research.md   — [Research] Evidence-based long-term memory architecture analysis.
   — Planned / Stub specs:
   aws-sst-migration-plan.md — [Planned] Future AWS/SST migration (not implemented).
-  memory-v2.md      — [Stub] Memory architecture redesign + shared personality layer.
+  memory-v2.md      — [Spec] Memory v2: 3 kinds, MCP tools (remember/save_chat/recall/reflect), decoupled compaction, shared soul.
   insight-engine.md — [Stub] Background dot-connecting worker with Telegram notifications.
-  chat-archive.md   — [Stub] Save Claude Desktop conversations as searchable content.
+  chat-archive.md   — [Merged] into memory-v2.md as `save_chat` tool.
   proactive-checkins.md — [Stub] Telegram bot proactive outreach for data gathering.
   project-management.md — [Stub] ADHD-tailored project management extending todos.
   fixtures/

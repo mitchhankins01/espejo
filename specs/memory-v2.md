@@ -1,94 +1,250 @@
 # Memory v2 — Memory Architecture & Shared Personality
 
-## Status: Stub (awaiting spec worker)
+## Status: Spec (ready for implementation)
 
 ## What
 
-Combined redesign of the memory layer and creation of a shared personality layer that works across all interfaces (Telegram, Claude Desktop, future bots).
+Redesign of the memory layer and shared personality system. Decouples memory creation from Telegram compaction, simplifies pattern kinds from 9 → 3, adds MCP tools for interface-agnostic memory access, and makes soul state global.
 
-## Scope — Memory
+Subsumes `specs/chat-archive.md` — the `save_chat` tool replaces the standalone chat archive concept.
 
-- **Audit current pattern system**: What's working, what's not, where does it fall short?
-- **Memory hierarchy**: entries (raw experience) → patterns (extracted semantics) → artifacts (synthesized knowledge) → ???
-- **Research alternatives**: OpenClaw, MemGPT/Letta, other approaches to LLM long-term memory
-- **Evaluate**: Is the problem the extraction quality? Retrieval quality? Decay model? Context injection format?
+## Audit Findings
 
-### Current Pattern System (for audit)
+Production audit (March 2026) of 90 patterns from a 2-week Telegram burst revealed:
 
-- 9 pattern kinds: behavior, emotion, belief, goal, preference, temporal, causal, fact, event
-- Typed decay scoring per kind
-- Extraction during compaction (size-based >48k chars OR time-based 12+ hours, 10+ messages)
-- Dedup: canonical hash (exact) + ANN embedding similarity (0.82+ threshold)
-- Retrieval: semantic search → MMR reranking → budget cap (2000 tokens) → system prompt injection
-- Tables: `patterns`, `pattern_observations`, `pattern_relations`, `pattern_aliases`, `pattern_entries`
+- **Event bloat**: 43% of patterns are granular events, many duplicated 3-4x (0.82 dedup threshold too conservative)
+- **Stale facts**: 5 contradictory weight entries, temporal facts stored as durable ("hasn't replied to email as of Feb 22")
+- **Miscategorized kinds**: Travel plans as "behavior", career moves as "goal" — LLM can't reliably distinguish 9 kinds
+- **Low retrieval quality**: Avg 1.5 patterns returned per query, avg top score 0.52 (barely above threshold)
+- **Interface blindness**: Primary interface (Claude Desktop via MCP) produces zero patterns — extraction only happens during Telegram compaction
+- **Compaction conflation**: Memory creation is a side effect of context window management — quality suffers because extraction is batch garbage collection, not intentional memory
 
-## Scope — Shared Personality
+## Core Architectural Change
 
-- **Current state**: Soul state is per-chat in Telegram only (`chat_soul_state` table)
-- **"Higher self" concept**: Personality represents who you are at your core / want to be, not just bot behavior
-- **Shared state**: Accessible across Telegram bot, Claude Desktop (via MCP), future interfaces
-- **Read vs write**: How personality state is read (injected into any system prompt) vs written (evolved by any interface)
-- **Conflict resolution**: If two interfaces evolve the soul state simultaneously
+**Decouple memory creation from context management.**
 
-## Key Questions
+| Concern | Before (v1) | After (v2) |
+|---------|-------------|------------|
+| Memory creation | Side effect of compaction | Intentional via `remember` / `save_chat` tools |
+| Compaction | Extracts patterns + trims context | Pure context trimming (summarize + discard) |
+| Write interface | Telegram only | Any interface (MCP tools) |
+| Pattern kinds | 9 (frequently miscategorized) | 3: identity, preference, goal |
+| Events | Stored as patterns (redundant) | Journal entries are the event store |
+| Soul state | Per-chat, Telegram only | Global singleton, any interface |
 
-### Memory
-- What specifically feels broken about current memory? (Needs diagnostic data from actual usage)
-- Is the extraction prompt producing high-quality patterns?
-- Is retrieval surfacing the right patterns at the right time?
-- Are decay curves well-calibrated? Are important patterns fading too fast?
-- What does OpenClaw/MemGPT/Letta do differently that's worth adopting?
-- Should memory be tiered (working → short-term → long-term) with different storage/retrieval?
+## Pattern Kinds
 
-### Personality
-- Should personality live in the DB (current approach) or as a synced config/prompt file?
-- How does Claude Desktop access personality state — new MCP tools (`get_soul_state`, `evolve_soul`)?
-- What prevents personality drift when multiple interfaces write concurrently?
-- How much of the soul state is "identity" (stable) vs "mood" (ephemeral)?
+### 3 kinds (down from 9)
 
-## Context Budget Note
+| Kind | What it captures | Half-life | Floor | Examples |
+|------|-----------------|-----------|-------|----------|
+| identity | Durable biographical facts about the user or their world | 3650 days | 0.85 | "Lives in Barcelona", "Jesse's birthday is March 15", "Allergic to penicillin" |
+| preference | Values, beliefs, habits, recurring choices | 180 days | 0.40 | "Prefers working from cafes", "Uses 'crash cómodo' framework for recovery days" |
+| goal | Active intentions with directionality | 90 days | 0.30 | "Reach B2 Spanish by June", "Reply to therapist's email" |
 
-Memory v2 should explicitly define token budgets per memory layer in the system prompt. Consider:
-- Fixed allocation per section (e.g., 500 tokens for patterns, 300 for soul, 200 for recent context)
-- Dynamic allocation based on relevance to current conversation
-- Demand-pulled (agent requests what it needs) vs always-injected
+**No event kind.** Journal entries are the event store — already searchable and embedded. Forward-looking events ("surgery on April 10") are stored as `identity` with temporal metadata:
 
-## Dependencies
+```json
+{ "temporal": { "date": "2026-04-10", "relevance": "upcoming" } }
+```
 
-**This is the foundational spec** — all other specs build on decisions made here:
-- Insight Engine (spec 1) uses memory/embeddings for dot-connecting
-- Chat Archive (spec 2) storage target depends on memory layers
-- Proactive Check-ins (spec 4) generate data that feeds into memory
-- Project Management (spec 5) project state becomes part of agent context
+### Kind migration
+
+| Old (v1) | New (v2) | Rationale |
+|----------|----------|-----------|
+| fact | identity | Renamed for clarity |
+| event | _(dropped)_ | Journal entries are the event store |
+| belief, preference, behavior | preference | All "what user values/does/thinks" |
+| emotion, temporal, causal | _(absorbed)_ | → preference (recurring) or identity (durable) |
+| goal | goal | Unchanged |
+
+## MCP Tools
+
+### `remember` — Store a single pattern
+
+```
+Params:
+  content: string       — The pattern to remember
+  kind: identity | preference | goal
+  confidence?: number   — 0.0-1.0, default 0.8
+  evidence?: string     — Why this is being stored
+  entry_uuids?: string[] — Link to journal entries
+  temporal?: { date?: string, relevance?: "upcoming" | "ongoing" }
+```
+
+- Runs dedup pipeline: hash check → embed → ANN similarity check (0.80 threshold) → insert or reinforce
+- Sets `source_type = 'mcp_explicit'`
+- Fast — no LLM call needed
+- Available to both MCP clients and Telegram agent's tool list
+- Telegram agent calls this mid-conversation when it hears something worth storing
+
+### `save_chat` — Batch extract patterns from a conversation
+
+```
+Params:
+  messages: string      — Conversation transcript
+  context?: string      — Topic hint for better extraction
+```
+
+- Reuses extraction prompt (refactored from compaction) with quality gates:
+  - Only 3 kinds (identity, preference, goal)
+  - Negative examples: no biometric dumps, hypotheticals, assistant suggestions
+  - Post-extraction validation: content 10-200 chars, evidence required, confidence ≥ 0.4, implicit signal ≥ 0.6
+  - Max 5 patterns per extraction
+- Returns: summary of patterns found, stored, reinforced, skipped
+- Sets `source_type = 'mcp_chat_archive'`
+- This is how Claude Desktop conversations feed the memory system
+
+### `recall` — Search memory
+
+```
+Params:
+  query: string         — Search query
+  kinds?: string[]      — Filter by kind
+  limit?: number        — Default 10, max 20
+```
+
+- Calls `searchPatterns()` with typed-decay scoring
+- Returns formatted list with kind, confidence, times_seen, last_seen
+
+### `reflect` — Memory maintenance
+
+```
+Params:
+  action: "consolidate" | "review_stale" | "stats"
+  kind?: string         — Filter to specific kind
+```
+
+- `consolidate`: Find clusters of similar active patterns (cosine > 0.78), send to LLM for merge proposals
+- `review_stale`: Return patterns not seen in 90+ days
+- `stats`: Pattern counts by kind/status, avg confidence, total active
+
+## Compaction Changes
+
+### Before (v1)
+1. Size/time trigger → take oldest half of messages
+2. LLM extracts patterns from those messages
+3. Mark messages as compacted
+4. Run pulse check
+
+### After (v2)
+1. Size trigger only (12k token threshold — context window management)
+2. Generate brief summary of compacted messages (conversational continuity)
+3. Store summary (so bot doesn't lose thread)
+4. Mark messages as compacted
+5. No pattern extraction during compaction
+
+### Telegram agent as active memory participant
+
+Instead of batch-extracting during compaction, the agent uses `remember` as a tool during conversation:
+
+- `remember` added to agent's available tools
+- System prompt guidance: "When the user shares biographical facts, preferences, goals, or important future dates, call `remember` to store them. Store important information as you hear it."
+- Agent decides in real-time what's worth storing, with full conversational context
+
+## Retrieval Improvements
+
+### Lower thresholds
+
+| Param | v1 | v2 |
+|-------|-----|-----|
+| `RETRIEVAL_BASE_MIN_SIMILARITY` | 0.45 | 0.35 |
+| `RETRIEVAL_SHORT_QUERY_MIN_SIMILARITY` | 0.52 | 0.42 |
+| `RETRIEVAL_SCORE_FLOOR_DEFAULT` | 0.35 | 0.20 |
+| `RETRIEVAL_SCORE_FLOOR_SHORT_QUERY` | 0.50 | 0.35 |
+
+Fewer, higher-quality patterns make lower thresholds safer.
+
+### Hybrid retrieval
+
+The `patterns` table already has a `text_search` tsvector column with GIN index — currently unused. Add text-based retrieval path and merge with RRF (k=60), mirroring how `search_entries` works:
+
+```typescript
+const [semantic, textual] = await Promise.all([
+  semanticSearchPatterns(pool, queryEmbedding, 15, minSimilarity),
+  textSearchPatterns(pool, queryText, 10),
+]);
+return rrfMerge(semantic, textual, 60);
+```
+
+## Shared Soul State
+
+### Global singleton table
+
+```sql
+CREATE TABLE IF NOT EXISTS soul_state (
+    id INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    identity_summary TEXT NOT NULL,
+    relational_commitments TEXT[] NOT NULL DEFAULT '{}',
+    tone_signature TEXT[] NOT NULL DEFAULT '{}',
+    growth_notes TEXT[] NOT NULL DEFAULT '{}',
+    version INT NOT NULL DEFAULT 1,
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_by TEXT NOT NULL DEFAULT 'system'
+);
+```
+
+- Migrated from per-chat `chat_soul_state` → global `soul_state`
+- Optimistic locking via `version` column (same pattern as artifacts)
+- `buildSoulPromptSection()` already a pure function — reuse for MCP context injection
+- Soul evolution moves from compaction trigger to periodic (every N messages or timer)
+
+## Automated Consolidation
+
+### Periodic background work
+- Wired into hourly Oura sync timer
+- Find clusters of similar active patterns (cosine > 0.78 within same kind), LLM merge, supersede originals
+- Active pattern cap: 40 max, deprecate lowest-scored excess
+- Prune expired patterns (based on `expires_at`)
+
+### Telegram notifications
+Background workers send summaries via Telegram when they act on memory:
+- "Consolidated 3 overlapping patterns about X → single pattern"
+- "Deprecated 2 stale patterns (not seen in 90+ days): ..."
+- "Active pattern count: 28/40"
+
+## Implementation Phases
+
+| Phase | What | Schema changes |
+|-------|------|---------------|
+| 1 | Kind simplification (9 → 3) + prod data cleanup | Migration: remap kinds, update constraint |
+| 2 | MCP tools (`remember`, `save_chat`, `recall`, `reflect`) + extraction pipeline refactor | New tool specs |
+| 3 | Decouple compaction from memory — pure context trimming, agent calls `remember` | Compaction summary storage |
+| 4 | Retrieval improvements — lower thresholds, hybrid RRF | None |
+| 5 | Shared soul state — global singleton | New `soul_state` table |
+| 6 | Automated consolidation + Telegram notifications | None |
+
+Each phase is independently deployable.
+
+## Files to Create/Modify
+
+**New files:**
+- `src/tools/remember.ts` — MCP remember tool
+- `src/tools/save-chat.ts` — MCP save_chat tool
+- `src/tools/recall.ts` — MCP recall tool
+- `src/tools/reflect.ts` — MCP reflect tool
+- `src/memory/extraction.ts` — Shared extraction pipeline (refactored from agent.ts)
+- `src/memory/consolidation.ts` — Cluster detection, LLM merge, cap enforcement
+
+**Modified files:**
+- `specs/tools.spec.ts` — 4 new tool specs
+- `specs/schema.sql` — Update kind constraint, add `soul_state` table
+- `scripts/migrate.ts` — Kind remap migration, soul state migration
+- `src/server.ts` — Register new tools
+- `src/db/queries.ts` — Updated decay params, text search query, consolidation queries, global soul CRUD
+- `src/telegram/agent.ts` — Simplified compaction, `remember` in tool list, updated system prompt, retrieval thresholds
+- `src/telegram/soul.ts` — Read/write global `soul_state`
+- `src/transports/http.ts` — Wire consolidation into sync timer
 
 ## Existing Code to Reuse
 
-| Component | Location | What to reuse/audit |
-|-----------|----------|---------------------|
-| Soul state | `telegram/soul.ts` | Current implementation to generalize |
-| Soul evolution | `telegram/soul.ts` | `buildSoulCompactionContext()`, mutation logic |
-| Pulse/quality loop | `telegram/pulse.ts` | `diagnoseQuality()`, `applySoulRepairs()` |
-| Pattern extraction | `telegram/agent.ts` | Compaction pipeline, extraction prompts |
-| Pattern retrieval | `telegram/agent.ts` | Semantic search → MMR → budget cap |
-| Pattern tables | `db/queries.ts` | All pattern CRUD queries |
+| Component | Location | Reuse |
+|-----------|----------|-------|
+| Pattern extraction prompt | `telegram/agent.ts` lines 1414-1443 | Refactor into `memory/extraction.ts` |
+| Dedup pipeline | `telegram/agent.ts` lines 1512-1631 | Refactor into `memory/extraction.ts` |
+| `searchPatterns()` scoring | `db/queries.ts` lines 1802-1834 | Update decay params for 3 kinds |
+| RRF merge | `tools/search.ts` | Pattern for hybrid retrieval |
+| `buildSoulPromptSection()` | `telegram/soul.ts` | Reuse for MCP context injection |
+| `sendMessage()` | `telegram/client.ts` | Consolidation notifications |
 | Embedding pipeline | `db/embeddings.ts` | Shared embedding infrastructure |
-
-## Research Tasks
-
-- [ ] Audit pattern extraction quality from recent compactions
-- [ ] Audit pattern retrieval relevance (are the right memories surfacing?)
-- [ ] Measure current system prompt size with all context sections active
-- [ ] Review OpenClaw architecture and applicability
-- [ ] Review MemGPT/Letta memory tiering approach
-- [ ] Review academic literature on LLM long-term memory (see `specs/ltm-research.md`)
-
-## Open Design Decisions
-
-- [ ] Memory hierarchy: how many layers, what lives where
-- [ ] Extraction: current compaction-based vs continuous vs hybrid
-- [ ] Retrieval: current MMR approach vs alternatives
-- [ ] Decay: current typed decay vs usage-based vs hybrid
-- [ ] Personality: DB-stored vs file-based vs hybrid
-- [ ] Personality: per-interface vs shared vs both (shared core + per-interface overlay)
-- [ ] Conflict resolution for concurrent personality writes
-- [ ] Context budget framework: fixed vs dynamic vs demand-pulled
+| Optimistic locking | `db/queries.ts` artifact queries | Pattern for soul state writes |
