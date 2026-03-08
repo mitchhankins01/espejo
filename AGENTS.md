@@ -101,6 +101,10 @@ src/
   spanish/
     analytics.ts    — Interface-agnostic Spanish learning analytics. Pure functions: digest building, trend analysis, formatting.
     assessment.ts   — LLM-as-judge Spanish conversation quality assessment. DI-based client interface.
+  insights/
+    engine.ts       — Background insight engine: timer, advisory lock, run loop, dedup, throttle, notify.
+    analyzers.ts    — Pure analysis functions: temporal echoes, biometric correlations, stale todos.
+    formatters.ts   — InsightCandidate → Telegram HTML notification formatting.
   oura/
     client.ts       — Oura API v2 client.
     sync.ts         — Oura sync engine: API fetch + DB upserts + advisory lock + timer.
@@ -151,7 +155,7 @@ specs/
   ltm-research.md   — [Research] Evidence-based long-term memory architecture analysis.
   — Planned / Stub specs:
   aws-sst-migration-plan.md — [Planned] Future AWS/SST migration (not implemented).
-  insight-engine.md — [Stub] Background dot-connecting worker with Telegram notifications.
+  insight-engine.md — [Implemented] Background dot-connecting worker: temporal echoes, biometric correlations, stale todo detection.
   chat-archive.md   — [Merged] into memory-v2.md as `save_chat` tool.
   proactive-checkins.md — [Stub] Telegram bot proactive outreach for data gathering.
   project-management.md — [Stub] ADHD-tailored project management extending todos.
@@ -234,7 +238,7 @@ Media files (photos, videos, audio) are uploaded to Cloudflare R2 during sync if
 
 ### Two Test Tiers
 
-**Unit tests** (`tests/tools/`, `tests/formatters/`, `tests/oura/`, `tests/utils/`):
+**Unit tests** (`tests/tools/`, `tests/formatters/`, `tests/oura/`, `tests/insights/`, `tests/utils/`):
 - No database needed
 - Test param validation, formatter output, spec conformance
 - Fast — run in milliseconds
@@ -699,6 +703,26 @@ Hourly sync from Oura API v2 into PostgreSQL, giving the Telegram agent access t
 OURA_ACCESS_TOKEN          — Personal access token from cloud.ouraring.com
 OURA_SYNC_INTERVAL_MINUTES — default 60
 OURA_SYNC_LOOKBACK_DAYS    — default 3
+```
+
+### Insight Engine
+
+Background worker that surfaces non-obvious connections across data and delivers them as Telegram notifications. Runs daily on a timer (like Oura sync), uses advisory lock to prevent concurrent runs. Design: `specs/insight-engine.md`.
+
+**3 insight types:**
+- `temporal_echo` — Semantically similar entries from the same calendar date (MM-DD) in previous years. Cosine similarity threshold 0.75.
+- `biometric_correlation` — When Oura data shows anomalies (low sleep, low readiness, low HRV, short sleep duration), surfaces nearby journal entries for context.
+- `stale_todo` — Active todos not updated in 7+ days, ordered by importance. Resurfaces weekly via week-bracket dedup hash.
+
+**DB table:** `insights` — stores generated insights with type, content_hash (dedup), title, body, relevance score, JSONB metadata, notified_at timestamp.
+
+**Dedup:** SHA-256 content hash checked against configurable window (default 30 days). Daily notification cap (default 3).
+
+**Config:**
+```
+INSIGHT_ENGINE_INTERVAL_HOURS    — default 24
+INSIGHT_ENGINE_MAX_PER_DAY       — default 3
+INSIGHT_ENGINE_DEDUP_WINDOW_DAYS — default 30
 ```
 
 ## HTTP REST API

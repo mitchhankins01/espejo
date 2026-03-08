@@ -101,6 +101,12 @@ import {
   completeTodo,
   setTodoFocus,
   getFocusTodo,
+  insertInsight,
+  insightHashExists,
+  countInsightsNotifiedToday,
+  markInsightNotified,
+  findTemporalEchoes,
+  findStaleTodos,
 } from "../../src/db/queries.js";
 import { fixturePatterns, fixtureArtifacts } from "../../specs/fixtures/seed.js";
 
@@ -3051,5 +3057,136 @@ describe("searchEntries regression", () => {
       expect(r.uuid).toBeTruthy();
       expect(r).not.toHaveProperty("kind");
     }
+  });
+});
+
+// ============================================================================
+// Insight queries
+// ============================================================================
+
+describe("insight queries", () => {
+  it("insertInsight creates a row and returns id", async () => {
+    const id = await insertInsight(
+      pool,
+      "temporal_echo",
+      "hash-abc",
+      "Echo from 2023",
+      "Some body text",
+      0.85,
+      { echo_uuid: "uuid-123" }
+    );
+    expect(id).toBeGreaterThan(0);
+  });
+
+  it("insightHashExists returns false for unknown hash", async () => {
+    const exists = await insightHashExists(pool, "nonexistent-hash", 30);
+    expect(exists).toBe(false);
+  });
+
+  it("insightHashExists returns true for existing hash within window", async () => {
+    await insertInsight(pool, "stale_todo", "hash-exists", "Title", "Body", 0.5, {});
+    const exists = await insightHashExists(pool, "hash-exists", 30);
+    expect(exists).toBe(true);
+  });
+
+  it("countInsightsNotifiedToday returns 0 when none notified", async () => {
+    await insertInsight(pool, "stale_todo", "hash-1", "Title", "Body", 0.5, {});
+    // Not marked as notified
+    const count = await countInsightsNotifiedToday(pool, "UTC");
+    expect(count).toBe(0);
+  });
+
+  it("countInsightsNotifiedToday counts notified insights", async () => {
+    const id = await insertInsight(pool, "stale_todo", "hash-2", "Title", "Body", 0.5, {});
+    await markInsightNotified(pool, id);
+    const count = await countInsightsNotifiedToday(pool, "UTC");
+    expect(count).toBe(1);
+  });
+
+  it("markInsightNotified sets notified_at", async () => {
+    const id = await insertInsight(pool, "temporal_echo", "hash-3", "Title", "Body", 0.8, {});
+    await markInsightNotified(pool, id);
+    const result = await pool.query("SELECT notified_at FROM insights WHERE id = $1", [id]);
+    expect(result.rows[0].notified_at).toBeTruthy();
+  });
+
+  it("findTemporalEchoes returns entries from same MM-DD in different years", async () => {
+    // Fixture entries 003 (2024-06-15) and 004 (2023-06-15) share the same MM-DD
+    // with similar embeddings (morningRoutineBase + noise)
+    const echoes = await findTemporalEchoes(pool, 6, 15, 2024, 0.5, "UTC", 10);
+    expect(echoes.length).toBeGreaterThan(0);
+    expect(echoes[0].echo_year).toBe(2023);
+    expect(echoes[0].similarity).toBeGreaterThan(0.5);
+    expect(echoes[0].current_uuid).toBe("ENTRY-003-MORNING-ROUTINE");
+    expect(echoes[0].echo_uuid).toBe("ENTRY-004-MORNING-SIMPLE");
+  });
+
+  it("findTemporalEchoes returns empty when threshold is too high", async () => {
+    const echoes = await findTemporalEchoes(pool, 6, 15, 2024, 0.999, "UTC", 10);
+    expect(echoes).toHaveLength(0);
+  });
+
+  it("findTemporalEchoes returns empty for date with no entries", async () => {
+    const echoes = await findTemporalEchoes(pool, 2, 29, 2024, 0.5, "UTC", 10);
+    expect(echoes).toHaveLength(0);
+  });
+
+  it("findStaleTodos returns active todos older than threshold", async () => {
+    const todo = await createTodo(pool, { title: "Stale task", status: "active" });
+    // Disable trigger to allow backdating updated_at
+    await pool.query("ALTER TABLE todos DISABLE TRIGGER trg_todo_updated_at_bump");
+    await pool.query(
+      "UPDATE todos SET updated_at = NOW() - INTERVAL '14 days' WHERE id = $1",
+      [todo.id]
+    );
+    await pool.query("ALTER TABLE todos ENABLE TRIGGER trg_todo_updated_at_bump");
+
+    const stale = await findStaleTodos(pool, 7, 10);
+    expect(stale.length).toBeGreaterThan(0);
+    expect(stale[0].title).toBe("Stale task");
+    expect(stale[0].days_stale).toBeGreaterThanOrEqual(14);
+  });
+
+  it("findStaleTodos excludes recently updated todos", async () => {
+    await createTodo(pool, { title: "Fresh task", status: "active" });
+    const stale = await findStaleTodos(pool, 7, 10);
+    const freshInResults = stale.find((t) => t.title === "Fresh task");
+    expect(freshInResults).toBeUndefined();
+  });
+
+  it("findStaleTodos excludes done todos", async () => {
+    const todo = await createTodo(pool, { title: "Done task", status: "active" });
+    await pool.query("ALTER TABLE todos DISABLE TRIGGER trg_todo_updated_at_bump");
+    await pool.query(
+      "UPDATE todos SET status = 'done', updated_at = NOW() - INTERVAL '30 days' WHERE id = $1",
+      [todo.id]
+    );
+    await pool.query("ALTER TABLE todos ENABLE TRIGGER trg_todo_updated_at_bump");
+    const stale = await findStaleTodos(pool, 7, 10);
+    const doneInResults = stale.find((t) => t.title === "Done task");
+    expect(doneInResults).toBeUndefined();
+  });
+
+  it("findStaleTodos orders by importance then staleness", async () => {
+    const importantTodo = await createTodo(pool, {
+      title: "Important stale",
+      status: "active",
+      important: true,
+    });
+    const normalTodo = await createTodo(pool, {
+      title: "Normal stale",
+      status: "active",
+    });
+    await pool.query("ALTER TABLE todos DISABLE TRIGGER trg_todo_updated_at_bump");
+    await pool.query(
+      "UPDATE todos SET updated_at = NOW() - INTERVAL '14 days' WHERE id = ANY($1)",
+      [[importantTodo.id, normalTodo.id]]
+    );
+    await pool.query("ALTER TABLE todos ENABLE TRIGGER trg_todo_updated_at_bump");
+
+    const stale = await findStaleTodos(pool, 7, 10);
+    const importantIdx = stale.findIndex((t) => t.title === "Important stale");
+    const normalIdx = stale.findIndex((t) => t.title === "Normal stale");
+    expect(importantIdx).toBeLessThan(normalIdx);
   });
 });

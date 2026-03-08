@@ -1,55 +1,80 @@
 # Insight Engine — Background Dot-Connecting Worker
 
-## Status: Stub (awaiting spec worker)
+## Status: Implemented
 
 ## What
 
-Scheduled background worker that scans all available data (entries, patterns, artifacts, Oura biometrics, todos) and surfaces non-obvious connections via Telegram notifications.
+Background worker that scans data (entries, Oura biometrics, todos) and surfaces non-obvious connections via Telegram notifications. Runs on a daily timer with advisory lock, dedup, and daily cap.
 
-## Scope
+## Architecture
 
-- **Scheduling**: In-process `setInterval` like Oura sync, or separate process
-- **"Connecting dots" concretely**:
-  - Embedding similarity across recent entries vs historical
-  - Pattern co-occurrence across time
-  - Oura-journal correlations (e.g., poor sleep → negative journaling)
-  - Temporal patterns ("you wrote about X last November too")
-  - Todo staleness detection / progress stalls
-- **Notification delivery**: Via Telegram (reuse existing `telegram/client.ts`)
-- **Dedup/throttling**: Don't spam with low-value insights — cadence limits, relevance thresholds
-- **Storage**: Log generated insights? Feed them back as patterns or artifacts?
+```
+src/insights/
+    engine.ts       — Timer (setInterval), advisory lock, run loop, dedup, throttle, notify
+    analyzers.ts    — Pure analysis functions (one per insight type)
+    formatters.ts   — InsightCandidate → Telegram HTML
+```
 
-## Key Questions
+Follows `src/oura/sync.ts` pattern: `setInterval` + `pg_try_advisory_lock` + `notifyError` on failure.
 
-- What scoring/threshold determines "interesting enough to notify"?
-- Should insights be stored (new table? artifact kind?) or ephemeral?
-- How does it avoid being annoying — cadence limits, relevance thresholds, user feedback loop?
-- What's the minimum viable insight that's actually useful?
+## Insight Types (MVP)
 
-## Context Budget Note
+### 1. Temporal Echoes
+Find semantically similar entries from the same calendar date (MM-DD) in previous years. CTE cross-joins current-year entries with past-year entries, filters by cosine similarity threshold (default 0.75).
 
-Generated insights injected into Telegram context could compound with existing Oura/todo/pattern injection. This spec must define a token budget for insight context — likely a fixed cap with priority ranking.
+### 2. Biometric-Journal Correlations
+When Oura data shows anomalies (sleep score < 65, readiness < 65, sleep < 6h, HRV < 20), surfaces journal entries from the same day for context.
 
-## Dependencies
+### 3. Stale Todo Detection
+Active todos not updated in 7+ days, ordered by importance then staleness. Week-bracket dedup hash allows weekly resurfacing.
 
-- **Memory v2** (spec 3) — informs what memory layers exist and how retrieval works
-- Uses embeddings/search infrastructure that Memory v2 may redesign
+## Dedup & Throttling
 
-## Existing Code to Reuse
+- **Content hash**: SHA-256 of canonical string (`type:key_identifiers`), checked against configurable window (default 30 days)
+- **Daily cap**: Max 3 notifications per day (configurable)
+- **Advisory lock**: `pg_try_advisory_lock(9152202)` prevents concurrent runs
 
-| Component | Location | What to reuse |
+## DB Table
+
+```sql
+CREATE TABLE insights (
+    id SERIAL PRIMARY KEY,
+    type TEXT NOT NULL CHECK (type IN ('temporal_echo', 'biometric_correlation', 'stale_todo')),
+    content_hash TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    relevance DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    metadata JSONB NOT NULL DEFAULT '{}',
+    notified_at TIMESTAMPTZ,
+    dismissed BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+## Config
+
+```
+INSIGHT_ENGINE_INTERVAL_HOURS    — default 24
+INSIGHT_ENGINE_MAX_PER_DAY       — default 3
+INSIGHT_ENGINE_DEDUP_WINDOW_DAYS — default 30
+```
+
+No enable flag — runs automatically when Telegram bot is configured.
+
+## Reused Components
+
+| Component | Location | What's reused |
 |-----------|----------|---------------|
-| Sync scheduling | Oura sync (`oura/sync.ts`) | `setInterval` + PG advisory lock pattern |
-| Embedding search | `db/queries.ts` | Cosine similarity queries, RRF search |
-| Telegram delivery | `telegram/client.ts` | `sendMessage` with retry/chunking |
-| Pattern retrieval | `telegram/agent.ts` | Semantic search → MMR reranking pipeline |
-| Oura data | `oura/analysis.ts` | Correlation, trend, anomaly detection functions |
-| Todo context | `todos/context.ts` | Current todo state summarization |
+| Sync scheduling | `oura/sync.ts` | `setInterval` + PG advisory lock pattern |
+| Biometric data | `db/queries.ts` | `getOuraSummaryByDay` for outlier detection |
+| Entry search | `db/queries.ts` | `getEntriesByDateRange` for journal context |
+| Telegram delivery | `telegram/client.ts` | `sendTelegramMessage` with retry/chunking |
+| Error notification | `telegram/notify.ts` | `notifyError` for background failures |
+| Date utilities | `utils/dates.ts` | `todayInTimezone` for timezone-aware date |
 
-## Open Design Decisions
+## Future Extensions
 
-- [ ] Scheduling: in-process timer vs cron vs event-driven
-- [ ] Insight types taxonomy and scoring rubric
-- [ ] Storage model: new table, artifact kind, or ephemeral
-- [ ] User feedback mechanism (thumbs up/down? dismiss? "more like this"?)
-- [ ] Notification cadence limits (max N per day? per hour?)
+- Additional insight types: pattern convergence, artifact gaps, learning momentum
+- User feedback mechanism (dismiss, "more like this")
+- Context injection into Telegram agent (token-budgeted)
+- Historical window-based outlier detection (IQR/Z-score from `oura/analysis.ts`)

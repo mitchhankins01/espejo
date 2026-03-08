@@ -937,6 +937,25 @@ const migrations: Migration[] = [
        $$`,
     ],
   },
+  {
+    name: "024-insights",
+    getSql: () => `
+      CREATE TABLE IF NOT EXISTS insights (
+          id SERIAL PRIMARY KEY,
+          type TEXT NOT NULL CHECK (type IN ('temporal_echo', 'biometric_correlation', 'stale_todo')),
+          content_hash TEXT NOT NULL,
+          title TEXT NOT NULL,
+          body TEXT NOT NULL,
+          relevance DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+          metadata JSONB NOT NULL DEFAULT '{}',
+          notified_at TIMESTAMPTZ,
+          dismissed BOOLEAN NOT NULL DEFAULT FALSE,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_insights_hash ON insights(content_hash);
+      CREATE INDEX IF NOT EXISTS idx_insights_type_created ON insights(type, created_at DESC);
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

@@ -52,6 +52,7 @@ import {
 } from "../db/queries.js";
 import { generateEmbedding } from "../db/embeddings.js";
 import { registerOAuthRoutes, isValidOAuthToken } from "./oauth.js";
+import { startInsightTimer } from "../insights/engine.js";
 import { startOuraSyncTimer } from "../oura/sync.js";
 
 type ServerFactory = () => McpServer;
@@ -81,6 +82,7 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
   };
   /* v8 ignore stop */
   startOuraSyncTimer(pool, runMemoryMaintenance);
+  startInsightTimer(pool);
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
 

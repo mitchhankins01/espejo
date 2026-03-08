@@ -81,6 +81,10 @@ const telegramPulseIntervalHours = parseIntegerEnv(
   24,
   1
 );
+const insightIntervalHours = parseIntegerEnv("INSIGHT_ENGINE_INTERVAL_HOURS", 24, 1);
+const insightMaxPerDay = parseIntegerEnv("INSIGHT_ENGINE_MAX_PER_DAY", 3, 1);
+const insightDedupWindowDays = parseIntegerEnv("INSIGHT_ENGINE_DEDUP_WINDOW_DAYS", 30, 1);
+
 const ouraSyncIntervalMinutes = parseIntegerEnv(
   "OURA_SYNC_INTERVAL_MINUTES",
   60,
@@ -182,6 +186,13 @@ export const config = {
   anthropic: {
     apiKey: process.env.ANTHROPIC_API_KEY || "",
     model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6",
+  },
+  insights: {
+    intervalHours: insightIntervalHours,
+    maxPerDay: insightMaxPerDay,
+    dedupWindowDays: insightDedupWindowDays,
+    temporalEchoThreshold: 0.75,
+    staleTodoDays: 7,
   },
   oura: {
     accessToken: process.env.OURA_ACCESS_TOKEN || "",
