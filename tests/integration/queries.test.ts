@@ -1327,29 +1327,29 @@ describe("searchPatterns", () => {
     expect(results.every((r) => r.id !== 1)).toBe(true);
   });
 
-  it("supports episodic kinds (fact and event)", async () => {
-    const factResults = await searchPatterns(
+  it("supports memory-v2 kinds (identity/preference/goal)", async () => {
+    const identityResults = await searchPatterns(
       pool,
       fixturePatterns[3].embedding,
       10,
       0.0
     );
-    const eventResults = await searchPatterns(
+    const preferenceResults = await searchPatterns(
       pool,
-      fixturePatterns[4].embedding,
+      fixturePatterns[0].embedding,
       10,
       0.0
     );
 
-    expect(factResults.some((r) => r.kind === "fact")).toBe(true);
-    expect(eventResults.some((r) => r.kind === "event")).toBe(true);
-    expect(factResults.every((r) => Number.isFinite(r.score))).toBe(true);
-    expect(eventResults.every((r) => Number.isFinite(r.score))).toBe(true);
+    expect(identityResults.some((r) => r.kind === "identity")).toBe(true);
+    expect(preferenceResults.some((r) => r.kind === "preference")).toBe(true);
+    expect(identityResults.every((r) => Number.isFinite(r.score))).toBe(true);
+    expect(preferenceResults.every((r) => Number.isFinite(r.score))).toBe(true);
   });
 });
 
 describe("getLanguagePreferencePatterns", () => {
-  it("returns active language preference/fact patterns and excludes unrelated content", async () => {
+  it("returns active language preference/identity patterns and excludes unrelated content", async () => {
     await insertPattern(pool, {
       content: "User prefers English and Dutch as base languages with gradual Spanish practice.",
       kind: "preference",
@@ -1363,7 +1363,7 @@ describe("getLanguagePreferencePatterns", () => {
 
     await insertPattern(pool, {
       content: "User speaks Dutch and English fluently.",
-      kind: "fact",
+      kind: "identity",
       confidence: 0.9,
       embedding: fixturePatterns[3].embedding,
       temporal: null,
@@ -1429,55 +1429,16 @@ describe("getTopPatterns", () => {
 });
 
 describe("pruneExpiredEventPatterns", () => {
-  it("deprecates expired active event memories", async () => {
-    const pattern = await insertPattern(pool, {
-      content: "User attended a meetup last year.",
-      kind: "event",
-      confidence: 0.7,
-      embedding: fixturePatterns[4].embedding,
-      temporal: null,
-      canonicalHash: "expired-event-001",
-      expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
-      timestamp: new Date(),
-    });
-
+  it("returns 0 when event kind is no longer used", async () => {
     const changed = await pruneExpiredEventPatterns(pool);
-    expect(changed).toBeGreaterThanOrEqual(1);
-
-    const row = await pool.query(
-      "SELECT status FROM patterns WHERE id = $1",
-      [pattern.id]
-    );
-    expect(row.rows[0].status).toBe("deprecated");
+    expect(changed).toBe(0);
   });
 });
 
 describe("countStaleEventPatterns", () => {
-  it("counts active event memories that are expired", async () => {
-    await insertPattern(pool, {
-      content: "User attended a local meetup in 2020.",
-      kind: "event",
-      confidence: 0.65,
-      embedding: fixturePatterns[4].embedding,
-      temporal: null,
-      canonicalHash: "stale-event-active-001",
-      expiresAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
-      timestamp: new Date(),
-    });
-
-    await insertPattern(pool, {
-      content: "User plans to attend a workshop next month.",
-      kind: "event",
-      confidence: 0.72,
-      embedding: fixturePatterns[4].embedding,
-      temporal: null,
-      canonicalHash: "fresh-event-active-001",
-      expiresAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000),
-      timestamp: new Date(),
-    });
-
+  it("returns 0 when event kind is no longer used", async () => {
     const count = await countStaleEventPatterns(pool);
-    expect(count).toBeGreaterThanOrEqual(1);
+    expect(count).toBe(0);
   });
 });
 
@@ -1769,7 +1730,8 @@ describe("upsertSoulState", () => {
       growthNotes: ["first run"],
     });
 
-    expect(state.chat_id).toBe("555");
+    expect(state.id).toBe(1);
+    expect(state.updated_by).toBe("555");
     expect(state.identity_summary).toContain("steady companion");
     expect(state.relational_commitments).toEqual(["stay grounded", "be direct"]);
     expect(state.tone_signature).toEqual(["warm", "clear"]);
@@ -1801,7 +1763,7 @@ describe("upsertSoulState", () => {
     expect(updated.updated_at).toBeInstanceOf(Date);
   });
 
-  it("respects provided version when it is higher than auto-increment", async () => {
+  it("uses optimistic locking with provided version", async () => {
     await upsertSoulState(pool, {
       chatId: "888",
       identitySummary: "State one",
@@ -1816,12 +1778,23 @@ describe("upsertSoulState", () => {
       relationalCommitments: [],
       toneSignature: [],
       growthNotes: [],
-      version: 7,
+      version: 1,
     });
 
-    expect(updated.version).toBe(7);
+    expect(updated.version).toBe(2);
     const fetched = await getSoulState(pool, "888");
-    expect(fetched?.version).toBe(7);
+    expect(fetched?.version).toBe(2);
+
+    await expect(
+      upsertSoulState(pool, {
+        chatId: "888",
+        identitySummary: "State three",
+        relationalCommitments: [],
+        toneSignature: [],
+        growthNotes: [],
+        version: 1,
+      })
+    ).rejects.toThrow("Soul state version conflict");
   });
 });
 

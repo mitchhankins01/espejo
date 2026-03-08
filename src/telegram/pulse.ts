@@ -201,7 +201,7 @@ export function buildSoulCompactionContext(
     "\nThe user's relational commitments with this assistant:",
     ...commitments.map((c) => `- ${c}`),
     "",
-    "Use these to guide pattern extraction. Prioritize explicit facts and events over vague behavioral inferences.",
+    "Use these to guide memory extraction. Prioritize explicit identity facts, preferences, and goals over vague inferences.",
   ];
 
   return lines.join("\n");

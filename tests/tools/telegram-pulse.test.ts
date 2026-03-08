@@ -352,6 +352,6 @@ describe("buildSoulCompactionContext", () => {
     expect(context).toContain("relational commitments");
     expect(context).toContain("stay direct and avoid sugarcoating");
     expect(context).toContain("favor specifics over generic phrasing");
-    expect(context).toContain("Prioritize explicit facts");
+    expect(context).toContain("Prioritize explicit identity facts");
   });
 });

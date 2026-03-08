@@ -2,38 +2,24 @@ import Anthropic from "@anthropic-ai/sdk";
 import crypto from "crypto";
 import OpenAI from "openai";
 import type pg from "pg";
-import { z } from "zod";
 import { config } from "../config.js";
 import { pool } from "../db/client.js";
 import { generateEmbeddingWithUsage } from "../db/embeddings.js";
 import {
-  getLastCompactionTime,
   getRecentMessages,
   getSoulState,
   upsertSoulState,
   getLanguagePreferencePatterns,
-  getTopPatterns,
   insertChatMessage,
-  insertPattern,
-  insertPatternAlias,
-  insertPatternObservation,
-  findSimilarPatterns,
   getLastCostNotificationTime,
   getTotalApiCostSince,
-  linkPatternToEntry,
   insertCostNotification,
   logApiUsage,
   logMemoryRetrieval,
   markMessagesCompacted,
-  countStaleEventPatterns,
-  reinforcePattern,
-  searchPatterns,
-  updatePatternStatus,
+  searchPatternsHybrid,
   insertSoulQualitySignal,
   getSoulQualityStats,
-  insertPulseCheck,
-  getLastPulseCheckTime,
-  insertSoulStateHistory,
   getSpanishProfile,
   upsertSpanishProfile,
   getDueSpanishVocabulary,
@@ -57,11 +43,6 @@ import {
   type SoulStateSnapshot,
 } from "./soul.js";
 import { getModePrompt, type AgentMode } from "./evening-review.js";
-import {
-  diagnoseQuality,
-  applySoulRepairs,
-  buildSoulCompactionContext,
-} from "./pulse.js";
 import {
   allToolNames,
   toAnthropicToolDefinition,
@@ -107,21 +88,15 @@ const CHARS_PER_TOKEN = 4;
 const TOOL_RESULT_MAX_CHARS = 500;
 const SEARCH_RESULT_ENTRY_MAX_CHARS = 100;
 const COMPACTION_TOKEN_BUDGET = 12_000;
-const COMPACTION_INTERVAL_HOURS = 12;
-const MIN_MESSAGES_FOR_TIME_COMPACT = 10;
 const MIN_MESSAGES_FOR_FORCE_COMPACT = 4;
-const MAX_NEW_PATTERNS_PER_COMPACTION = 7;
 const RECENT_MESSAGES_LIMIT = 50;
 const MIN_RETRIEVAL_CHARS = 30;
 const COST_NOTIFICATION_INTERVAL_HOURS = 12;
-const RETRIEVAL_BASE_MIN_SIMILARITY = 0.45;
-const RETRIEVAL_SHORT_QUERY_MIN_SIMILARITY = 0.52;
-const RETRIEVAL_SCORE_FLOOR_DEFAULT = 0.35;
-const RETRIEVAL_SCORE_FLOOR_SHORT_QUERY = 0.5;
+const RETRIEVAL_BASE_MIN_SIMILARITY = 0.35;
+const RETRIEVAL_SHORT_QUERY_MIN_SIMILARITY = 0.42;
+const RETRIEVAL_SCORE_FLOOR_DEFAULT = 0.2;
+const RETRIEVAL_SCORE_FLOOR_SHORT_QUERY = 0.35;
 const LANGUAGE_ANCHOR_LIMIT = 3;
-const MAX_OBSERVATION_EVIDENCE_ITEMS = 8;
-const MAX_OBSERVATION_EVIDENCE_CHARS_PER_ITEM = 280;
-const WEIGHT_CHANGE_EPSILON_KG = 0.25;
 const SPANISH_AUTO_LOG_LIMIT = 4;
 const SPANISH_DEFAULT_KNOWN_TENSES = [
   "presente",
@@ -175,13 +150,14 @@ You are a personal chatbot with long-term memory. Your role:
 3. Query the user's journal for information about past experiences
 4. Remember patterns from past conversations and reference them when relevant
 
-Your memory works automatically: patterns are extracted from conversations and stored for future reference. You do not need a special tool to "save" patterns — it happens behind the scenes. If the user asks about your memory, explain that you learn patterns over time from conversations.
+Memory tools are available: use remember to store important identity facts, preferences, goals, and future-relevant dates as they are shared. Use save_chat when explicitly asked to archive/extract memory from a long transcript.
 
- You have access to 17 tools:
+ You have access to 21 tools:
  - 7 journal tools: search_entries, get_entry, get_entries_by_date, on_this_day, find_similar, list_tags, entry_stats
  - log_weight: log daily weight measurements
  - 3 Spanish tools: conjugate_verb, log_vocabulary, spanish_quiz
  - 6 Oura tools: get_oura_summary, get_oura_weekly, get_oura_trends, get_oura_analysis, oura_compare_periods, oura_correlate
+ - 4 memory tools: remember, save_chat, recall, reflect
 
 CRITICAL — Journal entry composition:
 When the user signals they want a journal entry composed — using phrases like "write", "close", "write it up", "compose the entry", "write the entry", "escríbelo", or similar — your ENTIRE response must be the journal entry itself. Nothing else. No preamble, no commentary, no questions, no sign-off. Just the entry.
@@ -626,9 +602,10 @@ async function retrievePatterns(
       Date.now() - embeddingStartMs
     );
 
-    const raw = await searchPatterns(
+    const raw = await searchPatternsHybrid(
       pool,
       embeddingResult.embedding,
+      queryText,
       20,
       minSimilarityForQuery(queryText)
     );
@@ -1282,38 +1259,6 @@ function extractTextFromOpenAIMessages(messages: OpenAIChatMessage[]): string {
 // Compaction
 // ---------------------------------------------------------------------------
 
-const compactionExtractionSchema = z.object({
-  new_patterns: z.array(z.object({
-    content: z.string(),
-    kind: z.enum(["behavior", "emotion", "belief", "goal", "preference", "temporal", "causal", "fact", "event"]),
-    confidence: z.number().min(0).max(1),
-    signal: z.enum(["explicit", "implicit"]),
-    evidence_message_ids: z.array(z.number()),
-    entry_uuids: z.array(z.string()).optional().default([]),
-    temporal: z.record(z.unknown()).optional().default({}),
-  })).max(MAX_NEW_PATTERNS_PER_COMPACTION),
-  reinforcements: z.array(z.object({
-    pattern_id: z.number(),
-    confidence: z.number().min(0).max(1),
-    signal: z.enum(["explicit", "implicit"]),
-    evidence_message_ids: z.array(z.number()),
-    entry_uuids: z.array(z.string()).optional().default([]),
-  })),
-  contradictions: z.array(z.object({
-    pattern_id: z.number(),
-    reason: z.string(),
-    evidence_message_ids: z.array(z.number()),
-  })),
-  supersedes: z.array(z.object({
-    old_pattern_id: z.number(),
-    reason: z.string(),
-    new_pattern_content: z.string(),
-    evidence_message_ids: z.array(z.number()),
-  })),
-});
-
-type CompactionExtraction = z.infer<typeof compactionExtractionSchema>;
-
 async function tryAcquireLock(p: pg.Pool): Promise<boolean> {
   const res = await p.query<{ pg_try_advisory_lock: boolean }>(
     "SELECT pg_try_advisory_lock(1337)"
@@ -1325,123 +1270,22 @@ async function releaseLock(p: pg.Pool): Promise<void> {
   await p.query("SELECT pg_advisory_unlock(1337)");
 }
 
-function filterEvidenceRoles(
-  messageIds: number[],
-  allMessages: ChatMessageRow[]
-): { filteredIds: number[]; roles: string[]; messages: ChatMessageRow[] } {
-  const msgMap = new Map(allMessages.map((m) => [m.id, m]));
-  const filteredIds: number[] = [];
-  const roles: string[] = [];
-  const messages: ChatMessageRow[] = [];
-
-  for (const id of messageIds) {
-    const msg = msgMap.get(id);
-    if (msg && (msg.role === "user" || msg.role === "tool_result")) {
-      filteredIds.push(id);
-      if (!roles.includes(msg.role)) roles.push(msg.role);
-      messages.push(msg);
-    }
-  }
-
-  return { filteredIds, roles, messages };
-}
-
-function buildEvidenceSourceId(chatId: string, messageIds: number[]): string {
-  const idList = [...new Set(messageIds)]
-    .sort((a, b) => a - b)
-    .join(",")
-    .slice(0, 150);
-  return `chat:${chatId}:msg:${idList}`;
-}
-
-function buildObservationEvidence(messages: ChatMessageRow[]): string {
-  const payload = messages.slice(0, MAX_OBSERVATION_EVIDENCE_ITEMS).map((m) => ({
-    message_id: m.id,
-    role: m.role,
-    excerpt: m.content.slice(0, MAX_OBSERVATION_EVIDENCE_CHARS_PER_ITEM),
-  }));
-  return JSON.stringify(payload);
-}
-
-function extractWeightKg(content: string): number | null {
-  const normalized = content.toLowerCase();
-  if (!/\b(weigh|weight|kg|kilogram|lbs?|pounds?)\b/.test(normalized)) {
-    return null;
-  }
-
-  const match = normalized.match(
-    /(\d{2,3}(?:\.\d{1,2})?)\s*(kg|kgs|kilogram|kilograms|lb|lbs|pound|pounds)\b/
-  );
-  if (!match) return null;
-
-  const value = Number.parseFloat(match[1]);
-  /* v8 ignore next -- regex capture is constrained to finite decimal tokens */
-  if (!Number.isFinite(value)) return null;
-
-  const unit = match[2];
-  if (unit.startsWith("lb") || unit.startsWith("pound")) {
-    return value * 0.45359237;
-  }
-  return value;
-}
-
 function normalizeContent(content: string): string {
   return content.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
-function computeCanonicalHash(content: string): string {
-  return crypto.createHash("sha256").update(normalizeContent(content)).digest("hex");
-}
-
-async function extractPatterns(
-  messages: ChatMessageRow[],
-  existingPatterns: { id: number; content: string }[],
-  soulState?: SoulStateSnapshot | null
-): Promise<CompactionExtraction | null> {
-  const messagesText = messages
-    .map((m) => {
-      const prefix = m.role === "user" ? "User" : m.role === "tool_result" ? "Tool Result" : "Assistant";
-      return `[id:${m.id}] ${prefix}: ${m.content}`;
-    })
+async function summarizeCompactedMessages(messages: ChatMessageRow[]): Promise<string> {
+  const summaryInput = messages
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .slice(-20)
+    .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
     .join("\n");
 
-  const existingText = existingPatterns.length > 0
-    ? existingPatterns.map((p) => `[id:${p.id}] ${p.content}`).join("\n")
-    : "None";
+  if (summaryInput.trim().length === 0) {
+    return "No user/assistant content in compacted window.";
+  }
 
-  const soulContext = buildSoulCompactionContext(soulState ?? null);
-
-  const prompt = `Analyze these conversation messages and extract patterns, facts, and events.
-${soulContext}
-Existing patterns (for reference, to reinforce or contradict):
-${existingText}
-
-Messages to analyze:
-<untrusted>
-${messagesText}
-</untrusted>
-
-Extract patterns following these rules:
-- Atomic patterns only (one claim each)
-- Maximum ${MAX_NEW_PATTERNS_PER_COMPACTION} new patterns
-- Replace pronouns with specific nouns
-- Resolve entity references to canonical names
-- Only cite user or tool_result messages as evidence (never assistant messages)
-- signal: "explicit" for direct user statements, "implicit" for inferred patterns
-- Choose kinds carefully:
-  - fact: durable biographical detail (name, city, role, allergies, relationships)
-  - event: specific one-time occurrence (trip, appointment, move, launch)
-  - temporal: recurring timing pattern (e.g. "usually Sundays")
-  - belief: opinion/value stance rather than concrete biography
-
-Return JSON matching this schema:
-{
-  "new_patterns": [{ "content": "...", "kind": "behavior|emotion|belief|goal|preference|temporal|causal|fact|event", "confidence": 0.0-1.0, "signal": "explicit|implicit", "evidence_message_ids": [...], "entry_uuids": [...], "temporal": {} }],
-  "reinforcements": [{ "pattern_id": N, "confidence": 0.0-1.0, "signal": "explicit|implicit", "evidence_message_ids": [...], "entry_uuids": [...] }],
-  "contradictions": [{ "pattern_id": N, "reason": "...", "evidence_message_ids": [...] }],
-  "supersedes": [{ "old_pattern_id": N, "reason": "...", "new_pattern_content": "...", "evidence_message_ids": [...] }]
-}`;
-
+  const prompt = `Summarize the conversation below in 3-5 short bullet points for continuity.\nFocus on open loops, commitments, and unresolved questions.\nDo not extract memory patterns.\n\nConversation:\n<untrusted>\n${summaryInput}\n</untrusted>`;
   const provider = getLlmProvider();
   const model = getLlmModel(provider);
   const apiStartMs = Date.now();
@@ -1453,30 +1297,26 @@ Return JSON matching this schema:
     const openai = getOpenAI();
     const response = await openai.chat.completions.create({
       model,
-      max_tokens: 2048,
-      response_format: { type: "json_object" },
+      max_tokens: 512,
       messages: [
-        {
-          role: "system",
-          content: "Return valid JSON only. Do not include markdown fences.",
-        },
+        { role: "system", content: "Return plain text only." },
         { role: "user", content: prompt },
       ],
     });
-    text = response.choices[0]?.message?.content ?? null;
+    text = response.choices[0]?.message?.content?.trim() ?? null;
     inputTokens = response.usage?.prompt_tokens ?? 0;
     outputTokens = response.usage?.completion_tokens ?? 0;
   } else {
     const anthropic = getAnthropic();
     const response = await anthropic.messages.create({
       model,
-      max_tokens: 2048,
+      max_tokens: 512,
       messages: [{ role: "user", content: prompt }],
     });
     const textBlock = response.content.find(
       (b): b is Anthropic.TextBlock => b.type === "text"
     );
-    text = textBlock?.text ?? null;
+    text = textBlock?.text?.trim() ?? null;
     inputTokens = response.usage.input_tokens;
     outputTokens = response.usage.output_tokens;
   }
@@ -1485,149 +1325,17 @@ Return JSON matching this schema:
   await logApiUsage(pool, {
     provider,
     model,
-    purpose: "compaction",
+    purpose: "compaction_summary",
     inputTokens,
     outputTokens,
     costUsd: computeCost(model, inputTokens, outputTokens),
     latencyMs,
   });
 
-  if (!text) return null;
-
-  // Extract JSON from response (may be wrapped in ```json ... ```)
-  let jsonStr = text;
-  const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (jsonMatch) {
-    jsonStr = jsonMatch[1];
+  if (text && text.length > 0) {
+    return text.slice(0, 2000);
   }
-
-  try {
-    const parsed = JSON.parse(jsonStr);
-    return compactionExtractionSchema.parse(parsed);
-  } catch {
-    return null;
-  }
-}
-
-async function deduplicateAndInsertPattern(
-  p: pg.Pool,
-  chatId: string,
-  content: string,
-  kind: string,
-  confidence: number,
-  signal: string,
-  evidenceMessageIds: number[],
-  entryUuids: string[],
-  temporal: Record<string, unknown>,
-  allMessages: ChatMessageRow[]
-): Promise<void> {
-  const { filteredIds, roles, messages: evidenceMessages } = filterEvidenceRoles(
-    evidenceMessageIds,
-    allMessages
-  );
-  if (filteredIds.length === 0) return;
-
-  const sourceId = buildEvidenceSourceId(chatId, filteredIds);
-  const evidenceText = buildObservationEvidence(evidenceMessages);
-  const observationConfidence = signal === "explicit" ? confidence : confidence * 0.5;
-  const incomingWeightKg = kind === "fact" ? extractWeightKg(content) : null;
-  const hash = computeCanonicalHash(content);
-
-  // Tier 1: Hash check
-  const existing = await p.query<{ id: number }>(
-    "SELECT id FROM patterns WHERE canonical_hash = $1 AND status = 'active' AND (expires_at IS NULL OR expires_at > NOW()) LIMIT 1",
-    [hash]
-  );
-  /* v8 ignore next -- hash duplicate: tested via pool.query mock */
-  if (existing.rows.length > 0) return; // exact duplicate
-
-  // Generate embedding
-  let embedding: number[] | null = null;
-  try {
-    const embeddingStartMs = Date.now();
-    const embeddingResult = await generateEmbeddingWithUsage(content);
-    embedding = embeddingResult.embedding;
-    await logEmbeddingUsage(
-      embeddingResult.inputTokens,
-      Date.now() - embeddingStartMs
-    );
-  } catch {
-    // Continue without embedding
-  }
-
-  // Tier 2: ANN check
-  if (embedding) {
-    const similar = await findSimilarPatterns(p, embedding, 1, 0.82);
-
-    if (similar.length > 0) {
-      const best = similar[0];
-      const existingWeightKg = extractWeightKg(best.content);
-      const hasWeightConflict =
-        incomingWeightKg !== null &&
-        existingWeightKg !== null &&
-        Math.abs(incomingWeightKg - existingWeightKg) >= WEIGHT_CHANGE_EPSILON_KG;
-
-      if (hasWeightConflict) {
-        await updatePatternStatus(p, best.id, "superseded");
-      } else {
-        await reinforcePattern(p, best.id, confidence);
-        await insertPatternAlias(p, best.id, content, embedding);
-
-        await insertPatternObservation(p, {
-          patternId: best.id,
-          chatMessageIds: filteredIds,
-          evidence: evidenceText,
-          evidenceRoles: roles,
-          confidence: observationConfidence,
-          sourceType: "chat_compaction",
-          sourceId,
-        });
-
-        for (const uuid of entryUuids) {
-          await linkPatternToEntry(p, best.id, uuid, "compaction", confidence);
-        }
-        return;
-      }
-
-      // Continue and insert a new fact pattern after superseding stale value.
-    }
-  }
-
-  // Insert as new pattern
-  const now = new Date();
-  const expiresAt =
-    kind === "event"
-      ? new Date(now.getTime() + 540 * 24 * 60 * 60 * 1000)
-      : null;
-  const pattern = await insertPattern(p, {
-    content,
-    kind,
-    confidence,
-    embedding,
-    /* v8 ignore next -- temporal is always empty object in v1 */
-    temporal: Object.keys(temporal).length > 0 ? temporal : null,
-    canonicalHash: hash,
-    sourceType: "chat_compaction",
-    sourceId,
-    expiresAt,
-    timestamp: now,
-  });
-
-  // Create observation
-  await insertPatternObservation(p, {
-    patternId: pattern.id,
-    chatMessageIds: filteredIds,
-    evidence: evidenceText,
-    evidenceRoles: roles,
-    confidence: observationConfidence,
-    sourceType: "chat_compaction",
-    sourceId,
-  });
-
-  // Link to entries
-  for (const uuid of entryUuids) {
-    await linkPatternToEntry(p, pattern.id, uuid, "compaction", confidence);
-  }
+  return "Compacted older messages and saved a short context summary.";
 }
 
 async function runCompaction(
@@ -1642,202 +1350,19 @@ async function runCompaction(
   /* v8 ignore next -- defensive: messages.length > 0 guaranteed by caller */
   if (toCompact.length === 0) return;
 
-  // Get existing patterns for context
-  const existingPatterns = await getTopPatterns(pool, 20);
-  const existingForExtraction = existingPatterns.map((p) => ({
-    id: p.id,
-    content: p.content,
-  }));
-
-  // Load soul state for soul-aware extraction
-  const soulRow = config.telegram.soulEnabled
-    ? await getSoulState(pool, chatId)
-    : null;
-  const soulSnapshot = toSoulSnapshot(soulRow);
-
-  // Extract patterns (with soul context for guided extraction)
-  const extraction = await extractPatterns(toCompact, existingForExtraction, soulSnapshot);
-  if (!extraction) {
-    // Extraction failed — still mark as compacted to prevent retry loop
-    await markMessagesCompacted(pool, toCompact.map((m) => m.id));
-    return;
-  }
-
-  const staleEventCount = await countStaleEventPatterns(pool);
-
-  // Process new patterns
-  for (const np of extraction.new_patterns) {
-    await deduplicateAndInsertPattern(
-      pool,
-      chatId,
-      np.content,
-      np.kind,
-      np.confidence,
-      np.signal,
-      np.evidence_message_ids,
-      np.entry_uuids,
-      np.temporal,
-      toCompact
-    );
-  }
-
-  // Process reinforcements
-  for (const r of extraction.reinforcements) {
-    const { filteredIds, roles, messages: evidenceMessages } = filterEvidenceRoles(
-      r.evidence_message_ids,
-      toCompact
-    );
-    if (filteredIds.length === 0) continue;
-
-    await reinforcePattern(pool, r.pattern_id, r.confidence);
-    await insertPatternObservation(pool, {
-      patternId: r.pattern_id,
-      chatMessageIds: filteredIds,
-      evidence: buildObservationEvidence(evidenceMessages),
-      evidenceRoles: roles,
-      /* v8 ignore next -- implicit signal half-weight */
-      confidence: r.signal === "explicit" ? r.confidence : r.confidence * 0.5,
-      sourceType: "chat_compaction",
-      sourceId: buildEvidenceSourceId(chatId, filteredIds),
-    });
-
-    /* v8 ignore next -- entry_uuids always present from Zod default */
-    for (const uuid of r.entry_uuids ?? []) {
-      await linkPatternToEntry(pool, r.pattern_id, uuid, "compaction", r.confidence);
-    }
-  }
-
-  // Process contradictions
-  for (const c of extraction.contradictions) {
-    await updatePatternStatus(pool, c.pattern_id, "disputed");
-  }
-
-  // Process supersessions
-  for (const s of extraction.supersedes) {
-    await updatePatternStatus(pool, s.old_pattern_id, "superseded");
-
-    // Insert the replacement pattern
-    await deduplicateAndInsertPattern(
-      pool,
-      chatId,
-      s.new_pattern_content,
-      "behavior",
-      0.8,
-      "explicit",
-      s.evidence_message_ids,
-      [],
-      {},
-      toCompact
-    );
-  }
-
+  const summary = await summarizeCompactedMessages(toCompact);
+  await insertChatMessage(pool, {
+    chatId,
+    externalMessageId: null,
+    role: "assistant",
+    content: `<i>Context summary:</i>\n${summary}`,
+  });
   // Mark messages as compacted
   await markMessagesCompacted(pool, toCompact.map((m) => m.id));
 
   // Notify caller of compaction results
   if (onCompacted) {
-    const saved = extraction.new_patterns.length;
-    const reinforced = extraction.reinforcements.length;
-    const challenged = extraction.contradictions.length;
-    const replaced = extraction.supersedes.length;
-    const notes: string[] = [];
-
-    if (saved > 0) {
-      const kindSet = new Set(extraction.new_patterns.map((p) => p.kind));
-      notes.push(
-        `saved ${saved} ${saved === 1 ? "memory" : "memories"} (${[...kindSet].join(", ")})`
-      );
-    }
-    if (reinforced > 0) notes.push(`reinforced ${reinforced}`);
-    if (challenged > 0) notes.push(`flagged ${challenged} as disputed`);
-    if (replaced > 0) notes.push(`superseded ${replaced}`);
-    if (staleEventCount > 0) {
-      notes.push(
-        `${staleEventCount} stale event ${staleEventCount === 1 ? "memory" : "memories"} pending review`
-      );
-    }
-
-    if (notes.length > 0) await onCompacted(notes.join(" · "));
-  }
-
-  // Run pulse check after compaction (self-healing organism)
-  if (config.telegram.pulseEnabled && config.telegram.soulEnabled) {
-    try {
-      await runPulseCheck(chatId, soulSnapshot, onCompacted);
-    } catch (err) {
-      /* v8 ignore next -- pulse errors are non-critical */
-      console.error(`Telegram pulse check error [chat:${chatId}]:`, err);
-    }
-  }
-}
-
-async function runPulseCheck(
-  chatId: string,
-  soulSnapshot: SoulStateSnapshot | null,
-  onCompacted?: (summary: string) => Promise<void>
-): Promise<void> {
-  // Rate limit: check interval
-  const lastPulseTime = await getLastPulseCheckTime(pool, chatId);
-  const intervalMs = config.telegram.pulseIntervalHours * 60 * 60 * 1000;
-  if (lastPulseTime && Date.now() - lastPulseTime.getTime() < intervalMs) {
-    return;
-  }
-
-  // Get quality stats
-  const stats = await getSoulQualityStats(pool, chatId);
-  const diagnosis = diagnoseQuality(stats);
-
-  const soulVersionBefore = soulSnapshot?.version ?? 0;
-  let soulVersionAfter = soulVersionBefore;
-
-  // Apply repairs if any
-  if (diagnosis.repairs.length > 0 && soulSnapshot) {
-    const repaired = applySoulRepairs(soulSnapshot, diagnosis.repairs);
-    if (repaired) {
-      await upsertSoulState(pool, {
-        chatId,
-        identitySummary: repaired.identitySummary,
-        relationalCommitments: repaired.relationalCommitments,
-        toneSignature: repaired.toneSignature,
-        growthNotes: repaired.growthNotes,
-        version: repaired.version,
-      });
-      soulVersionAfter = repaired.version;
-
-      // Record audit trail
-      await insertSoulStateHistory(pool, {
-        chatId,
-        version: repaired.version,
-        identitySummary: repaired.identitySummary,
-        relationalCommitments: repaired.relationalCommitments,
-        toneSignature: repaired.toneSignature,
-        growthNotes: repaired.growthNotes,
-        changeReason: `pulse: ${diagnosis.status} — ${diagnosis.recommendation}`,
-      });
-    }
-  }
-
-  // Log the pulse check
-  await insertPulseCheck(pool, {
-    chatId,
-    status: diagnosis.status,
-    personalRatio: diagnosis.personalRatio,
-    correctionRate: diagnosis.correctionRate,
-    signalCounts: {
-      felt_personal: stats.felt_personal,
-      felt_generic: stats.felt_generic,
-      correction: stats.correction,
-      positive_reaction: stats.positive_reaction,
-      total: stats.total,
-    },
-    repairsApplied: diagnosis.repairs.map((r) => ({ type: r.type, value: r.value })),
-    soulVersionBefore,
-    soulVersionAfter,
-  });
-
-  // Notify user of pulse result if repairs were applied
-  if (diagnosis.repairs.length > 0 && onCompacted) {
-    await onCompacted(`pulse: ${diagnosis.status} — ${diagnosis.recommendation}`);
+    await onCompacted(`trimmed ${toCompact.length} messages and saved continuity summary`);
   }
 }
 
@@ -1851,15 +1376,7 @@ export async function compactIfNeeded(
 
   const overBudget = totalChars / CHARS_PER_TOKEN >= COMPACTION_TOKEN_BUDGET;
 
-  if (!overBudget) {
-    // Time-based trigger: compact if 12+ hours since last compaction and enough messages
-    if (recentMessages.length < MIN_MESSAGES_FOR_TIME_COMPACT) return;
-    const lastCompaction = await getLastCompactionTime(pool, chatId);
-    const hoursSince = lastCompaction
-      ? (Date.now() - lastCompaction.getTime()) / (1000 * 60 * 60)
-      : Infinity;
-    if (hoursSince < COMPACTION_INTERVAL_HOURS) return;
-  }
+  if (!overBudget) return;
 
   // Try to acquire lock
   const acquired = await tryAcquireLock(pool);
@@ -2073,20 +1590,19 @@ export async function runAgent(params: {
         message
       );
       if (nextSoulState) {
-        await upsertSoulState(pool, {
+        const updatedSoul = await upsertSoulState(pool, {
           chatId,
           identitySummary: nextSoulState.identitySummary,
           relationalCommitments: nextSoulState.relationalCommitments,
           toneSignature: nextSoulState.toneSignature,
           growthNotes: nextSoulState.growthNotes,
-          version: nextSoulState.version,
         });
         // Log implicit correction signal — user message triggered soul evolution
         await insertSoulQualitySignal(pool, {
           chatId,
           assistantMessageId: null,
           signalType: "correction",
-          soulVersion: nextSoulState.version,
+          soulVersion: updatedSoul.version,
           patternCount: patterns.length,
           metadata: { source: "implicit_correction" },
         });

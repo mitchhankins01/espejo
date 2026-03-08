@@ -248,7 +248,7 @@ export const fixturePatterns: FixturePattern[] = [
   {
     content:
       "User's dopamine baseline crashes after nicotine use, causing next-day depletion and low readiness scores.",
-    kind: "causal",
+    kind: "preference",
     confidence: 0.85,
     strength: 3.5,
     times_seen: 4,
@@ -260,7 +260,7 @@ export const fixturePatterns: FixturePattern[] = [
   {
     content:
       "User experiences poor sleep when consuming caffeine after 2pm or using screens after 9pm.",
-    kind: "behavior",
+    kind: "preference",
     confidence: 0.75,
     strength: 2.0,
     times_seen: 3,
@@ -272,7 +272,7 @@ export const fixturePatterns: FixturePattern[] = [
   {
     content:
       "User feels grounded and present after completing morning routine (cold plunge, breathwork, journaling).",
-    kind: "behavior",
+    kind: "preference",
     confidence: 0.9,
     strength: 5.0,
     times_seen: 8,
@@ -283,7 +283,7 @@ export const fixturePatterns: FixturePattern[] = [
   },
   {
     content: "User's partner is named Ana.",
-    kind: "fact",
+    kind: "identity",
     confidence: 0.95,
     strength: 2.5,
     times_seen: 3,
@@ -294,7 +294,7 @@ export const fixturePatterns: FixturePattern[] = [
   },
   {
     content: "User moved to Barcelona in early 2024.",
-    kind: "event",
+    kind: "identity",
     confidence: 0.88,
     strength: 2.0,
     times_seen: 2,

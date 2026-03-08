@@ -233,7 +233,11 @@ export function notifyOuraSync(result: OuraSyncResult, insight: string | null = 
   });
 }
 
-async function syncAndNotify(pool: pg.Pool, lookbackDays: number): Promise<void> {
+async function syncAndNotify(
+  pool: pg.Pool,
+  lookbackDays: number,
+  onAfterSync?: () => Promise<void>
+): Promise<void> {
   try {
     const result = await runOuraSync(pool, lookbackDays);
     if (result) {
@@ -243,14 +247,21 @@ async function syncAndNotify(pool: pg.Pool, lookbackDays: number): Promise<void>
     /* v8 ignore next 3 -- background sync: errors already recorded in oura_sync_runs */
   } catch (err) {
     notifyError("Oura sync", err);
+  } finally {
+    if (onAfterSync) {
+      await onAfterSync();
+    }
   }
 }
 
-export function startOuraSyncTimer(pool: pg.Pool): NodeJS.Timeout | null {
+export function startOuraSyncTimer(
+  pool: pg.Pool,
+  onAfterSync?: () => Promise<void>
+): NodeJS.Timeout | null {
   if (!config.oura.accessToken) return null;
-  void syncAndNotify(pool, 30);
+  void syncAndNotify(pool, 30, onAfterSync);
   /* v8 ignore next 3 — interval callback body is not testable in unit tests */
   return setInterval(() => {
-    void syncAndNotify(pool, config.oura.syncLookbackDays);
+    void syncAndNotify(pool, config.oura.syncLookbackDays, onAfterSync);
   }, config.oura.syncIntervalMinutes * 60_000);
 }

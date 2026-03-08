@@ -47,6 +47,10 @@ const spanishActionParam = z
   .regex(/^(get_due|record_review|stats)$/, "Must be get_due, record_review, or stats")
   .describe("Quiz action: get_due, record_review, or stats");
 
+const memoryKindParam = z
+  .enum(["identity", "preference", "goal"])
+  .describe("Memory kind: identity, preference, or goal");
+
 // ============================================================================
 // Tool result types
 // ============================================================================
@@ -610,6 +614,89 @@ export const toolSpecs = {
       {
         input: { query: "dopamine", content_types: ["knowledge_artifact"] },
         behavior: "Searches only knowledge artifacts for dopamine content",
+      },
+    ],
+  },
+
+  remember: {
+    name: "remember" as const,
+    description:
+      "Store a single durable memory pattern. Use for explicit identity facts, recurring preferences, and active goals.",
+    params: z.object({
+      content: z.string().min(1).max(200).describe("Memory content to store"),
+      kind: memoryKindParam,
+      confidence: z.number().min(0).max(1).optional().describe("Optional confidence score (default: 0.8)"),
+      evidence: z.string().optional().describe("Why this should be remembered"),
+      entry_uuids: z.array(z.string()).optional().describe("Related journal entry UUIDs"),
+      temporal: z.object({
+        date: dateString.optional(),
+        relevance: z.enum(["upcoming", "ongoing"]).optional(),
+      }).optional().describe("Optional temporal metadata for future-relevant memories"),
+    }),
+    examples: [
+      {
+        input: { content: "Lives in Barcelona", kind: "identity", confidence: 0.95 },
+        behavior: "Stores or reinforces a durable identity memory",
+      },
+      {
+        input: { content: "Wants to reach B2 Spanish by June", kind: "goal" },
+        behavior: "Stores an active intention for future recall",
+      },
+    ],
+  },
+
+  save_chat: {
+    name: "save_chat" as const,
+    description:
+      "Extract and store up to 5 memory patterns from a conversation transcript using memory-v2 quality gates.",
+    params: z.object({
+      messages: z.string().min(1).describe("Conversation transcript"),
+      context: z.string().optional().describe("Optional extraction context hint"),
+    }),
+    examples: [
+      {
+        input: {
+          messages: "User: I live in Barcelona now. User: My goal is B2 Spanish by June.",
+          context: "Spanish coaching session",
+        },
+        behavior: "Extracts identity/goal patterns and stores or reinforces them",
+      },
+    ],
+  },
+
+  recall: {
+    name: "recall" as const,
+    description:
+      "Search memory patterns using hybrid semantic + text retrieval with memory-aware ranking.",
+    params: z.object({
+      query: z.string().min(1).describe("Memory search query"),
+      kinds: z.array(memoryKindParam).optional().describe("Optional kind filters"),
+      limit: limitParam(10, 20),
+    }),
+    examples: [
+      {
+        input: { query: "language preferences", kinds: ["preference"] },
+        behavior: "Returns relevant preference memories about language use",
+      },
+    ],
+  },
+
+  reflect: {
+    name: "reflect" as const,
+    description:
+      "Memory maintenance utility: review stats, stale memories, or run consolidation on overlapping patterns.",
+    params: z.object({
+      action: z.enum(["consolidate", "review_stale", "stats"]),
+      kind: memoryKindParam.optional().describe("Optional kind scope"),
+    }),
+    examples: [
+      {
+        input: { action: "stats" },
+        behavior: "Returns memory counts by kind/status and confidence summary",
+      },
+      {
+        input: { action: "review_stale", kind: "goal" },
+        behavior: "Lists stale goals not seen in 90+ days",
       },
     ],
   },

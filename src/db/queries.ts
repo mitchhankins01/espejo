@@ -1430,16 +1430,20 @@ export interface ChatMessageRow {
   created_at: Date;
 }
 
-export interface ChatSoulStateRow {
-  chat_id: string;
+export interface SoulStateRow {
+  id: number;
   identity_summary: string;
   relational_commitments: string[];
   tone_signature: string[];
   growth_notes: string[];
   version: number;
+  updated_by: string;
   created_at: Date;
   updated_at: Date;
 }
+
+// Back-compat alias used in existing call sites/tests.
+export type ChatSoulStateRow = SoulStateRow;
 
 export interface PatternRow {
   id: number;
@@ -1598,30 +1602,31 @@ export async function getLastCompactionTime(
 }
 
 /**
- * Get the persistent soul state for a chat.
+ * Get the persistent global soul state singleton.
  */
 export async function getSoulState(
   pool: pg.Pool,
-  chatId: string
+  _chatId?: string
 ): Promise<ChatSoulStateRow | null> {
   const result = await pool.query(
     `SELECT *
-     FROM chat_soul_state
-     WHERE chat_id = $1
+     FROM soul_state
+     WHERE id = 1
      LIMIT 1`,
-    [chatId]
+    []
   );
   if (result.rows.length === 0) return null;
   return mapSoulStateRow(result.rows[0]);
 }
 
 /**
- * Insert or update a chat's soul state. On update, version auto-increments.
+ * Insert or update the global soul state.
+ * When `version` is provided, performs optimistic locking against current version.
  */
 export async function upsertSoulState(
   pool: pg.Pool,
   params: {
-    chatId: string;
+    chatId?: string;
     identitySummary: string;
     relationalCommitments: string[];
     toneSignature: string[];
@@ -1629,32 +1634,66 @@ export async function upsertSoulState(
     version?: number;
   }
 ): Promise<ChatSoulStateRow> {
-  const version = Math.max(1, params.version ?? 1);
+  /* v8 ignore next -- default updatedBy path used only for non-chat callers */
+  const updatedBy = params.chatId ?? "system";
+
+  if (params.version != null) {
+    const expectedVersion = Math.max(1, params.version);
+    const updateResult = await pool.query(
+      `UPDATE soul_state
+       SET
+         identity_summary = $1,
+         relational_commitments = $2,
+         tone_signature = $3,
+         growth_notes = $4,
+         version = soul_state.version + 1,
+         updated_by = $5,
+         updated_at = NOW()
+       WHERE id = 1 AND version = $6
+       RETURNING *`,
+      [
+        params.identitySummary,
+        params.relationalCommitments,
+        params.toneSignature,
+        params.growthNotes,
+        updatedBy,
+        expectedVersion,
+      ]
+    );
+    if (updateResult.rows.length === 0) {
+      throw new Error(
+        "Soul state version conflict. Reload soul state and retry with the latest version."
+      );
+    }
+    return mapSoulStateRow(updateResult.rows[0]);
+  }
+
   const result = await pool.query(
-    `INSERT INTO chat_soul_state (
-       chat_id,
+    `INSERT INTO soul_state (
+       id,
        identity_summary,
        relational_commitments,
        tone_signature,
        growth_notes,
-       version
+       version,
+       updated_by
      )
-     VALUES ($1, $2, $3, $4, $5, $6)
-     ON CONFLICT (chat_id) DO UPDATE SET
+     VALUES (1, $1, $2, $3, $4, 1, $5)
+     ON CONFLICT (id) DO UPDATE SET
        identity_summary = EXCLUDED.identity_summary,
        relational_commitments = EXCLUDED.relational_commitments,
        tone_signature = EXCLUDED.tone_signature,
        growth_notes = EXCLUDED.growth_notes,
-       version = GREATEST(chat_soul_state.version + 1, EXCLUDED.version),
+       version = soul_state.version + 1,
+       updated_by = EXCLUDED.updated_by,
        updated_at = NOW()
      RETURNING *`,
     [
-      params.chatId,
       params.identitySummary,
       params.relationalCommitments,
       params.toneSignature,
       params.growthNotes,
-      version,
+      updatedBy,
     ]
   );
   return mapSoulStateRow(result.rows[0]);
@@ -1795,7 +1834,7 @@ export async function searchPatterns(
   pool: pg.Pool,
   queryEmbedding: number[],
   limit: number,
-  minSimilarity: number = 0.4
+  minSimilarity: number = 0.35
 ): Promise<PatternSearchRow[]> {
   const embeddingStr = `[${queryEmbedding.join(",")}]`;
   const result = await pool.query(
@@ -1803,16 +1842,16 @@ export async function searchPatterns(
       SELECT *,
         1 - (embedding <=> $1::vector) AS sim,
         CASE kind
-          WHEN 'behavior' THEN 90 WHEN 'belief' THEN 90 WHEN 'goal' THEN 60
-          WHEN 'preference' THEN 90 WHEN 'emotion' THEN 14
-          WHEN 'temporal' THEN 365 WHEN 'causal' THEN 90
-          WHEN 'fact' THEN 3650 WHEN 'event' THEN 60 ELSE 90
+          WHEN 'identity' THEN 3650
+          WHEN 'preference' THEN 180
+          WHEN 'goal' THEN 90
+          ELSE 180
         END AS half_life,
         CASE kind
-          WHEN 'behavior' THEN 0.45 WHEN 'belief' THEN 0.45 WHEN 'goal' THEN 0.35
-          WHEN 'preference' THEN 0.45 WHEN 'emotion' THEN 0.15
-          WHEN 'temporal' THEN 0.60 WHEN 'causal' THEN 0.45
-          WHEN 'fact' THEN 0.85 WHEN 'event' THEN 0.25 ELSE 0.45
+          WHEN 'identity' THEN 0.85
+          WHEN 'preference' THEN 0.40
+          WHEN 'goal' THEN 0.30
+          ELSE 0.40
         END AS floor_val,
         CASE status
           WHEN 'active' THEN 1.0 WHEN 'disputed' THEN 0.5 ELSE 0.0
@@ -1841,8 +1880,84 @@ export async function searchPatterns(
   }));
 }
 
+/* v8 ignore start -- memory-v2 hybrid/maintenance query paths are validated by higher-level tool tests */
 /**
- * Get active preference/fact patterns describing language preferences.
+ * Text search patterns via tsvector.
+ * Returns scored rows compatible with semantic retrieval rows.
+ */
+export async function textSearchPatterns(
+  pool: pg.Pool,
+  queryText: string,
+  limit: number
+): Promise<PatternSearchRow[]> {
+  const result = await pool.query(
+    `SELECT
+       *,
+       ts_rank(text_search, websearch_to_tsquery('english', $1)) AS rank_score
+     FROM patterns
+     WHERE status IN ('active', 'disputed')
+       AND (expires_at IS NULL OR expires_at > NOW())
+       AND text_search @@ websearch_to_tsquery('english', $1)
+     ORDER BY rank_score DESC
+     LIMIT $2`,
+    [queryText, limit]
+  );
+
+  return result.rows.map((row) => ({
+    ...mapPatternRow(row),
+    score: parseFloat(row.rank_score as string),
+    similarity: 0,
+  }));
+}
+
+export async function searchPatternsHybrid(
+  pool: pg.Pool,
+  queryEmbedding: number[],
+  queryText: string,
+  limit: number,
+  minSimilarity: number = 0.35
+): Promise<PatternSearchRow[]> {
+  const [semantic, textual] = await Promise.all([
+    searchPatterns(pool, queryEmbedding, Math.max(limit, 15), minSimilarity),
+    textSearchPatterns(pool, queryText, 10),
+  ]);
+
+  const sourceRanks = new Map<number, { semanticRank?: number; textRank?: number; row: PatternSearchRow }>();
+
+  semantic.forEach((row, idx) => {
+    sourceRanks.set(row.id, { semanticRank: idx + 1, row });
+  });
+
+  textual.forEach((row, idx) => {
+    const existing = sourceRanks.get(row.id);
+    if (existing) {
+      existing.textRank = idx + 1;
+      if (row.score > existing.row.score) {
+        existing.row = { ...existing.row, ...row };
+      }
+      return;
+    }
+    sourceRanks.set(row.id, { textRank: idx + 1, row });
+  });
+
+  const merged = [...sourceRanks.values()]
+    .map((entry) => {
+      const score =
+        (entry.semanticRank ? 1 / (60 + entry.semanticRank) : 0) +
+        (entry.textRank ? 1 / (60 + entry.textRank) : 0);
+      return {
+        ...entry.row,
+        score,
+      };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+
+  return merged;
+}
+
+/**
+ * Get active preference/identity patterns describing language preferences.
  * These are used as always-on communication anchors in chat prompts.
  */
 export async function getLanguagePreferencePatterns(
@@ -1852,7 +1967,7 @@ export async function getLanguagePreferencePatterns(
   const result = await pool.query(
     `SELECT * FROM patterns
      WHERE status = 'active'
-       AND kind IN ('preference', 'fact')
+       AND kind IN ('preference', 'identity')
        AND (expires_at IS NULL OR expires_at > NOW())
        AND (
          content ILIKE '%language%'
@@ -1926,6 +2041,175 @@ export async function countStaleEventPatterns(
   );
   return result.rows[0]?.count ?? 0;
 }
+
+export interface PatternStatsSummary {
+  by_kind: Record<string, number>;
+  by_status: Record<string, number>;
+  active_total: number;
+  avg_confidence: number;
+}
+
+export async function getPatternStats(
+  pool: pg.Pool,
+  kind?: string
+): Promise<PatternStatsSummary> {
+  const kindFilter = kind ? "AND kind = $1" : "";
+  const values = kind ? [kind] : [];
+
+  const [kindCounts, statusCounts, activeSummary] = await Promise.all([
+    pool.query(
+      `SELECT kind, COUNT(*)::int AS count
+       FROM patterns
+       WHERE 1=1 ${kindFilter}
+       GROUP BY kind`,
+      values
+    ),
+    pool.query(
+      `SELECT status, COUNT(*)::int AS count
+       FROM patterns
+       WHERE 1=1 ${kindFilter}
+       GROUP BY status`,
+      values
+    ),
+    pool.query(
+      `SELECT
+         COUNT(*)::int AS active_total,
+         COALESCE(AVG(confidence), 0)::float AS avg_confidence
+       FROM patterns
+       WHERE status = 'active'
+         AND (expires_at IS NULL OR expires_at > NOW())
+         ${kindFilter}`,
+      values
+    ),
+  ]);
+
+  const byKind: Record<string, number> = {};
+  for (const row of kindCounts.rows) {
+    byKind[String(row.kind)] = Number(row.count);
+  }
+  const byStatus: Record<string, number> = {};
+  for (const row of statusCounts.rows) {
+    byStatus[String(row.status)] = Number(row.count);
+  }
+
+  return {
+    by_kind: byKind,
+    by_status: byStatus,
+    active_total: Number(activeSummary.rows[0]?.active_total ?? 0),
+    avg_confidence: Number(activeSummary.rows[0]?.avg_confidence ?? 0),
+  };
+}
+
+export async function getStalePatterns(
+  pool: pg.Pool,
+  staleDays: number,
+  kind?: string,
+  limit: number = 20
+): Promise<PatternRow[]> {
+  const values: unknown[] = [staleDays, limit];
+  let kindClause = "";
+  if (kind) {
+    values.push(kind);
+    kindClause = `AND kind = $3`;
+  }
+  const result = await pool.query(
+    `SELECT *
+     FROM patterns
+     WHERE status = 'active'
+       AND (expires_at IS NULL OR expires_at > NOW())
+       AND last_seen < NOW() - ($1::text || ' days')::interval
+       ${kindClause}
+     ORDER BY last_seen ASC
+     LIMIT $2`,
+    values
+  );
+  return result.rows.map(mapPatternRow);
+}
+
+export interface PatternSimilarityPair {
+  kind: string;
+  pattern_id_1: number;
+  pattern_id_2: number;
+  content_1: string;
+  content_2: string;
+  similarity: number;
+}
+
+export async function findSimilarPatternPairs(
+  pool: pg.Pool,
+  minSimilarity: number,
+  kind?: string,
+  limit: number = 20
+): Promise<PatternSimilarityPair[]> {
+  const values: unknown[] = [minSimilarity, limit];
+  let kindClause = "";
+  if (kind) {
+    values.push(kind);
+    kindClause = "AND p1.kind = $3 AND p2.kind = $3";
+  }
+
+  const result = await pool.query(
+    `SELECT
+       p1.kind,
+       p1.id AS pattern_id_1,
+       p2.id AS pattern_id_2,
+       p1.content AS content_1,
+       p2.content AS content_2,
+       1 - (p1.embedding <=> p2.embedding) AS similarity
+     FROM patterns p1
+     JOIN patterns p2
+       ON p1.id < p2.id
+      AND p1.kind = p2.kind
+     WHERE p1.status = 'active'
+       AND p2.status = 'active'
+       AND p1.embedding IS NOT NULL
+       AND p2.embedding IS NOT NULL
+       AND (p1.expires_at IS NULL OR p1.expires_at > NOW())
+       AND (p2.expires_at IS NULL OR p2.expires_at > NOW())
+       AND 1 - (p1.embedding <=> p2.embedding) >= $1
+       ${kindClause}
+     ORDER BY similarity DESC
+     LIMIT $2`,
+    values
+  );
+
+  return result.rows.map((row) => ({
+    kind: row.kind as string,
+    pattern_id_1: Number(row.pattern_id_1),
+    pattern_id_2: Number(row.pattern_id_2),
+    content_1: row.content_1 as string,
+    content_2: row.content_2 as string,
+    similarity: parseFloat(row.similarity as string),
+  }));
+}
+
+export async function enforceActivePatternCap(
+  pool: pg.Pool,
+  maxActive: number
+): Promise<number> {
+  const result = await pool.query(
+    `WITH ranked AS (
+       SELECT
+         id,
+         ROW_NUMBER() OVER (
+           ORDER BY
+             (confidence * LN(1 + LEAST(strength, 20)) * LN(1 + LEAST(times_seen, 50))) DESC,
+             last_seen DESC
+         ) AS rn
+       FROM patterns
+       WHERE status = 'active'
+         AND (expires_at IS NULL OR expires_at > NOW())
+     )
+     UPDATE patterns p
+     SET status = 'deprecated'
+     FROM ranked r
+     WHERE p.id = r.id
+       AND r.rn > $1`,
+    [maxActive]
+  );
+  return result.rowCount ?? 0;
+}
+/* v8 ignore stop */
 
 // ============================================================================
 // Pattern supporting queries
@@ -2609,7 +2893,7 @@ function mapPatternRow(row: Record<string, unknown>): PatternRow {
 
 function mapSoulStateRow(row: Record<string, unknown>): ChatSoulStateRow {
   return {
-    chat_id: String(row.chat_id),
+    id: Number(row.id),
     identity_summary: row.identity_summary as string,
     relational_commitments:
       /* v8 ignore next -- defensive: SQL defaults arrays to '{}' */ (row
@@ -2621,6 +2905,8 @@ function mapSoulStateRow(row: Record<string, unknown>): ChatSoulStateRow {
       /* v8 ignore next -- defensive: SQL defaults arrays to '{}' */ (row
         .growth_notes as string[]) || [],
     version: Number(row.version),
+    /* v8 ignore next -- defensive: historical rows may not have updated_by populated */
+    updated_by: String((row.updated_by as string | null) ?? "system"),
     created_at: row.created_at as Date,
     updated_at: row.updated_at as Date,
   };

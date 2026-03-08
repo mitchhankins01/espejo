@@ -7,6 +7,8 @@ import { z } from "zod";
 import { config } from "../config.js";
 import { pool } from "../db/client.js";
 import { notifyError } from "../telegram/notify.js";
+import { sendTelegramMessage } from "../telegram/client.js";
+import { runMemoryConsolidation } from "../memory/consolidation.js";
 import {
   upsertDailyMetric,
   getActivityLog,
@@ -59,7 +61,26 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
   const app = express();
 
   app.set("trust proxy", 1);
-  startOuraSyncTimer(pool);
+  /* v8 ignore start -- background timer callback is runtime-only */
+  const runMemoryMaintenance = async (): Promise<void> => {
+    try {
+      const result = await runMemoryConsolidation(pool, {
+        minSimilarity: 0.78,
+        maxPairs: 20,
+        activeCap: 40,
+      });
+      if (result.notes.length === 0) return;
+      if (!config.telegram.botToken || !config.telegram.allowedChatId) return;
+      await sendTelegramMessage(
+        config.telegram.allowedChatId,
+        `Memory maintenance: ${result.notes.join(" ")}`
+      );
+    } catch (err) {
+      notifyError("Memory consolidation", err);
+    }
+  };
+  /* v8 ignore stop */
+  startOuraSyncTimer(pool, runMemoryMaintenance);
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
 

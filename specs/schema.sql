@@ -104,25 +104,26 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 CREATE INDEX IF NOT EXISTS idx_chat_messages_created ON chat_messages(created_at);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_active ON chat_messages(chat_id, created_at) WHERE compacted_at IS NULL;
 
--- Persistent relational tone state for one evolving assistant personality
-CREATE TABLE IF NOT EXISTS chat_soul_state (
-    chat_id BIGINT PRIMARY KEY,
+-- Persistent relational tone state for one evolving assistant personality (global singleton)
+CREATE TABLE IF NOT EXISTS soul_state (
+    id INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
     identity_summary TEXT NOT NULL,
     relational_commitments TEXT[] NOT NULL DEFAULT '{}',
     tone_signature TEXT[] NOT NULL DEFAULT '{}',
     growth_notes TEXT[] NOT NULL DEFAULT '{}',
     version INT NOT NULL DEFAULT 1,
+    updated_by TEXT NOT NULL DEFAULT 'system',
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_chat_soul_state_updated ON chat_soul_state(updated_at);
+CREATE INDEX IF NOT EXISTS idx_soul_state_updated ON soul_state(updated_at);
 
 -- Long-term: extracted patterns (the actual memory units)
 CREATE TABLE IF NOT EXISTS patterns (
     id SERIAL PRIMARY KEY,
     content TEXT NOT NULL,
-    kind TEXT NOT NULL DEFAULT 'behavior',
+    kind TEXT NOT NULL DEFAULT 'preference',
     confidence DOUBLE PRECISION NOT NULL DEFAULT 0.5,
     embedding vector(1536),
     embedding_model TEXT NOT NULL DEFAULT 'text-embedding-3-small',
@@ -142,8 +143,7 @@ CREATE TABLE IF NOT EXISTS patterns (
     ) STORED,
     CONSTRAINT patterns_kind_check CHECK (
         kind IN (
-            'behavior', 'emotion', 'belief', 'goal', 'preference',
-            'temporal', 'causal', 'fact', 'event'
+            'identity', 'preference', 'goal'
         )
     ),
     CONSTRAINT patterns_status_check CHECK (

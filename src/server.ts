@@ -22,6 +22,10 @@ import { handleGetArtifact } from "./tools/get-artifact.js";
 import { handleListArtifacts } from "./tools/list-artifacts.js";
 import { handleSearchArtifacts } from "./tools/search-artifacts.js";
 import { handleSearchContent } from "./tools/search-content.js";
+import { handleRemember } from "./tools/remember.js";
+import { handleSaveChat } from "./tools/save-chat.js";
+import { handleRecall } from "./tools/recall.js";
+import { handleReflect } from "./tools/reflect.js";
 import { handleListTodos } from "./tools/list-todos.js";
 import { handleCreateTodo } from "./tools/create-todo.js";
 import { handleUpdateTodo } from "./tools/update-todo.js";
@@ -52,6 +56,10 @@ export const toolHandlers: Record<string, ToolHandler> = {
   list_artifacts: handleListArtifacts,
   search_artifacts: handleSearchArtifacts,
   search_content: handleSearchContent,
+  remember: handleRemember,
+  save_chat: handleSaveChat,
+  recall: handleRecall,
+  reflect: handleReflect,
   list_todos: handleListTodos,
   create_todo: handleCreateTodo,
   update_todo: handleUpdateTodo,

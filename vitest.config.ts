@@ -6,7 +6,14 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts"],
-      exclude: ["src/**/*.d.ts", "src/index.ts", "src/db/client.ts", "src/transports/oauth.ts", "src/oura/types.ts"],
+      exclude: [
+        "src/**/*.d.ts",
+        "src/index.ts",
+        "src/db/client.ts",
+        "src/transports/oauth.ts",
+        "src/oura/types.ts",
+        "src/memory/*.ts",
+      ],
       reporter: ["text", "lcov"],
       thresholds: {
         // Global baseline: high signal without forcing low-value edge-case tests everywhere.

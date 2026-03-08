@@ -1,5 +1,17 @@
 TODOs
 
+memory-v2 implementation checklist
+[x] phase 1: simplify pattern kinds to identity/preference/goal and migrate existing pattern data
+[x] phase 2: add MCP tools: remember, save_chat, recall, reflect
+[x] phase 2: refactor extraction + dedup pipeline into shared memory module reused by tools and telegram
+[x] phase 3: decouple compaction from memory extraction (summary + trim only)
+[x] phase 3: add remember tool guidance to telegram system prompt
+[x] phase 4: update retrieval thresholds and implement hybrid memory retrieval (semantic + text + rrf)
+[x] phase 5: migrate soul state from per-chat to global singleton and wire optimistic locking
+[x] phase 6: add memory consolidation worker and telegram notification summaries
+[x] update tests and fixtures for 3-kind memory model
+[x] run pnpm check and fix all failures
+
 manual day one sync annoying
 integrate Oura
 compare soul to openclaw approach
