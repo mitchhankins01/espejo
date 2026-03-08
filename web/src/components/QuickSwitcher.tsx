@@ -10,7 +10,36 @@ interface QuickResult {
   path: string;
   score: number;
   isNew?: boolean;
+  badge?: string;
 }
+
+const QUICK_SHORTCUTS: Omit<QuickResult, "score">[] = [
+  {
+    id: "shortcut-new-entry",
+    title: "New entry",
+    path: "/journal/new",
+    isNew: true,
+    badge: "Journal",
+  },
+  {
+    id: "shortcut-journal",
+    title: "Journal",
+    path: "/journal",
+    badge: "Nav",
+  },
+  {
+    id: "shortcut-templates",
+    title: "Templates",
+    path: "/templates",
+    badge: "Nav",
+  },
+  {
+    id: "shortcut-new-template",
+    title: "New template",
+    path: "/templates/new",
+    badge: "Template",
+  },
+];
 
 function fuzzyMatch(query: string, target: string): number {
   const q = query.toLowerCase().trim();
@@ -77,18 +106,26 @@ export function QuickSwitcher() {
   }, [open]);
 
   const results = useMemo(() => {
+    const q = query.trim();
+    const shortcutResults: QuickResult[] = QUICK_SHORTCUTS.map((item) => ({
+      ...item,
+      score: q ? fuzzyMatch(q, item.title) : 0,
+    }))
+      .filter((item) => (q ? item.score > 0 : true))
+      .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
+
     const baseResults: QuickResult[] = titles
       .map((item) => ({
         id: item.id,
         title: item.title,
         kind: item.kind,
         path: `/${item.id}`,
-        score: query.trim() ? fuzzyMatch(query, item.title) : 0,
+        score: q ? fuzzyMatch(q, item.title) : 0,
       }))
-      .filter((item) => (query.trim() ? item.score > 0 : true))
+      .filter((item) => (q ? item.score > 0 : true))
       .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
 
-    if (!query.trim()) {
+    if (!q) {
       return [
         {
           id: "new-artifact",
@@ -96,12 +133,16 @@ export function QuickSwitcher() {
           path: "/new",
           score: Number.POSITIVE_INFINITY,
           isNew: true,
+          badge: "Artifact",
         },
+        ...shortcutResults,
         ...baseResults,
       ].slice(0, 20);
     }
 
-    return baseResults.slice(0, 20);
+    return [...shortcutResults, ...baseResults]
+      .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title))
+      .slice(0, 20);
   }, [titles, query]);
 
   useEffect(() => {
@@ -157,7 +198,7 @@ export function QuickSwitcher() {
                 select(results[selectedIndex]);
               }
             }}
-            placeholder="Search artifacts..."
+            placeholder="Search artifacts, journal, templates..."
             className="w-full px-3 py-2 rounded-lg border border-border bg-surface-alt text-text-primary placeholder:text-text-muted/70 focus:outline-none focus:ring-2 focus:ring-pine-500/30 focus:border-pine-500"
           />
         </div>
@@ -183,13 +224,22 @@ export function QuickSwitcher() {
                   <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-pine-600 dark:bg-pine-500 text-white">
                     New
                   </span>
-                ) : (
+                ) : result.kind ? (
                   <span
                     className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${
-                      result.kind ? ARTIFACT_BADGE_COLORS[result.kind] : ""
+                      ARTIFACT_BADGE_COLORS[result.kind]
                     }`}
                   >
                     {result.kind}
+                  </span>
+                ) : result.badge ? (
+                  <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-surface-elevated text-text-muted">
+                    {result.badge}
+                  </span>
+                ) : null}
+                {result.badge && result.kind && (
+                  <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-surface-elevated text-text-muted">
+                    {result.badge}
                   </span>
                 )}
                 <span className="truncate text-sm">{result.title}</span>

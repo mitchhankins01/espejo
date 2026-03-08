@@ -11,6 +11,12 @@ import { TodoCreate } from "./pages/TodoCreate.tsx";
 import { TodoEdit } from "./pages/TodoEdit.tsx";
 import { Weight } from "./pages/Weight.tsx";
 import { DbObservability } from "./pages/DbObservability.tsx";
+import { EntryList } from "./pages/EntryList.tsx";
+import { EntryCreate } from "./pages/EntryCreate.tsx";
+import { EntryEdit } from "./pages/EntryEdit.tsx";
+import { TemplateList } from "./pages/TemplateList.tsx";
+import { TemplateCreate } from "./pages/TemplateCreate.tsx";
+import { TemplateEdit } from "./pages/TemplateEdit.tsx";
 import "./index.css";
 
 createRoot(document.getElementById("root")!).render(
@@ -23,6 +29,12 @@ createRoot(document.getElementById("root")!).render(
           <Route path="/new" element={<ArtifactCreate />} />
           <Route path="/weight" element={<Weight />} />
           <Route path="/db" element={<DbObservability />} />
+          <Route path="/journal" element={<EntryList />} />
+          <Route path="/journal/new" element={<EntryCreate />} />
+          <Route path="/journal/:uuid" element={<EntryEdit />} />
+          <Route path="/templates" element={<TemplateList />} />
+          <Route path="/templates/new" element={<TemplateCreate />} />
+          <Route path="/templates/:id" element={<TemplateEdit />} />
           <Route path="/todos" element={<TodoList />} />
           <Route path="/todos/new" element={<TodoCreate />} />
           <Route path="/todos/:id" element={<TodoEdit />} />

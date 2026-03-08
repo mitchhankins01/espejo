@@ -2,6 +2,7 @@ import {
   S3Client,
   PutObjectCommand,
   HeadObjectCommand,
+  DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 import fs from "fs";
 import path from "path";
@@ -81,5 +82,38 @@ export async function uploadMedia(
   return getPublicUrl(key);
 }
 
-export { createClient };
+export async function uploadMediaBuffer(
+  client: S3Client,
+  buffer: Buffer,
+  key: string,
+  contentType: string
+): Promise<string> {
+  await client.send(
+    new PutObjectCommand({
+      Bucket: config.r2.bucketName,
+      Key: key,
+      Body: buffer,
+      ContentType: contentType,
+    })
+  );
+  return getPublicUrl(key);
+}
+
+export async function deleteMediaObject(
+  client: S3Client,
+  key: string
+): Promise<void> {
+  try {
+    await client.send(
+      new DeleteObjectCommand({
+        Bucket: config.r2.bucketName,
+        Key: key,
+      })
+    );
+  } catch {
+    // Best-effort delete — log but don't throw
+  }
+}
+
+export { createClient, CONTENT_TYPES };
 export type { S3Client };

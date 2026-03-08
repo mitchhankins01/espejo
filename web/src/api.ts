@@ -60,6 +60,53 @@ export interface EntrySearchResult {
   preview: string;
 }
 
+export type EntrySource = "dayone" | "web" | "telegram";
+
+export interface EntryMedia {
+  id: number;
+  type: "photo" | "video" | "audio";
+  url: string;
+  dimensions: { width: number; height: number } | null;
+  storage_key?: string | null;
+}
+
+export interface Entry {
+  id: number;
+  uuid: string;
+  text: string;
+  created_at: string;
+  modified_at: string | null;
+  timezone: string | null;
+  source: EntrySource;
+  version: number;
+  city: string | null;
+  country: string | null;
+  place_name: string | null;
+  admin_area: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  temperature: number | null;
+  weather_conditions: string | null;
+  humidity: number | null;
+  tags: string[];
+  photo_count: number;
+  video_count: number;
+  audio_count: number;
+  media: EntryMedia[];
+}
+
+export interface EntryTemplate {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  body: string;
+  default_tags: string[];
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export type TodoStatus = "active" | "waiting" | "done" | "someday";
 
 export interface Todo {
@@ -139,6 +186,13 @@ export interface DbChangeEvent {
   operation: DbChangeOperation;
   row_id: string | null;
   summary: string;
+  changed_fields?: Array<{
+    field: string;
+    before: unknown;
+    after: unknown;
+  }>;
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | null;
   tool_name?: string;
   chat_id?: string;
 }
@@ -159,13 +213,17 @@ export function clearToken(): void {
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken();
+  const headers = new Headers(init?.headers ?? {});
+  if (!(init?.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
   const res = await fetch(path, {
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...init?.headers,
-    },
+    headers,
   });
 
   if (!res.ok) {
@@ -266,6 +324,168 @@ export function getArtifactGraph(): Promise<GraphData> {
 
 export function searchEntries(q: string): Promise<EntrySearchResult[]> {
   return apiFetch(`/api/entries/search?q=${encodeURIComponent(q)}`);
+}
+
+export function listEntries(params?: {
+  limit?: number;
+  offset?: number;
+  from?: string;
+  to?: string;
+  tag?: string;
+  source?: EntrySource;
+  q?: string;
+}): Promise<{ items: Entry[]; total: number }> {
+  const qs = new URLSearchParams();
+  if (params?.limit) qs.set("limit", String(params.limit));
+  if (params?.offset) qs.set("offset", String(params.offset));
+  if (params?.from) qs.set("from", params.from);
+  if (params?.to) qs.set("to", params.to);
+  if (params?.tag) qs.set("tag", params.tag);
+  if (params?.source) qs.set("source", params.source);
+  if (params?.q) qs.set("q", params.q);
+  const query = qs.toString();
+  return apiFetch(`/api/entries${query ? `?${query}` : ""}`);
+}
+
+export function getEntry(uuid: string): Promise<Entry> {
+  return apiFetch(`/api/entries/${encodeURIComponent(uuid)}`);
+}
+
+export function createEntry(data: {
+  text: string;
+  created_at?: string;
+  timezone?: string;
+  tags?: string[];
+}): Promise<Entry> {
+  return apiFetch("/api/entries", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateEntry(
+  uuid: string,
+  data: {
+    text?: string;
+    created_at?: string;
+    timezone?: string;
+    tags?: string[];
+    expected_version: number;
+  }
+): Promise<Entry> {
+  return apiFetch(`/api/entries/${encodeURIComponent(uuid)}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteEntry(uuid: string): Promise<{ status: "deleted" }> {
+  return apiFetch(`/api/entries/${encodeURIComponent(uuid)}`, {
+    method: "DELETE",
+  });
+}
+
+export function uploadEntryMedia(
+  uuid: string,
+  file: File,
+  onProgress?: (percent: number) => void
+): Promise<EntryMedia> {
+  const token = getToken();
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/entries/${encodeURIComponent(uuid)}/media`);
+    if (token) {
+      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    }
+
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable || !onProgress) return;
+      const percent = Math.round((event.loaded / event.total) * 100);
+      onProgress(percent);
+    };
+
+    xhr.onerror = () => {
+      reject(new Error("Upload failed. Check your network and try again."));
+    };
+
+    xhr.onload = () => {
+      let payload: unknown = null;
+      try {
+        payload = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+      } catch {
+        payload = null;
+      }
+
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(payload as EntryMedia);
+        return;
+      }
+
+      const message =
+        typeof payload === "object" &&
+        payload !== null &&
+        "error" in payload &&
+        typeof (payload as { error: unknown }).error === "string"
+          ? (payload as { error: string }).error
+          : `HTTP ${xhr.status}`;
+      reject(new Error(message));
+    };
+
+    const formData = new FormData();
+    formData.append("file", file);
+    xhr.send(formData);
+  });
+}
+
+export function deleteEntryMedia(id: number): Promise<{ status: "deleted" }> {
+  return apiFetch(`/api/media/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export function listTemplates(): Promise<EntryTemplate[]> {
+  return apiFetch("/api/templates");
+}
+
+export function getTemplate(id: string): Promise<EntryTemplate> {
+  return apiFetch(`/api/templates/${encodeURIComponent(id)}`);
+}
+
+export function createTemplate(data: {
+  slug: string;
+  name: string;
+  description?: string | null;
+  body: string;
+  default_tags?: string[];
+  sort_order?: number;
+}): Promise<EntryTemplate> {
+  return apiFetch("/api/templates", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateTemplate(
+  id: string,
+  data: {
+    slug?: string;
+    name?: string;
+    description?: string | null;
+    body?: string;
+    default_tags?: string[];
+    sort_order?: number;
+  }
+): Promise<EntryTemplate> {
+  return apiFetch(`/api/templates/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteTemplate(id: string): Promise<{ status: "deleted" }> {
+  return apiFetch(`/api/templates/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
 }
 
 export function listTodos(params?: {

@@ -451,12 +451,14 @@ async function syncBatch(
       `INSERT INTO entries (
         uuid, text, created_at, modified_at, timezone,
         latitude, longitude, city, country, place_name, admin_area,
-        temperature, weather_conditions, humidity, moon_phase, sunrise, sunset
+        temperature, weather_conditions, humidity, moon_phase, sunrise, sunset,
+        source
       )
       SELECT
         d_uuid, d_text, d_created, d_modified, d_tz,
         d_lat, d_lon, d_city, d_country, d_place, d_admin,
-        d_temp, d_weather, d_humid, d_moon, d_sunrise, d_sunset
+        d_temp, d_weather, d_humid, d_moon, d_sunrise, d_sunset,
+        'dayone'
       FROM unnest(
         $1::text[], $2::text[], $3::timestamptz[], $4::timestamptz[], $5::text[],
         $6::float8[], $7::float8[], $8::text[], $9::text[], $10::text[], $11::text[],
@@ -482,6 +484,7 @@ async function syncBatch(
         moon_phase = EXCLUDED.moon_phase,
         sunrise = EXCLUDED.sunrise,
         sunset = EXCLUDED.sunset
+      WHERE entries.source = 'dayone'
       RETURNING id, uuid`,
       [
         col.uuids, col.texts, col.createdAts, col.modifiedAts, col.timezones,

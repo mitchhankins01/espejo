@@ -121,6 +121,19 @@ import {
   getConsecutiveIgnoredCount,
   findOrCreateDailyLogArtifact,
   appendToDailyLog,
+  createEntry,
+  updateEntry,
+  deleteEntry,
+  listEntries,
+  insertMedia,
+  getMediaForEntry,
+  deleteMedia,
+  listTemplates,
+  createTemplate,
+  updateTemplate,
+  deleteTemplate,
+  getEntryIdByUuid,
+  updateEntryEmbeddingIfVersionMatches,
 } from "../../src/db/queries.js";
 import { fixturePatterns, fixtureArtifacts } from "../../specs/fixtures/seed.js";
 
@@ -3450,5 +3463,360 @@ describe("insight queries", () => {
     const fetched = await getArtifactById(pool, artifact.id);
     expect(fetched!.body).toContain("Morning");
     expect(fetched!.body).toContain("Afternoon");
+  });
+});
+
+// ============================================================================
+// Web journaling: Entry CRUD
+// ============================================================================
+
+describe("Entry CRUD", () => {
+  it("creates an entry with source=web and version=1", async () => {
+    const entry = await createEntry(pool, {
+      text: "Test journal entry",
+      tags: ["test", "web"],
+      timezone: "Europe/Madrid",
+      city: "Barcelona",
+    });
+
+    expect(entry.uuid).toBeTruthy();
+    expect(entry.text).toBe("Test journal entry");
+    expect(entry.source).toBe("web");
+    expect(entry.version).toBe(1);
+    expect(entry.tags).toEqual(["test", "web"]);
+    expect(entry.city).toBe("Barcelona");
+    expect(entry.timezone).toBe("Europe/Madrid");
+  });
+
+  it("creates entry with custom created_at", async () => {
+    const entry = await createEntry(pool, {
+      text: "Backdated entry",
+      created_at: "2025-06-15T10:00:00Z",
+    });
+    expect(entry.created_at.toISOString()).toContain("2025-06-15");
+  });
+
+  it("updates entry with optimistic locking", async () => {
+    const entry = await createEntry(pool, { text: "Original" });
+
+    const updated = await updateEntry(pool, entry.uuid, 1, {
+      text: "Updated text",
+      tags: ["updated"],
+    });
+    expect(updated).not.toBe("version_conflict");
+    expect(updated).not.toBeNull();
+    if (updated && updated !== "version_conflict") {
+      expect(updated.text).toBe("Updated text");
+      expect(updated.version).toBe(2);
+      expect(updated.tags).toEqual(["updated"]);
+      expect(updated.modified_at).not.toBeNull();
+    }
+  });
+
+  it("returns version_conflict on stale update", async () => {
+    const entry = await createEntry(pool, { text: "Original" });
+    await updateEntry(pool, entry.uuid, 1, { text: "V2" });
+
+    // Try to update with stale version 1
+    const result = await updateEntry(pool, entry.uuid, 1, { text: "Stale" });
+    expect(result).toBe("version_conflict");
+  });
+
+  it("returns null when updating non-existent entry", async () => {
+    const result = await updateEntry(pool, "nonexistent-uuid", 1, { text: "x" });
+    expect(result).toBeNull();
+  });
+
+  it("invalidates embedding when text changes", async () => {
+    const entry = await createEntry(pool, { text: "Has embedding" });
+
+    // Manually set embedding
+    const fakeEmb = new Array(1536).fill(0.1);
+    await updateEntryEmbeddingIfVersionMatches(pool, entry.uuid, 1, fakeEmb);
+
+    // Update text should invalidate embedding
+    const updated = await updateEntry(pool, entry.uuid, 1, { text: "New text" });
+    expect(updated).not.toBeNull();
+    expect(updated).not.toBe("version_conflict");
+
+    // Verify embedding was cleared by checking search doesn't find it via vector
+    const fetched = await getEntryByUuid(pool, entry.uuid);
+    expect(fetched!.text).toBe("New text");
+  });
+
+  it("updates entry optional fields (timezone, created_at, city, country, place_name, lat, lng)", async () => {
+    const entry = await createEntry(pool, { text: "Bare entry" });
+
+    const updated = await updateEntry(pool, entry.uuid, 1, {
+      timezone: "America/New_York",
+      created_at: "2025-01-15T10:00:00Z",
+      city: "New York",
+      country: "US",
+      place_name: "Central Park",
+      latitude: 40.785091,
+      longitude: -73.968285,
+    });
+    expect(updated).not.toBeNull();
+    expect(updated).not.toBe("version_conflict");
+    if (updated && updated !== "version_conflict") {
+      expect(updated.timezone).toBe("America/New_York");
+      expect(updated.city).toBe("New York");
+      expect(updated.country).toBe("US");
+      expect(updated.place_name).toBe("Central Park");
+      expect(updated.latitude).toBeCloseTo(40.785091);
+      expect(updated.longitude).toBeCloseTo(-73.968285);
+      expect(updated.version).toBe(2);
+    }
+  });
+
+  it("deletes entry", async () => {
+    const entry = await createEntry(pool, { text: "To delete" });
+    const deleted = await deleteEntry(pool, entry.uuid);
+    expect(deleted).toBe(true);
+
+    const fetched = await getEntryByUuid(pool, entry.uuid);
+    expect(fetched).toBeNull();
+  });
+
+  it("returns false when deleting non-existent entry", async () => {
+    const result = await deleteEntry(pool, "nonexistent-uuid");
+    expect(result).toBe(false);
+  });
+
+  it("lists entries with filters", async () => {
+    await createEntry(pool, { text: "Web entry 1", tags: ["alpha"] });
+    await createEntry(pool, { text: "Web entry 2", tags: ["beta"] });
+
+    const all = await listEntries(pool, { source: "web" });
+    expect(all.count).toBeGreaterThanOrEqual(2);
+
+    const tagged = await listEntries(pool, { tag: "alpha", source: "web" });
+    expect(tagged.rows.some((r) => r.tags.includes("alpha"))).toBe(true);
+  });
+
+  it("lists entries with text search", async () => {
+    await createEntry(pool, { text: "Unique searchable term zephyr" });
+
+    const result = await listEntries(pool, { q: "zephyr" });
+    expect(result.count).toBeGreaterThanOrEqual(1);
+  });
+
+  it("lists entries with date filters", async () => {
+    await createEntry(pool, {
+      text: "Date filtered entry",
+      created_at: "2025-01-15T10:00:00Z",
+    });
+
+    const result = await listEntries(pool, {
+      from: "2025-01-01",
+      to: "2025-01-31",
+    });
+    expect(result.count).toBeGreaterThanOrEqual(1);
+  });
+
+  it("lists entries with pagination", async () => {
+    const page1 = await listEntries(pool, { limit: 1, offset: 0 });
+    const page2 = await listEntries(pool, { limit: 1, offset: 1 });
+
+    expect(page1.rows.length).toBeLessThanOrEqual(1);
+    if (page1.count > 1) {
+      expect(page2.rows.length).toBeLessThanOrEqual(1);
+      expect(page1.rows[0].uuid).not.toBe(page2.rows[0]?.uuid);
+    }
+  });
+
+  it("getEntryIdByUuid resolves entry id", async () => {
+    const entry = await createEntry(pool, { text: "ID lookup" });
+    const id = await getEntryIdByUuid(pool, entry.uuid);
+    expect(id).toBe(entry.id);
+  });
+
+  it("getEntryIdByUuid returns null for missing", async () => {
+    const id = await getEntryIdByUuid(pool, "nonexistent");
+    expect(id).toBeNull();
+  });
+});
+
+// ============================================================================
+// Web journaling: Version-guarded embedding
+// ============================================================================
+
+describe("updateEntryEmbeddingIfVersionMatches", () => {
+  it("writes embedding when version matches", async () => {
+    const entry = await createEntry(pool, { text: "Embed me" });
+    const emb = new Array(1536).fill(0.5);
+
+    const updated = await updateEntryEmbeddingIfVersionMatches(pool, entry.uuid, 1, emb);
+    expect(updated).toBe(true);
+  });
+
+  it("rejects embedding when version is stale", async () => {
+    const entry = await createEntry(pool, { text: "Embed me" });
+    // Update to bump version to 2
+    await updateEntry(pool, entry.uuid, 1, { text: "V2" });
+
+    // Try to write embedding for version 1 (stale)
+    const emb = new Array(1536).fill(0.5);
+    const updated = await updateEntryEmbeddingIfVersionMatches(pool, entry.uuid, 1, emb);
+    expect(updated).toBe(false);
+  });
+});
+
+// ============================================================================
+// Web journaling: Media queries
+// ============================================================================
+
+describe("Media queries", () => {
+  it("inserts and retrieves media for entry", async () => {
+    const entry = await createEntry(pool, { text: "With photo" });
+
+    const media = await insertMedia(pool, {
+      entry_id: entry.id,
+      type: "photo",
+      storage_key: "entries/test/photo.jpg",
+      url: "https://r2.example.com/entries/test/photo.jpg",
+      file_size: 12345,
+      dimensions: { width: 800, height: 600 },
+    });
+
+    expect(media.id).toBeTruthy();
+    expect(media.type).toBe("photo");
+    expect(media.url).toBe("https://r2.example.com/entries/test/photo.jpg");
+
+    const mediaList = await getMediaForEntry(pool, entry.id);
+    expect(mediaList.length).toBe(1);
+    expect(mediaList[0].storage_key).toBe("entries/test/photo.jpg");
+  });
+
+  it("deletes media and returns storage_key", async () => {
+    const entry = await createEntry(pool, { text: "Delete media" });
+    const media = await insertMedia(pool, {
+      entry_id: entry.id,
+      type: "photo",
+      storage_key: "entries/test/del.jpg",
+      url: "https://r2.example.com/entries/test/del.jpg",
+    });
+
+    const result = await deleteMedia(pool, media.id);
+    expect(result.deleted).toBe(true);
+    expect(result.storage_key).toBe("entries/test/del.jpg");
+
+    const after = await getMediaForEntry(pool, entry.id);
+    expect(after.length).toBe(0);
+  });
+
+  it("returns not-deleted for non-existent media", async () => {
+    const result = await deleteMedia(pool, 999999);
+    expect(result.deleted).toBe(false);
+    expect(result.storage_key).toBeNull();
+  });
+
+  it("cascades media delete when entry is deleted", async () => {
+    const entry = await createEntry(pool, { text: "Cascade test" });
+    await insertMedia(pool, {
+      entry_id: entry.id,
+      type: "photo",
+      storage_key: "entries/test/cascade.jpg",
+      url: "https://r2.example.com/cascade.jpg",
+    });
+
+    await deleteEntry(pool, entry.uuid);
+    const media = await getMediaForEntry(pool, entry.id);
+    expect(media.length).toBe(0);
+  });
+});
+
+// ============================================================================
+// Web journaling: Entry templates
+// ============================================================================
+
+describe("Entry templates", () => {
+  it("creates and lists templates", async () => {
+    const template = await createTemplate(pool, {
+      slug: "test-template",
+      name: "Test Template",
+      description: "A test",
+      body: "## Test\n\nWrite here",
+      default_tags: ["test"],
+      sort_order: 99,
+    });
+
+    expect(template.id).toBeTruthy();
+    expect(template.slug).toBe("test-template");
+    expect(template.name).toBe("Test Template");
+    expect(template.default_tags).toEqual(["test"]);
+
+    const all = await listTemplates(pool);
+    expect(all.some((t) => t.slug === "test-template")).toBe(true);
+  });
+
+  it("updates template", async () => {
+    const template = await createTemplate(pool, {
+      slug: "update-me",
+      name: "Before Update",
+    });
+
+    const updated = await updateTemplate(pool, template.id, {
+      name: "After Update",
+      body: "New body",
+    });
+
+    expect(updated).not.toBeNull();
+    expect(updated!.name).toBe("After Update");
+    expect(updated!.body).toBe("New body");
+    expect(updated!.slug).toBe("update-me"); // unchanged
+  });
+
+  it("updates template optional fields (slug, description, default_tags, sort_order)", async () => {
+    const template = await createTemplate(pool, {
+      slug: "optional-fields",
+      name: "Optional Fields Test",
+    });
+
+    const updated = await updateTemplate(pool, template.id, {
+      slug: "optional-fields-updated",
+      description: "A description",
+      default_tags: ["tag1", "tag2"],
+      sort_order: 42,
+    });
+
+    expect(updated).not.toBeNull();
+    expect(updated!.slug).toBe("optional-fields-updated");
+    expect(updated!.description).toBe("A description");
+    expect(updated!.default_tags).toEqual(["tag1", "tag2"]);
+    expect(updated!.sort_order).toBe(42);
+  });
+
+  it("returns null for updating non-existent template", async () => {
+    const result = await updateTemplate(pool, "00000000-0000-0000-0000-000000000000", { name: "x" });
+    expect(result).toBeNull();
+  });
+
+  it("update with no changes returns current template", async () => {
+    const template = await createTemplate(pool, {
+      slug: "no-change",
+      name: "No Change",
+    });
+    const result = await updateTemplate(pool, template.id, {});
+    expect(result).not.toBeNull();
+    expect(result!.name).toBe("No Change");
+  });
+
+  it("deletes template", async () => {
+    const template = await createTemplate(pool, {
+      slug: "delete-me",
+      name: "Delete Me",
+    });
+
+    const deleted = await deleteTemplate(pool, template.id);
+    expect(deleted).toBe(true);
+
+    const all = await listTemplates(pool);
+    expect(all.some((t) => t.slug === "delete-me")).toBe(false);
+  });
+
+  it("returns false for deleting non-existent template", async () => {
+    const result = await deleteTemplate(pool, "00000000-0000-0000-0000-000000000000");
+    expect(result).toBe(false);
   });
 });

@@ -44,7 +44,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
     const onTodos = location.pathname.startsWith("/todos");
     const onWeight = location.pathname.startsWith("/weight");
     const onDb = location.pathname.startsWith("/db");
-    const onKnowledge = !onTodos && !onWeight && !onDb;
+    const onJournal =
+      location.pathname.startsWith("/journal") ||
+      location.pathname.startsWith("/templates");
+    const onKnowledge = !onTodos && !onWeight && !onDb && !onJournal;
     return (
       <div className="min-h-screen bg-surface-alt">
         <nav className="border-b border-border bg-surface">
@@ -68,6 +71,16 @@ export function AuthGate({ children }: { children: ReactNode }) {
               }`}
             >
               Weight
+            </Link>
+            <Link
+              to="/journal"
+              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                onJournal
+                  ? "bg-pine-600 dark:bg-pine-500 text-white"
+                  : "text-text-muted hover:text-text-primary"
+              }`}
+            >
+              Journal
             </Link>
             <Link
               to="/todos"

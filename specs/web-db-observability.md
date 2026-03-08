@@ -59,7 +59,8 @@ Two tabs:
 
 ### Recent Changes tab
 
-- Time-ordered feed (newest first) with filters:
+- Combined cross-table timeline (newest first) that merges events from **all allowlisted tables** in one feed by default.
+- Filters:
   - table
   - operation type (`insert`, `update`, `delete`, `tool_call`)
   - time window (`15m`, `1h`, `6h`, `24h`)
@@ -68,9 +69,11 @@ Two tabs:
   - `table`
   - `operation`
   - `row_id` (or compound key string)
-  - compact diff/summary (when available)
+  - changed fields summary (e.g. `status: active -> done`, `updated_at`, `tags +1`)
+  - before/after JSON payload (expand/collapse)
   - optional `tool_name` + `chat_id` (when traceable from activity logs)
 - Auto-refresh every 5s with pause toggle.
+- Default mode is **All Tables** (no table pre-filter). Table filter is optional narrowing.
 
 ---
 
@@ -101,8 +104,7 @@ Explicitly exclude sensitive/internal-only data by default:
 ### Access control
 
 - Reuse existing bearer token auth (`MCP_SECRET`) in HTTP layer.
-- Add feature flag `WEB_DB_OBSERVABILITY_ENABLED` (default `false` in production).
-- Return `404` for `/api/db/*` endpoints when disabled.
+- `/api/db/*` is always available behind bearer auth.
 
 ---
 
@@ -154,6 +156,13 @@ All SQL must live in `src/db/queries.ts`.
      operation: "insert" | "update" | "delete" | "tool_call";
      row_id: string | null;
      summary: string;
+     changed_fields?: Array<{
+       field: string;
+       before: unknown;
+       after: unknown;
+     }>;
+     before?: Record<string, unknown> | null;
+     after?: Record<string, unknown> | null;
      tool_name?: string;
      chat_id?: string;
    };
@@ -179,7 +188,7 @@ Implementation constraints:
 
 ## Recent changes design
 
-### Phase A (v1): practical feed without schema overhaul
+### Phase A (v1): combined inferred feed from all tables
 
 Build `listRecentChanges` from two sources:
 
@@ -188,14 +197,28 @@ Build `listRecentChanges` from two sources:
    - `updated_at` when present
    - otherwise `created_at`
 
-Event inference rules:
+Combined-view behavior:
+
+- `/api/db/changes` returns one merged stream across all allowlisted tables by default.
+- Merge key order: `changed_at DESC`, then stable tie-breaker (`table`, `row_id`).
+- Optional `table` param narrows results; it never changes feed shape.
+
+Event inference rules (v1):
 
 - `insert`: `updated_at` absent OR `updated_at ~= created_at`
 - `update`: `updated_at > created_at`
 - `tool_call`: direct from `activity_logs`
 - `delete`: not reliably captured in phase A (unless represented in tool logs)
 
-This gives immediate visibility for "what changed recently" with minimal migration risk.
+Change detail behavior (v1):
+
+- For `tool_call`, include call name + args/result summary.
+- For row events without audit history, include:
+  - best-effort `summary`
+  - optional `after` snapshot (current row fetch when possible)
+  - `changed_fields` may be empty when true before-state is unavailable.
+
+This gives immediate visibility for "what changed recently across the whole DB" with minimal migration risk.
 
 ### Phase B (v2): full audit trail (recommended)
 
@@ -212,9 +235,13 @@ Add audit infrastructure for robust change history, including deletes:
 
 2. Trigger function `log_row_change()` and per-table triggers on allowlisted mutable tables.
 
-3. `/api/db/changes` switches to `db_change_events` as primary source and enriches with nearby `activity_logs` context.
+3. `/api/db/changes` uses `db_change_events` as primary source and enriches with nearby `activity_logs` context.
+4. Compute deterministic per-field diffs from `before`/`after`:
+   - added field
+   - removed field
+   - updated scalar/object value
 
-v2 result: complete feed with reliable delete visibility and optional row-level diff rendering.
+v2 result: complete combined feed with reliable delete visibility and explicit field-level changes for each event.
 
 ---
 
@@ -254,11 +281,12 @@ v2 result: complete feed with reliable delete visibility and optional row-level 
 
 2. **Phase 2: Recent changes (inferred)**
    - Add `/api/db/changes` using timestamp + activity log inference
-   - Add Recent Changes tab with polling refresh
+   - Merge all-table events into a single timeline by default
+   - Add expandable before/after JSON with best-effort changed-fields summary
 
 3. **Phase 3: Full audit trail (optional but recommended)**
    - Add `db_change_events` + triggers
-   - Upgrade feed to include reliable deletes + optional before/after diff
+   - Upgrade feed to include reliable deletes + exact field-level diffs
 
 ---
 
@@ -271,8 +299,9 @@ v2 result: complete feed with reliable delete visibility and optional row-level 
   - reject unknown sort columns
 - Integration tests:
   - row pagination/filter/sort by table
-  - changes feed ordering and filtering
-  - auth + feature-flag behavior (`404` when disabled)
+  - combined changes feed ordering across multiple tables
+  - changes feed filtering by table/operation/window
+  - detail payload shape (`changed_fields`, `before`, `after`) for audited rows
 
 ### Frontend
 
@@ -283,8 +312,9 @@ v2 result: complete feed with reliable delete visibility and optional row-level 
 - Playwright:
   - login -> navigate `/db`
   - inspect `todos` rows
-  - create/update todo in another tab/session
-  - confirm change appears in Recent Changes feed after refresh
+  - create/update todo + artifact in another tab/session
+  - confirm both appear in one combined Recent Changes feed after refresh
+  - expand event row and verify changed-fields + before/after payload rendering
 
 ### Global
 
@@ -295,7 +325,6 @@ v2 result: complete feed with reliable delete visibility and optional row-level 
 
 ## Open questions
 
-1. Should `/db` be enabled only in development, or in production behind token + env flag?
-2. Is row-level diff required in v1, or is a summary string sufficient?
-3. Which additional tables (if any) should be visible by default for your workflow?
-4. Do you want the changes feed to include only app-mutated tables, or also sync tables (Day One/Oura imports)?
+1. Which additional tables (if any) should be included in the combined feed allowlist by default?
+2. For large JSON columns, do you want full before/after by default or truncated with "view full"?
+3. Should sync-originated updates (Day One/Oura) be visually tagged separately from MCP/tool-driven updates?

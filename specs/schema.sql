@@ -29,6 +29,11 @@ CREATE TABLE IF NOT EXISTS entries (
     sunrise TIMESTAMPTZ,
     sunset TIMESTAMPTZ,
 
+    -- Source and versioning
+    source TEXT NOT NULL DEFAULT 'dayone'
+        CHECK (source IN ('dayone', 'web', 'telegram')),
+    version INT NOT NULL DEFAULT 1,
+
     -- Vector embedding (1536 dims for text-embedding-3-small)
     embedding vector(1536),
 
@@ -70,6 +75,33 @@ CREATE TABLE IF NOT EXISTS daily_metrics (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS entry_templates (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    slug TEXT UNIQUE NOT NULL CHECK (char_length(slug) BETWEEN 1 AND 80),
+    name TEXT NOT NULL CHECK (char_length(name) BETWEEN 1 AND 100),
+    description TEXT,
+    body TEXT NOT NULL DEFAULT '',
+    default_tags TEXT[] NOT NULL DEFAULT '{}',
+    sort_order INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_entry_templates_sort
+    ON entry_templates (sort_order ASC, created_at ASC);
+
+CREATE OR REPLACE FUNCTION touch_updated_at() RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at := NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_entry_templates_touch_updated_at ON entry_templates;
+CREATE TRIGGER trg_entry_templates_touch_updated_at
+    BEFORE UPDATE ON entry_templates
+    FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
 CREATE TABLE IF NOT EXISTS _migrations (
     id SERIAL PRIMARY KEY,
     name TEXT UNIQUE NOT NULL,
@@ -78,6 +110,7 @@ CREATE TABLE IF NOT EXISTS _migrations (
 
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_entries_created ON entries(created_at);
+CREATE INDEX IF NOT EXISTS idx_entries_source_created ON entries(source, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_entries_text_search ON entries USING GIN(text_search);
 CREATE INDEX IF NOT EXISTS idx_entries_embedding ON entries USING ivfflat(embedding vector_cosine_ops) WITH (lists = 50);
 CREATE INDEX IF NOT EXISTS idx_entries_trgm ON entries USING GIN(text gin_trgm_ops);
@@ -606,12 +639,15 @@ CREATE TABLE IF NOT EXISTS artifact_tags (
 CREATE TABLE IF NOT EXISTS artifact_links (
     source_id UUID NOT NULL REFERENCES knowledge_artifacts(id) ON DELETE CASCADE,
     target_id UUID NOT NULL REFERENCES knowledge_artifacts(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (source_id, target_id),
     CHECK (source_id != target_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_artifact_links_target
     ON artifact_links (target_id);
+CREATE INDEX IF NOT EXISTS idx_artifact_links_created_at
+    ON artifact_links (created_at DESC);
 
 -- Trigger: auto-bump updated_at and version on UPDATE
 CREATE OR REPLACE FUNCTION knowledge_artifact_version_bump()

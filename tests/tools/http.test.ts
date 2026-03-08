@@ -31,6 +31,7 @@ vi.mock("../../src/config.js", () => ({
     telegram: { botToken: "", secretToken: "", allowedChatId: "" },
     oura: { accessToken: "" },
     checkins: { enabled: false, intervalMinutes: 15, ignoreThreshold: 3 },
+    r2: { accountId: "", accessKeyId: "", secretAccessKey: "", bucketName: "", publicUrl: "" },
   },
 }));
 
@@ -41,6 +42,22 @@ vi.mock("../../src/transports/oauth.js", () => ({
 
 vi.mock("../../src/oura/sync.js", () => ({
   startOuraSyncTimer: vi.fn(),
+}));
+
+vi.mock("multer", () => {
+  const multerFn = vi.fn(() => ({
+    single: vi.fn(() => (_req: any, _res: any, next: any) => next()),
+  }));
+  (multerFn as any).memoryStorage = vi.fn();
+  (multerFn as any).MulterError = class MulterError extends Error {};
+  return { default: multerFn };
+});
+
+vi.mock("../../src/storage/r2.js", () => ({
+  createClient: vi.fn(),
+  uploadMediaBuffer: vi.fn().mockResolvedValue("https://r2.example.com/test.jpg"),
+  deleteMediaObject: vi.fn().mockResolvedValue(undefined),
+  getPublicUrl: vi.fn((key: string) => `https://r2.example.com/${key}`),
 }));
 
 vi.mock("../../src/checkins/scheduler.js", () => ({
@@ -102,6 +119,20 @@ const {
   mockListObservableTableRows,
   mockListRecentDbChanges,
   mockIsObservableDbTableName,
+  mockCreateEntry,
+  mockUpdateEntry,
+  mockDeleteEntry,
+  mockListEntries,
+  mockGetEntryByUuid,
+  mockGetEntryIdByUuid,
+  mockInsertMedia,
+  mockDeleteMediaRow,
+  mockListTemplates,
+  mockGetTemplateById,
+  mockCreateTemplate,
+  mockUpdateTemplate,
+  mockDeleteTemplate,
+  mockUpdateEntryEmbeddingIfVersionMatches,
 } = vi.hoisted(() => ({
   mockPool: {},
   mockUpsertDailyMetric: vi.fn(),
@@ -153,6 +184,20 @@ const {
   mockListObservableTableRows: vi.fn(),
   mockListRecentDbChanges: vi.fn(),
   mockIsObservableDbTableName: vi.fn(),
+  mockCreateEntry: vi.fn(),
+  mockUpdateEntry: vi.fn(),
+  mockDeleteEntry: vi.fn(),
+  mockListEntries: vi.fn(),
+  mockGetEntryByUuid: vi.fn(),
+  mockGetEntryIdByUuid: vi.fn(),
+  mockInsertMedia: vi.fn(),
+  mockDeleteMediaRow: vi.fn(),
+  mockListTemplates: vi.fn(),
+  mockGetTemplateById: vi.fn(),
+  mockCreateTemplate: vi.fn(),
+  mockUpdateTemplate: vi.fn(),
+  mockDeleteTemplate: vi.fn(),
+  mockUpdateEntryEmbeddingIfVersionMatches: vi.fn(),
 }));
 
 vi.mock("../../src/db/client.js", () => ({
@@ -212,6 +257,20 @@ vi.mock("../../src/db/queries.js", () => ({
   listObservableTableRows: mockListObservableTableRows,
   listRecentDbChanges: mockListRecentDbChanges,
   isObservableDbTableName: mockIsObservableDbTableName,
+  createEntry: mockCreateEntry,
+  updateEntry: mockUpdateEntry,
+  deleteEntry: mockDeleteEntry,
+  listEntries: mockListEntries,
+  getEntryByUuid: mockGetEntryByUuid,
+  getEntryIdByUuid: mockGetEntryIdByUuid,
+  insertMedia: mockInsertMedia,
+  deleteMedia: mockDeleteMediaRow,
+  listTemplates: mockListTemplates,
+  getTemplateById: mockGetTemplateById,
+  createTemplate: mockCreateTemplate,
+  updateTemplate: mockUpdateTemplate,
+  deleteTemplate: mockDeleteTemplate,
+  updateEntryEmbeddingIfVersionMatches: mockUpdateEntryEmbeddingIfVersionMatches,
 }));
 
 const mockHandleRequest = vi.fn();
@@ -2977,5 +3036,323 @@ describe("startHttpServer", () => {
 
     await handler(mockReq, mockRes);
     expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  // ====================================================================
+  // Journal Entries CRUD
+  // ====================================================================
+
+  it("GET /api/entries returns paginated list", async () => {
+    const items = [{ uuid: "e1", text: "hello", source: "web", version: 1, tags: [] }];
+    mockListEntries.mockResolvedValue({ rows: items, count: 1 });
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/entries");
+    const handler = call![1];
+    const mockReq = { headers: {}, query: { limit: "10", offset: "0", source: "web" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockListEntries).toHaveBeenCalledWith(mockPool, expect.objectContaining({ source: "web", limit: 10, offset: 0 }));
+    expect(mockRes.json).toHaveBeenCalledWith({ items, total: 1 });
+  });
+
+  it("GET /api/entries returns 500 on error", async () => {
+    mockListEntries.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/entries");
+    const handler = call![1];
+    const mockReq = { headers: {}, query: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  it("GET /api/entries/:uuid returns single entry", async () => {
+    const entry = { uuid: "e1", text: "test", source: "web", version: 1 };
+    mockGetEntryByUuid.mockResolvedValue(entry);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/entries/:uuid");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { uuid: "e1" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.json).toHaveBeenCalledWith(entry);
+  });
+
+  it("GET /api/entries/:uuid returns 404 for missing", async () => {
+    mockGetEntryByUuid.mockResolvedValue(null);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/entries/:uuid");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { uuid: "missing" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(404);
+  });
+
+  it("POST /api/entries creates entry", async () => {
+    const entry = { uuid: "new-1", text: "hello", source: "web", version: 1, tags: [] };
+    mockCreateEntry.mockResolvedValue(entry);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/entries");
+    const handler = call![1];
+    const mockReq = { headers: {}, body: { text: "hello", tags: ["test"] } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockCreateEntry).toHaveBeenCalledWith(mockPool, expect.objectContaining({ text: "hello", tags: ["test"] }));
+    expect(mockRes.status).toHaveBeenCalledWith(201);
+  });
+
+  it("POST /api/entries returns 400 for invalid body", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/entries");
+    const handler = call![1];
+    const mockReq = { headers: {}, body: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+  });
+
+  it("PUT /api/entries/:uuid updates entry", async () => {
+    const entry = { uuid: "e1", text: "updated", source: "web", version: 2 };
+    mockUpdateEntry.mockResolvedValue(entry);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/entries/:uuid");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { uuid: "e1" }, body: { text: "updated", expected_version: 1 } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.json).toHaveBeenCalledWith(entry);
+  });
+
+  it("PUT /api/entries/:uuid returns 409 on version conflict", async () => {
+    mockUpdateEntry.mockResolvedValue("version_conflict");
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/entries/:uuid");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { uuid: "e1" }, body: { text: "x", expected_version: 1 } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(409);
+  });
+
+  it("PUT /api/entries/:uuid returns 404 when not found", async () => {
+    mockUpdateEntry.mockResolvedValue(null);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/entries/:uuid");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { uuid: "missing" }, body: { text: "x", expected_version: 1 } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(404);
+  });
+
+  it("DELETE /api/entries/:uuid deletes entry", async () => {
+    mockDeleteEntry.mockResolvedValue(true);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.delete.mock.calls.find((c: any[]) => c[0] === "/api/entries/:uuid");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { uuid: "e1" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.json).toHaveBeenCalledWith({ status: "deleted" });
+  });
+
+  it("DELETE /api/entries/:uuid returns 404 when not found", async () => {
+    mockDeleteEntry.mockResolvedValue(false);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.delete.mock.calls.find((c: any[]) => c[0] === "/api/entries/:uuid");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { uuid: "missing" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(404);
+  });
+
+  // ====================================================================
+  // Media endpoints
+  // ====================================================================
+
+  it("DELETE /api/media/:id deletes media", async () => {
+    mockDeleteMediaRow.mockResolvedValue({ deleted: true, storage_key: "entries/e1/test.jpg" });
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.delete.mock.calls.find((c: any[]) => c[0] === "/api/media/:id");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { id: "42" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.json).toHaveBeenCalledWith({ status: "deleted" });
+  });
+
+  it("DELETE /api/media/:id returns 404 when not found", async () => {
+    mockDeleteMediaRow.mockResolvedValue({ deleted: false, storage_key: null });
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.delete.mock.calls.find((c: any[]) => c[0] === "/api/media/:id");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { id: "999" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(404);
+  });
+
+  it("DELETE /api/media/:id returns 400 for invalid id", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.delete.mock.calls.find((c: any[]) => c[0] === "/api/media/:id");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { id: "abc" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+  });
+
+  // ====================================================================
+  // Template CRUD
+  // ====================================================================
+
+  it("GET /api/templates returns template list", async () => {
+    const templates = [{ id: "t1", slug: "morning", name: "Morning" }];
+    mockListTemplates.mockResolvedValue(templates);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/templates");
+    const handler = call![1];
+    const mockReq = { headers: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.json).toHaveBeenCalledWith(templates);
+  });
+
+  it("GET /api/templates/:id returns single template", async () => {
+    const template = { id: "t1", slug: "morning", name: "Morning" };
+    mockGetTemplateById.mockResolvedValue(template);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/templates/:id");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { id: "t1" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.json).toHaveBeenCalledWith(template);
+  });
+
+  it("GET /api/templates/:id returns 404 when not found", async () => {
+    mockGetTemplateById.mockResolvedValue(null);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/templates/:id");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { id: "nonexistent" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(404);
+  });
+
+  it("POST /api/templates creates template", async () => {
+    const template = { id: "t1", slug: "weekly", name: "Weekly Review" };
+    mockCreateTemplate.mockResolvedValue(template);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/templates");
+    const handler = call![1];
+    const mockReq = { headers: {}, body: { slug: "weekly", name: "Weekly Review" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(201);
+  });
+
+  it("POST /api/templates returns 400 for invalid body", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/templates");
+    const handler = call![1];
+    const mockReq = { headers: {}, body: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+  });
+
+  it("PUT /api/templates/:id updates template", async () => {
+    const template = { id: "t1", slug: "morning", name: "Morning Updated" };
+    mockUpdateTemplate.mockResolvedValue(template);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/templates/:id");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { id: "t1" }, body: { name: "Morning Updated" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.json).toHaveBeenCalledWith(template);
+  });
+
+  it("PUT /api/templates/:id returns 404 when not found", async () => {
+    mockUpdateTemplate.mockResolvedValue(null);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/templates/:id");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { id: "missing" }, body: { name: "x" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(404);
+  });
+
+  it("DELETE /api/templates/:id deletes template", async () => {
+    mockDeleteTemplate.mockResolvedValue(true);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.delete.mock.calls.find((c: any[]) => c[0] === "/api/templates/:id");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { id: "t1" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.json).toHaveBeenCalledWith({ status: "deleted" });
+  });
+
+  it("DELETE /api/templates/:id returns 404 when not found", async () => {
+    mockDeleteTemplate.mockResolvedValue(false);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.delete.mock.calls.find((c: any[]) => c[0] === "/api/templates/:id");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { id: "missing" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(404);
   });
 });

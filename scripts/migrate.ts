@@ -992,6 +992,71 @@ const migrations: Migration[] = [
         CHECK (kind IN ('insight', 'theory', 'model', 'reference', 'note', 'log'));
     `,
   },
+  {
+    name: "026-web-journaling",
+    getSql: () => `
+      ALTER TABLE entries
+        ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'dayone'
+          CHECK (source IN ('dayone', 'web', 'telegram')),
+        ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 1;
+
+      CREATE INDEX IF NOT EXISTS idx_entries_source_created
+        ON entries (source, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS entry_templates (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          slug TEXT UNIQUE NOT NULL CHECK (char_length(slug) BETWEEN 1 AND 80),
+          name TEXT NOT NULL CHECK (char_length(name) BETWEEN 1 AND 100),
+          description TEXT,
+          body TEXT NOT NULL DEFAULT '',
+          default_tags TEXT[] NOT NULL DEFAULT '{}',
+          sort_order INT NOT NULL DEFAULT 0,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_entry_templates_sort
+          ON entry_templates (sort_order ASC, created_at ASC);
+    `,
+    rawStatements: [
+      `CREATE OR REPLACE FUNCTION touch_updated_at() RETURNS TRIGGER AS $$
+       BEGIN
+           NEW.updated_at := NOW();
+           RETURN NEW;
+       END;
+       $$ LANGUAGE plpgsql`,
+      `DROP TRIGGER IF EXISTS trg_entry_templates_touch_updated_at ON entry_templates`,
+      `CREATE TRIGGER trg_entry_templates_touch_updated_at
+           BEFORE UPDATE ON entry_templates
+           FOR EACH ROW EXECUTE FUNCTION touch_updated_at()`,
+      // Seed templates idempotently
+      `INSERT INTO entry_templates (slug, name, description, body, default_tags, sort_order)
+       VALUES
+         ('morning', 'Morning Journal', 'Free-flow morning reflection',
+          E'## Morning\n\nHow am I landing this morning?\n\n## Body\n\nWhat does my body feel like?\n\n## Intention\n\nWhat matters today?\n',
+          '{morning-journal}', 1),
+         ('evening', 'Evening Review', 'End-of-day reflection',
+          E'## Review\n\nWhat happened today?\n\n## Wins\n\n## Challenges\n\n## Tomorrow\n\nWhat do I want to carry forward?\n',
+          '{evening-review}', 2),
+         ('freeform', 'Freeform', 'Blank entry', '', '{}', 10)
+       ON CONFLICT (slug) DO UPDATE SET
+         name = EXCLUDED.name,
+         description = EXCLUDED.description,
+         body = EXCLUDED.body,
+         default_tags = EXCLUDED.default_tags,
+         sort_order = EXCLUDED.sort_order`,
+    ],
+  },
+  {
+    name: "027-artifact-links-created-at",
+    getSql: () => `
+      ALTER TABLE artifact_links
+        ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+      CREATE INDEX IF NOT EXISTS idx_artifact_links_created_at
+        ON artifact_links (created_at DESC);
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

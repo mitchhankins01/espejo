@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import type pg from "pg";
 import { config } from "../config.js";
 
@@ -27,6 +28,8 @@ export interface EntryRow {
   temperature: number | null;
   weather_conditions: string | null;
   humidity: number | null;
+  source: "dayone" | "web" | "telegram";
+  version: number;
   tags: string[];
   photo_count: number;
   video_count: number;
@@ -237,6 +240,9 @@ export async function getEntryByUuid(
     temperature: row.temperature,
     weather_conditions: row.weather_conditions,
     humidity: row.humidity,
+    /* v8 ignore next 2 -- defensive: DB defaults always provide these */
+    source: row.source ?? "dayone",
+    version: row.version ?? 1,
     tags: /* v8 ignore next -- defensive: SQL coalesces to '{}' */ row.tags || [],
     photo_count: row.photo_count,
     video_count: row.video_count,
@@ -3038,12 +3044,21 @@ export interface DbRowsResult {
   columns: DbColumnMeta[];
 }
 
+export interface DbChangedField {
+  field: string;
+  before: unknown;
+  after: unknown;
+}
+
 export interface DbChangeEvent {
   changed_at: Date;
   table: ObservableDbTableName;
   operation: DbChangeOperation;
   row_id: string | null;
   summary: string;
+  changed_fields?: DbChangedField[];
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | null;
   tool_name?: string;
   chat_id?: string;
 }
@@ -3326,6 +3341,68 @@ function buildObservableTableWhere(
   };
 }
 
+function sanitizeObservableChangeSnapshot(
+  table: ObservableDbTableName,
+  row: unknown
+): Record<string, unknown> | null {
+  if (!row || typeof row !== "object" || Array.isArray(row)) return null;
+  const config = OBSERVABLE_DB_TABLE_CONFIG[table];
+  const hiddenColumns = new Set(
+    config.columns.filter((column) => column.hidden).map((column) => column.name)
+  );
+  const input = row as Record<string, unknown>;
+  const output: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (hiddenColumns.has(key)) continue;
+    output[key] = value;
+  }
+  return output;
+}
+
+/* v8 ignore next 26 -- data-dependent field inference, tested via DB observability integration */
+function inferObservableChangedFields(
+  operation: DbChangeOperation,
+  after: Record<string, unknown> | null
+): DbChangedField[] {
+  if (!after || operation === "delete" || operation === "tool_call") return [];
+  const candidateKeys = [
+    "status",
+    "title",
+    "kind",
+    "type",
+    "tags",
+    "version",
+    "updated_at",
+    "created_at",
+  ];
+  const fields: DbChangedField[] = [];
+  for (const key of candidateKeys) {
+    if (!(key in after)) continue;
+    fields.push({
+      field: key,
+      before: null,
+      after: after[key],
+    });
+  }
+  return fields.slice(0, 5);
+}
+
+/* v8 ignore next 13 */
+function summarizeObservableChange(
+  table: ObservableDbTableName,
+  operation: DbChangeOperation,
+  rowId: string | null,
+  changedFields: DbChangedField[]
+): string {
+  if (changedFields.length === 0) {
+    return rowId ? `${table} ${operation} (${rowId})` : `${table} ${operation}`;
+  }
+  const fieldSummary = changedFields
+    .map((field) => `${field.field}=${String(field.after)}`)
+    .join(", ");
+  return rowId ? `${table} ${operation} (${rowId}) · ${fieldSummary}` : `${table} ${operation} · ${fieldSummary}`;
+}
+
 export async function listObservableTables(pool: pg.Pool): Promise<DbTableMeta[]> {
   const tasks = OBSERVABLE_DB_TABLES.map(async (name): Promise<DbTableMeta> => {
     const config = OBSERVABLE_DB_TABLE_CONFIG[name];
@@ -3455,6 +3532,7 @@ export async function listRecentDbChanges(
       const names = toolCalls
         .map((call) => String(call.name ?? "").trim())
         .filter((name) => name.length > 0);
+      const firstToolCall = toolCalls[0] ?? null;
       /* v8 ignore next 9 */
       events.push({
         changed_at: row.created_at as Date,
@@ -3462,6 +3540,16 @@ export async function listRecentDbChanges(
         operation: "tool_call",
         row_id: String(row.id),
         summary: names.length > 0 ? `Tool calls: ${names.join(", ")}` : "Tool call activity logged",
+        changed_fields: [],
+        before: null,
+        after: firstToolCall
+          ? sanitizeObservableChangeSnapshot("activity_logs", {
+            tool_name: firstToolCall.name ?? null,
+            args: firstToolCall.input ?? firstToolCall.args ?? null,
+            /* v8 ignore next */
+            result: firstToolCall.output ?? firstToolCall.result ?? null,
+          })
+          : /* v8 ignore next */ null,
         tool_name: names[0],
         chat_id: String(row.chat_id),
       });
@@ -3498,13 +3586,18 @@ export async function listRecentDbChanges(
       : "'insert'";
 
     const result = await pool.query(
-      `SELECT ${config.rowIdExpression} AS row_id,
-              ${quoteIdentifier(changedAtColumn)} AS changed_at,
-              ${operationExpr}::text AS operation
-       FROM ${quoteIdentifier(table)}
-       ${whereSql}
-       ORDER BY ${quoteIdentifier(changedAtColumn)} DESC
-       LIMIT ${limitParam}`,
+      `SELECT
+         ${config.rowIdExpression} AS row_id,
+         ${quoteIdentifier(changedAtColumn)} AS changed_at,
+         ${operationExpr}::text AS operation,
+         row_to_json(src)::jsonb AS after
+       FROM (
+         SELECT *
+         FROM ${quoteIdentifier(table)}
+         ${whereSql}
+         ORDER BY ${quoteIdentifier(changedAtColumn)} DESC
+         LIMIT ${limitParam}
+       ) AS src`,
       values
     );
 
@@ -3512,19 +3605,30 @@ export async function listRecentDbChanges(
       const operation = row.operation as DbChangeOperation;
       /* v8 ignore next */
       if (options.operation && operation !== options.operation) continue;
+      const rowId = (row.row_id as string | null) ?? null;
+      const after = sanitizeObservableChangeSnapshot(table, row.after);
+      const changedFields = inferObservableChangedFields(operation, after);
       events.push({
         changed_at: row.changed_at as Date,
         table,
         operation,
-        /* v8 ignore next */
-        row_id: (row.row_id as string | null) ?? null,
-        summary: `${table} ${operation}`,
+        row_id: rowId,
+        summary: summarizeObservableChange(table, operation, rowId, changedFields),
+        changed_fields: changedFields,
+        before: null,
+        after,
       });
     }
   }
 
   return events
-    .sort((a, b) => b.changed_at.getTime() - a.changed_at.getTime())
+    .sort((a, b) => {
+      const timeDelta = b.changed_at.getTime() - a.changed_at.getTime();
+      if (timeDelta !== 0) return timeDelta;
+      const tableDelta = a.table.localeCompare(b.table);
+      if (tableDelta !== 0) return tableDelta;
+      return (a.row_id ?? "").localeCompare(b.row_id ?? "");
+    })
     .slice(0, options.limit);
 }
 
@@ -3752,6 +3856,8 @@ function mapEntryRow(row: Record<string, unknown>): EntryRow {
     temperature: row.temperature as number | null,
     weather_conditions: row.weather_conditions as string | null,
     humidity: row.humidity as number | null,
+    source: (row.source as EntryRow["source"]) ?? "dayone",
+    version: (row.version as number) ?? 1,
     tags: (row.tags as string[]) || [] /* v8 ignore next -- defensive: SQL coalesces to '{}' */,
     photo_count: row.photo_count as number,
     video_count: row.video_count as number,
@@ -6003,4 +6109,581 @@ export async function appendToDailyLog(
     [artifactId, section]
   );
   return result.rows[0];
+}
+
+// ============================================================================
+// Web journaling: Entry CRUD
+// ============================================================================
+
+const ENTRY_SELECT = `
+  e.*,
+  COALESCE(
+    (SELECT array_agg(t.name) FROM entry_tags et JOIN tags t ON t.id = et.tag_id WHERE et.entry_id = e.id),
+    '{}'::text[]
+  ) AS tags,
+  (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'photo') AS photo_count,
+  (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'video') AS video_count,
+  (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'audio') AS audio_count,
+  (SELECT COALESCE(json_agg(json_build_object(
+    'id', m.id, 'type', m.type, 'url', m.url, 'storage_key', m.storage_key, 'dimensions', m.dimensions
+  ) ORDER BY m.id) FILTER (WHERE m.url IS NOT NULL), '[]'::json)
+  FROM media m WHERE m.entry_id = e.id) AS media,
+  dm.weight_kg
+`;
+
+export interface CreateEntryData {
+  text: string;
+  tags?: string[];
+  timezone?: string;
+  created_at?: string;
+  city?: string;
+  country?: string;
+  place_name?: string;
+  latitude?: number;
+  longitude?: number;
+}
+
+export async function createEntry(
+  pool: pg.Pool,
+  data: CreateEntryData
+): Promise<EntryRow> {
+  const uuid = crypto.randomUUID();
+  const tags = normalizeTags(data.tags ?? []);
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const result = await client.query(
+      `INSERT INTO entries (uuid, text, timezone, created_at, city, country, place_name, latitude, longitude, source, version)
+       VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5, $6, $7, $8, $9, 'web', 1)
+       RETURNING id, uuid`,
+      [
+        uuid,
+        data.text,
+        data.timezone ?? null,
+        data.created_at ?? null,
+        data.city ?? null,
+        data.country ?? null,
+        data.place_name ?? null,
+        data.latitude ?? null,
+        data.longitude ?? null,
+      ]
+    );
+
+    const entryId = result.rows[0].id as number;
+
+    await upsertEntryTags(client, entryId, tags);
+
+    await client.query("COMMIT");
+
+    // Fetch full row with aggregates
+    const full = await pool.query(
+      `SELECT ${ENTRY_SELECT} FROM entries e LEFT JOIN daily_metrics dm ON dm.date = e.created_at::date WHERE e.uuid = $1`,
+      [uuid]
+    );
+    return mapEntryRow(full.rows[0] as Record<string, unknown>);
+  /* v8 ignore next 4 */
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export interface UpdateEntryData {
+  text?: string;
+  tags?: string[];
+  timezone?: string;
+  created_at?: string;
+  city?: string;
+  country?: string;
+  place_name?: string;
+  latitude?: number;
+  longitude?: number;
+}
+
+export async function updateEntry(
+  pool: pg.Pool,
+  uuid: string,
+  expectedVersion: number,
+  data: UpdateEntryData
+): Promise<EntryRow | "version_conflict" | null> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Optimistic lock: atomically bump version only if it matches
+    const setClauses: string[] = [];
+    const params: unknown[] = [uuid, expectedVersion];
+    let paramIdx = 2;
+
+    // Always bump version and modified_at for web edits
+    setClauses.push("version = version + 1");
+    setClauses.push("modified_at = NOW()");
+
+    if (data.text !== undefined) {
+      paramIdx++;
+      setClauses.push(`text = $${paramIdx}`);
+      params.push(data.text);
+      // Invalidate embedding when text changes
+      setClauses.push("embedding = NULL");
+    }
+    if (data.timezone !== undefined) {
+      paramIdx++;
+      setClauses.push(`timezone = $${paramIdx}`);
+      params.push(data.timezone);
+    }
+    if (data.created_at !== undefined) {
+      paramIdx++;
+      setClauses.push(`created_at = $${paramIdx}::timestamptz`);
+      params.push(data.created_at);
+    }
+    if (data.city !== undefined) {
+      paramIdx++;
+      setClauses.push(`city = $${paramIdx}`);
+      params.push(data.city);
+    }
+    if (data.country !== undefined) {
+      paramIdx++;
+      setClauses.push(`country = $${paramIdx}`);
+      params.push(data.country);
+    }
+    if (data.place_name !== undefined) {
+      paramIdx++;
+      setClauses.push(`place_name = $${paramIdx}`);
+      params.push(data.place_name);
+    }
+    if (data.latitude !== undefined) {
+      paramIdx++;
+      setClauses.push(`latitude = $${paramIdx}`);
+      params.push(data.latitude);
+    }
+    if (data.longitude !== undefined) {
+      paramIdx++;
+      setClauses.push(`longitude = $${paramIdx}`);
+      params.push(data.longitude);
+    }
+
+    const result = await client.query(
+      `UPDATE entries
+       SET ${setClauses.join(", ")}
+       WHERE uuid = $1 AND version = $2
+       RETURNING id`,
+      params
+    );
+
+    if (result.rows.length === 0) {
+      await client.query("ROLLBACK");
+      // Check if entry exists at all
+      const exists = await pool.query(
+        `SELECT uuid FROM entries WHERE uuid = $1`,
+        [uuid]
+      );
+      return exists.rows.length === 0 ? null : "version_conflict";
+    }
+
+    const entryId = result.rows[0].id as number;
+
+    // Update tags if provided
+    if (data.tags !== undefined) {
+      await client.query(`DELETE FROM entry_tags WHERE entry_id = $1`, [
+        entryId,
+      ]);
+      await upsertEntryTags(client, entryId, normalizeTags(data.tags));
+    }
+
+    await client.query("COMMIT");
+
+    // Fetch full row
+    const full = await pool.query(
+      `SELECT ${ENTRY_SELECT} FROM entries e LEFT JOIN daily_metrics dm ON dm.date = e.created_at::date WHERE e.uuid = $1`,
+      [uuid]
+    );
+    return mapEntryRow(full.rows[0] as Record<string, unknown>);
+  /* v8 ignore next 4 */
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function deleteEntry(
+  pool: pg.Pool,
+  uuid: string
+): Promise<boolean> {
+  const result = await pool.query(`DELETE FROM entries WHERE uuid = $1`, [uuid]);
+  /* v8 ignore next */
+  return (result.rowCount ?? 0) > 0;
+}
+
+export interface ListEntriesFilters {
+  limit?: number;
+  offset?: number;
+  from?: string;
+  to?: string;
+  tag?: string;
+  source?: string;
+  q?: string;
+}
+
+export async function listEntries(
+  pool: pg.Pool,
+  filters: ListEntriesFilters
+): Promise<{ rows: EntryRow[]; count: number }> {
+  const whereClauses: string[] = [];
+  const whereParams: unknown[] = [];
+  let paramIdx = 0;
+
+  if (filters.from) {
+    paramIdx++;
+    whereClauses.push(`e.created_at >= $${paramIdx}::timestamptz`);
+    whereParams.push(filters.from);
+  }
+  if (filters.to) {
+    paramIdx++;
+    whereClauses.push(`e.created_at < ($${paramIdx}::date + interval '1 day')`);
+    whereParams.push(filters.to);
+  }
+  if (filters.tag) {
+    paramIdx++;
+    whereClauses.push(
+      `EXISTS (SELECT 1 FROM entry_tags et2 JOIN tags t2 ON t2.id = et2.tag_id WHERE et2.entry_id = e.id AND t2.name = $${paramIdx})`
+    );
+    whereParams.push(filters.tag.toLowerCase());
+  }
+  if (filters.source) {
+    paramIdx++;
+    whereClauses.push(`e.source = $${paramIdx}`);
+    whereParams.push(filters.source);
+  }
+  if (filters.q) {
+    paramIdx++;
+    whereClauses.push(`e.text_search @@ plainto_tsquery('english', $${paramIdx})`);
+    whereParams.push(filters.q);
+  }
+
+  const whereClause =
+    whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+  const limit = Math.min(filters.limit ?? 20, 100);
+  const offset = filters.offset ?? 0;
+
+  paramIdx++;
+  const limitParam = paramIdx;
+  paramIdx++;
+  const offsetParam = paramIdx;
+
+  const params = [...whereParams, limit, offset];
+
+  const [rowsResult, countResult] = await Promise.all([
+    pool.query(
+      `SELECT ${ENTRY_SELECT}
+       FROM entries e
+       LEFT JOIN daily_metrics dm ON dm.date = e.created_at::date
+       ${whereClause}
+       ORDER BY e.created_at DESC
+       LIMIT $${limitParam} OFFSET $${offsetParam}`,
+      params
+    ),
+    pool.query(
+      `SELECT count(*)::int AS total FROM entries e ${whereClause}`,
+      whereParams
+    ),
+  ]);
+
+  return {
+    rows: rowsResult.rows.map((row) =>
+      mapEntryRow(row as Record<string, unknown>)
+    ),
+    count: countResult.rows[0].total as number,
+  };
+}
+
+async function upsertEntryTags(
+  client: pg.Pool | pg.PoolClient,
+  entryId: number,
+  tags: string[]
+): Promise<void> {
+  if (tags.length === 0) return;
+  for (const tag of tags) {
+    await client.query(
+      `INSERT INTO tags (name) VALUES ($1) ON CONFLICT (name) DO NOTHING`,
+      [tag]
+    );
+    await client.query(
+      `INSERT INTO entry_tags (entry_id, tag_id)
+       SELECT $1, id FROM tags WHERE name = $2
+       ON CONFLICT DO NOTHING`,
+      [entryId, tag]
+    );
+  }
+}
+
+// ============================================================================
+// Web journaling: Media queries
+// ============================================================================
+
+export interface MediaRow {
+  id: number;
+  entry_id: number;
+  type: string;
+  md5: string | null;
+  file_size: number | null;
+  dimensions: { width: number; height: number } | null;
+  storage_key: string | null;
+  url: string | null;
+}
+
+export async function insertMedia(
+  pool: pg.Pool,
+  data: {
+    entry_id: number;
+    type: string;
+    storage_key: string;
+    url: string;
+    file_size?: number;
+    dimensions?: { width: number; height: number };
+  }
+): Promise<MediaRow> {
+  const result = await pool.query(
+    `INSERT INTO media (entry_id, type, storage_key, url, file_size, dimensions)
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+     RETURNING id, entry_id, type, md5, file_size, dimensions, storage_key, url`,
+    [
+      data.entry_id,
+      data.type,
+      data.storage_key,
+      data.url,
+      data.file_size ?? null,
+      data.dimensions ? JSON.stringify(data.dimensions) : null,
+    ]
+  );
+  return result.rows[0] as MediaRow;
+}
+
+export async function getMediaForEntry(
+  pool: pg.Pool,
+  entryId: number
+): Promise<MediaRow[]> {
+  const result = await pool.query(
+    `SELECT id, entry_id, type, md5, file_size, dimensions, storage_key, url
+     FROM media WHERE entry_id = $1 ORDER BY id`,
+    [entryId]
+  );
+  return result.rows as MediaRow[];
+}
+
+export async function deleteMedia(
+  pool: pg.Pool,
+  id: number
+): Promise<{ deleted: boolean; storage_key: string | null }> {
+  const result = await pool.query(
+    `DELETE FROM media WHERE id = $1 RETURNING storage_key`,
+    [id]
+  );
+  /* v8 ignore next */
+  if ((result.rowCount ?? 0) === 0) {
+    return { deleted: false, storage_key: null };
+  }
+  return {
+    deleted: true,
+    /* v8 ignore next */
+    storage_key: (result.rows[0].storage_key as string | null) ?? null,
+  };
+}
+
+// ============================================================================
+// Web journaling: Version-guarded embedding update
+// ============================================================================
+
+export async function updateEntryEmbeddingIfVersionMatches(
+  pool: pg.Pool,
+  uuid: string,
+  version: number,
+  embedding: number[]
+): Promise<boolean> {
+  const embeddingStr = `[${embedding.join(",")}]`;
+  const result = await pool.query(
+    `UPDATE entries SET embedding = $1::vector
+     WHERE uuid = $2 AND version = $3`,
+    [embeddingStr, uuid, version]
+  );
+  /* v8 ignore next */
+  return (result.rowCount ?? 0) > 0;
+}
+
+// ============================================================================
+// Web journaling: Entry templates
+// ============================================================================
+
+export interface TemplateRow {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  body: string;
+  default_tags: string[];
+  sort_order: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+const TEMPLATE_COLUMNS = `id, slug, name, description, body, default_tags, sort_order, created_at, updated_at`;
+
+function toTemplateRow(row: Record<string, unknown>): TemplateRow {
+  return {
+    id: row.id as string,
+    slug: row.slug as string,
+    name: row.name as string,
+    description: (row.description as string | null) ?? null,
+    body: row.body as string,
+    /* v8 ignore next 2 */
+    default_tags: (row.default_tags as string[]) ?? [],
+    sort_order: (row.sort_order as number) ?? 0,
+    created_at: row.created_at as Date,
+    updated_at: row.updated_at as Date,
+  };
+}
+
+export async function listTemplates(
+  pool: pg.Pool
+): Promise<TemplateRow[]> {
+  const result = await pool.query(
+    `SELECT ${TEMPLATE_COLUMNS} FROM entry_templates ORDER BY sort_order ASC, created_at ASC`
+  );
+  return result.rows.map((row) => toTemplateRow(row as Record<string, unknown>));
+}
+
+export async function getTemplateById(
+  pool: pg.Pool,
+  id: string
+): Promise<TemplateRow | null> {
+  const result = await pool.query(
+    `SELECT ${TEMPLATE_COLUMNS} FROM entry_templates WHERE id = $1`,
+    [id]
+  );
+  if (result.rows.length === 0) return null;
+  return toTemplateRow(result.rows[0] as Record<string, unknown>);
+}
+
+export async function createTemplate(
+  pool: pg.Pool,
+  data: {
+    slug: string;
+    name: string;
+    description?: string;
+    body?: string;
+    default_tags?: string[];
+    sort_order?: number;
+  }
+): Promise<TemplateRow> {
+  const result = await pool.query(
+    `INSERT INTO entry_templates (slug, name, description, body, default_tags, sort_order)
+     VALUES ($1, $2, $3, $4, $5::text[], $6)
+     RETURNING ${TEMPLATE_COLUMNS}`,
+    [
+      data.slug,
+      data.name,
+      data.description ?? null,
+      data.body ?? "",
+      data.default_tags ?? [],
+      data.sort_order ?? 0,
+    ]
+  );
+  return toTemplateRow(result.rows[0] as Record<string, unknown>);
+}
+
+export async function updateTemplate(
+  pool: pg.Pool,
+  id: string,
+  data: {
+    slug?: string;
+    name?: string;
+    description?: string;
+    body?: string;
+    default_tags?: string[];
+    sort_order?: number;
+  }
+): Promise<TemplateRow | null> {
+  const setClauses: string[] = [];
+  const params: unknown[] = [];
+  let paramIdx = 0;
+
+  if (data.slug !== undefined) {
+    paramIdx++;
+    setClauses.push(`slug = $${paramIdx}`);
+    params.push(data.slug);
+  }
+  if (data.name !== undefined) {
+    paramIdx++;
+    setClauses.push(`name = $${paramIdx}`);
+    params.push(data.name);
+  }
+  if (data.description !== undefined) {
+    paramIdx++;
+    setClauses.push(`description = $${paramIdx}`);
+    params.push(data.description);
+  }
+  if (data.body !== undefined) {
+    paramIdx++;
+    setClauses.push(`body = $${paramIdx}`);
+    params.push(data.body);
+  }
+  if (data.default_tags !== undefined) {
+    paramIdx++;
+    setClauses.push(`default_tags = $${paramIdx}::text[]`);
+    params.push(data.default_tags);
+  }
+  if (data.sort_order !== undefined) {
+    paramIdx++;
+    setClauses.push(`sort_order = $${paramIdx}`);
+    params.push(data.sort_order);
+  }
+
+  if (setClauses.length === 0) {
+    return getTemplateById(pool, id);
+  }
+
+  paramIdx++;
+  params.push(id);
+
+  const result = await pool.query(
+    `UPDATE entry_templates
+     SET ${setClauses.join(", ")}
+     WHERE id = $${paramIdx}
+     RETURNING ${TEMPLATE_COLUMNS}`,
+    params
+  );
+
+  if (result.rows.length === 0) return null;
+  return toTemplateRow(result.rows[0] as Record<string, unknown>);
+}
+
+export async function deleteTemplate(
+  pool: pg.Pool,
+  id: string
+): Promise<boolean> {
+  const result = await pool.query(
+    `DELETE FROM entry_templates WHERE id = $1`,
+    [id]
+  );
+  /* v8 ignore next */
+  return (result.rowCount ?? 0) > 0;
+}
+
+/**
+ * Get entry internal ID by UUID. Used by media upload to resolve entry_id FK.
+ */
+export async function getEntryIdByUuid(
+  pool: pg.Pool,
+  uuid: string
+): Promise<number | null> {
+  const result = await pool.query(
+    `SELECT id FROM entries WHERE uuid = $1`,
+    [uuid]
+  );
+  return result.rows.length > 0 ? (result.rows[0].id as number) : null;
 }
