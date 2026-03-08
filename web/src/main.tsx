@@ -10,6 +10,7 @@ import { TodoList } from "./pages/TodoList.tsx";
 import { TodoCreate } from "./pages/TodoCreate.tsx";
 import { TodoEdit } from "./pages/TodoEdit.tsx";
 import { Weight } from "./pages/Weight.tsx";
+import { DbObservability } from "./pages/DbObservability.tsx";
 import "./index.css";
 
 createRoot(document.getElementById("root")!).render(
@@ -21,6 +22,7 @@ createRoot(document.getElementById("root")!).render(
           <Route path="/" element={<ArtifactList />} />
           <Route path="/new" element={<ArtifactCreate />} />
           <Route path="/weight" element={<Weight />} />
+          <Route path="/db" element={<DbObservability />} />
           <Route path="/todos" element={<TodoList />} />
           <Route path="/todos/new" element={<TodoCreate />} />
           <Route path="/todos/:id" element={<TodoEdit />} />

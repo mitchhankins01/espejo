@@ -53,11 +53,17 @@ import {
   completeTodo,
   setTodoFocus,
   getFocusTodo,
+  upsertUserSettings,
+  listObservableTables,
+  listObservableTableRows,
+  listRecentDbChanges,
+  isObservableDbTableName,
 } from "../db/queries.js";
 import { generateEmbedding } from "../db/embeddings.js";
 import { registerOAuthRoutes, isValidOAuthToken } from "./oauth.js";
 import { startInsightTimer } from "../insights/engine.js";
 import { startOuraSyncTimer } from "../oura/sync.js";
+import { startCheckinTimer } from "../checkins/scheduler.js";
 
 type ServerFactory = () => McpServer;
 
@@ -87,6 +93,7 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
   /* v8 ignore stop */
   startOuraSyncTimer(pool, runMemoryMaintenance);
   startInsightTimer(pool);
+  startCheckinTimer(pool);
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
 
@@ -338,8 +345,129 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
   const dateParamSchema = z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD format");
+  const timestampParamSchema = z.string().datetime({ offset: true });
   const weightBodySchema = z.object({
     weight_kg: z.number().positive(),
+  });
+
+  // GET /api/db/tables - observable table metadata
+  app.get("/api/db/tables", async (req, res) => {
+    if (!requireBearerAuth(req, res)) return;
+
+    try {
+      const tables = await listObservableTables(pool);
+      res.json(tables);
+    } catch (err) {
+      console.error("DB observability tables error:", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  // GET /api/db/tables/:table/rows - paginated rows for one allowlisted table
+  app.get("/api/db/tables/:table/rows", async (req, res) => {
+    if (!requireBearerAuth(req, res)) return;
+
+    const table = String(req.params.table ?? "");
+    if (!isObservableDbTableName(table)) {
+      res.status(400).json({ error: `Unsupported table: ${table}` });
+      return;
+    }
+
+    const from = req.query.from ? String(req.query.from) : undefined;
+    const to = req.query.to ? String(req.query.to) : undefined;
+    if (from && !timestampParamSchema.safeParse(from).success) {
+      res.status(400).json({ error: "from must be an ISO timestamp with timezone" });
+      return;
+    }
+    if (to && !timestampParamSchema.safeParse(to).success) {
+      res.status(400).json({ error: "to must be an ISO timestamp with timezone" });
+      return;
+    }
+
+    const orderRaw = String(req.query.order ?? "desc").toLowerCase();
+    const order = orderRaw === "asc" ? "asc" : orderRaw === "desc" ? "desc" : null;
+    if (!order) {
+      res.status(400).json({ error: "order must be asc or desc" });
+      return;
+    }
+
+    try {
+      const limit = Math.min(
+        Math.max(parseInt(String(req.query.limit ?? "50"), 10) || 50, 1),
+        200
+      );
+      const offset = Math.max(parseInt(String(req.query.offset ?? "0"), 10) || 0, 0);
+      const sort = req.query.sort ? String(req.query.sort) : undefined;
+      const q = req.query.q ? String(req.query.q) : undefined;
+
+      const rows = await listObservableTableRows(pool, table, {
+        limit,
+        offset,
+        sort,
+        order,
+        q,
+        from,
+        to,
+      });
+      res.json(rows);
+    } catch (err) {
+      const message = String(err);
+      if (message.includes("Unsupported")) {
+        res.status(400).json({ error: message });
+        return;
+      }
+      console.error("DB observability rows error:", err);
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // GET /api/db/changes - merged inferred change feed + tool-call activity
+  app.get("/api/db/changes", async (req, res) => {
+    if (!requireBearerAuth(req, res)) return;
+
+    const tableParam = req.query.table ? String(req.query.table) : undefined;
+    if (tableParam && !isObservableDbTableName(tableParam)) {
+      res.status(400).json({ error: `Unsupported table: ${tableParam}` });
+      return;
+    }
+    const table = tableParam && isObservableDbTableName(tableParam)
+      ? tableParam
+      : undefined;
+    const operationRaw = req.query.operation
+      ? String(req.query.operation).toLowerCase()
+      : undefined;
+    const operation = operationRaw && ["insert", "update", "delete", "tool_call"].includes(operationRaw)
+      ? operationRaw as "insert" | "update" | "delete" | "tool_call"
+      : undefined;
+    if (operationRaw && !operation) {
+      res.status(400).json({
+        error: "operation must be one of insert, update, delete, tool_call",
+      });
+      return;
+    }
+
+    const since = req.query.since ? String(req.query.since) : undefined;
+    if (since && !timestampParamSchema.safeParse(since).success) {
+      res.status(400).json({ error: "since must be an ISO timestamp with timezone" });
+      return;
+    }
+
+    try {
+      const limit = Math.min(
+        Math.max(parseInt(String(req.query.limit ?? "100"), 10) || 100, 1),
+        500
+      );
+      const changes = await listRecentDbChanges(pool, {
+        limit,
+        since: since ? new Date(since) : undefined,
+        table,
+        operation,
+      });
+      res.json(changes);
+    } catch (err) {
+      console.error("DB observability changes error:", err);
+      res.status(500).json({ error: String(err) });
+    }
   });
 
   // GET /api/weights - list weight history with optional range/pagination
@@ -1012,6 +1140,33 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
       res.json({ status: "deleted" });
     } catch (err) {
       console.error("Todo delete error:", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  // POST /api/settings/timezone — web app auto-sync
+  app.post("/api/settings/timezone", async (req, res) => {
+    /* v8 ignore next */
+    if (!requireBearerAuth(req, res)) return;
+
+    try {
+      const { timezone } = req.body as { timezone?: string };
+      if (!timezone || typeof timezone !== "string") {
+        res.status(400).json({ error: "timezone is required" });
+        return;
+      }
+      // Validate timezone
+      try {
+        Intl.DateTimeFormat(undefined, { timeZone: timezone });
+      } catch {
+        res.status(400).json({ error: `Invalid timezone: ${timezone}` });
+        return;
+      }
+      const chatId = config.telegram.allowedChatId || "0";
+      await upsertUserSettings(pool, chatId, { timezone });
+      res.json({ status: "ok", timezone });
+    } catch (err) {
+      console.error("Settings timezone error:", err);
       res.status(500).json({ error: String(err) });
     }
   });

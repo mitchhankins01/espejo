@@ -43,7 +43,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
   if (authed) {
     const onTodos = location.pathname.startsWith("/todos");
     const onWeight = location.pathname.startsWith("/weight");
-    const onKnowledge = !onTodos && !onWeight;
+    const onDb = location.pathname.startsWith("/db");
+    const onKnowledge = !onTodos && !onWeight && !onDb;
     return (
       <div className="min-h-screen bg-surface-alt">
         <nav className="border-b border-border bg-surface">
@@ -77,6 +78,16 @@ export function AuthGate({ children }: { children: ReactNode }) {
               }`}
             >
               Todos
+            </Link>
+            <Link
+              to="/db"
+              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                onDb
+                  ? "bg-pine-600 dark:bg-pine-500 text-white"
+                  : "text-text-muted hover:text-text-primary"
+              }`}
+            >
+              DB
             </Link>
           </div>
         </nav>

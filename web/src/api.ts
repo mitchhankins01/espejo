@@ -99,6 +99,50 @@ export interface WeightPatterns {
   logged_days: number;
 }
 
+export type ObservableDbTableName =
+  | "knowledge_artifacts"
+  | "artifact_links"
+  | "todos"
+  | "activity_logs"
+  | "chat_messages"
+  | "patterns"
+  | "spanish_vocabulary"
+  | "spanish_reviews"
+  | "daily_metrics"
+  | "insights"
+  | "checkins";
+
+export interface DbTableMeta {
+  name: ObservableDbTableName;
+  row_count: number;
+  last_changed_at: string | null;
+  default_sort_column: string | null;
+}
+
+export interface DbColumnMeta {
+  name: string;
+  type: string;
+  hidden: boolean;
+}
+
+export interface DbRowsResult {
+  items: Record<string, unknown>[];
+  total: number;
+  columns: DbColumnMeta[];
+}
+
+export type DbChangeOperation = "insert" | "update" | "delete" | "tool_call";
+
+export interface DbChangeEvent {
+  changed_at: string;
+  table: ObservableDbTableName;
+  operation: DbChangeOperation;
+  row_id: string | null;
+  summary: string;
+  tool_name?: string;
+  chat_id?: string;
+}
+
 const TOKEN_KEY = "espejo_token";
 
 export function getToken(): string | null {
@@ -348,4 +392,49 @@ export function getWeightPatterns(params?: {
   if (params?.to) qs.set("to", params.to);
   const query = qs.toString();
   return apiFetch(`/api/weights/patterns${query ? `?${query}` : ""}`);
+}
+
+export function listDbTables(): Promise<DbTableMeta[]> {
+  return apiFetch("/api/db/tables");
+}
+
+export function listDbTableRows(
+  table: ObservableDbTableName,
+  params?: {
+    limit?: number;
+    offset?: number;
+    sort?: string;
+    order?: "asc" | "desc";
+    q?: string;
+    from?: string;
+    to?: string;
+  }
+): Promise<DbRowsResult> {
+  const qs = new URLSearchParams();
+  if (params?.limit) qs.set("limit", String(params.limit));
+  if (params?.offset) qs.set("offset", String(params.offset));
+  if (params?.sort) qs.set("sort", params.sort);
+  if (params?.order) qs.set("order", params.order);
+  if (params?.q) qs.set("q", params.q);
+  if (params?.from) qs.set("from", params.from);
+  if (params?.to) qs.set("to", params.to);
+  const query = qs.toString();
+  return apiFetch(
+    `/api/db/tables/${encodeURIComponent(table)}/rows${query ? `?${query}` : ""}`
+  );
+}
+
+export function listDbChanges(params?: {
+  limit?: number;
+  since?: string;
+  table?: ObservableDbTableName;
+  operation?: DbChangeOperation;
+}): Promise<DbChangeEvent[]> {
+  const qs = new URLSearchParams();
+  if (params?.limit) qs.set("limit", String(params.limit));
+  if (params?.since) qs.set("since", params.since);
+  if (params?.table) qs.set("table", params.table);
+  if (params?.operation) qs.set("operation", params.operation);
+  const query = qs.toString();
+  return apiFetch(`/api/db/changes${query ? `?${query}` : ""}`);
 }
