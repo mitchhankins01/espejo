@@ -299,19 +299,27 @@ if (process.env.NODE_ENV !== "production") {
 - **Development/test**: Loads `.env` or `.env.test` with `override: true` (overrides shell env vars)
 - **Production**: Skips dotenv entirely — uses env vars from the caller (Railway, or CLI for manual sync)
 
-### Connecting to dev database
+### Connecting to databases with psql
 
-```
-Host:     localhost
-Port:     5434
-Database: journal_dev
-User:     dev
-Password: dev
+`psql` is installed via `libpq` (not in PATH by default — prefix commands or add to shell):
+
+```bash
+export PATH="/opt/homebrew/opt/libpq/bin:$PATH"
 ```
 
-Or as a connection string: `postgresql://dev:dev@localhost:5434/journal_dev`
+**Dev DB** (credentials in `.env`):
+```bash
+source .env && psql "$DATABASE_URL"
+```
 
-**Note:** Some tools (TablePlus, pgAdmin, psql) need each field entered separately. If you get `database "dev" does not exist`, the tool is using the username as the database name — make sure to specify `journal_dev` explicitly.
+**Prod DB** (credentials in `.env.production.local`):
+```bash
+source .env.production.local && psql "$DATABASE_URL"
+```
+
+**Claude Code can query either DB directly** — just say "query dev" or "query prod" and I'll source the appropriate env file and run the SQL via Bash.
+
+**Note (GUI tools like TablePlus):** Use the fields from `DATABASE_URL` in `.env`. If you get `database "dev" does not exist`, the tool is using the username as the database name — make sure to specify `journal_dev` explicitly.
 
 ## Adding a New Tool
 
