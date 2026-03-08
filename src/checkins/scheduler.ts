@@ -12,7 +12,7 @@ import {
 } from "../db/queries.js";
 import { sendTelegramMessage } from "../telegram/client.js";
 import { notifyError } from "../telegram/notify.js";
-import { currentHourInTimezone, todayDateInTimezone, currentTimeLabel } from "../utils/dates.js";
+import { currentHourInTimezone, currentTimeLabel } from "../utils/dates.js";
 import { buildOuraContextPrompt } from "../oura/context.js";
 import { buildTodoContextPrompt } from "../todos/context.js";
 import { buildCheckinPrompt } from "./prompts.js";
@@ -103,15 +103,8 @@ export async function runCheckinEngine(pool: pg.Pool): Promise<CheckinEngineResu
       // Check if already sent for this window today (within last 12h to handle timezone shifts)
       const existing = await getLastCheckinForWindow(pool, chatId, window, 12);
       if (existing) {
-        // Already sent today for this window — check if the existing one is on today's date
-        const existingDate = todayDateInTimezone(tz);
-        const checkinDate = new Intl.DateTimeFormat("en-CA", {
-          timeZone: tz,
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-        }).format(new Date(existing.created_at));
-        if (checkinDate === existingDate) continue;
+        // Already sent for this window within the lookback period — skip
+        continue;
       }
 
       // Check adaptation: should we ask to adjust?

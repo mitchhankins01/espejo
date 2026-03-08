@@ -1248,7 +1248,7 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
       }
 
       res.status(201).json(entry);
-    /* v8 ignore next 7 */
+    /* v8 ignore next 8 */
     } catch (err) {
       if (err instanceof z.ZodError) {
         res.status(400).json({ error: err.errors });
@@ -1490,7 +1490,7 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
       const data = schema.parse(req.body);
       const template = await createTemplate(pool, data);
       res.status(201).json(template);
-    /* v8 ignore next 7 */
+    /* v8 ignore next 8 */
     } catch (err) {
       if (err instanceof z.ZodError) {
         res.status(400).json({ error: err.errors });

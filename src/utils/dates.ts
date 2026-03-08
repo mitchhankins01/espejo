@@ -10,7 +10,7 @@ export function todayInTimezone(): string {
 }
 
 export function currentHourInTimezone(tz: string): number {
-  return parseInt(
+  const raw = parseInt(
     new Intl.DateTimeFormat("en-US", {
       timeZone: tz,
       hour: "numeric",
@@ -18,6 +18,8 @@ export function currentHourInTimezone(tz: string): number {
     }).format(new Date()),
     10
   );
+  // Intl can return 24 at midnight during DST transitions — normalize to 0
+  return raw % 24;
 }
 
 export function todayDateInTimezone(tz: string): string {

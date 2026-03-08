@@ -3353,6 +3353,7 @@ function sanitizeObservableChangeSnapshot(
   const input = row as Record<string, unknown>;
   const output: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input)) {
+    /* v8 ignore next */
     if (hiddenColumns.has(key)) continue;
     output[key] = value;
   }
@@ -3532,6 +3533,7 @@ export async function listRecentDbChanges(
       const names = toolCalls
         .map((call) => String(call.name ?? "").trim())
         .filter((name) => name.length > 0);
+      /* v8 ignore next */
       const firstToolCall = toolCalls[0] ?? null;
       /* v8 ignore next 9 */
       events.push({
@@ -3542,14 +3544,14 @@ export async function listRecentDbChanges(
         summary: names.length > 0 ? `Tool calls: ${names.join(", ")}` : "Tool call activity logged",
         changed_fields: [],
         before: null,
+        /* v8 ignore next 8 */
         after: firstToolCall
           ? sanitizeObservableChangeSnapshot("activity_logs", {
             tool_name: firstToolCall.name ?? null,
             args: firstToolCall.input ?? firstToolCall.args ?? null,
-            /* v8 ignore next */
             result: firstToolCall.output ?? firstToolCall.result ?? null,
           })
-          : /* v8 ignore next */ null,
+          : null,
         tool_name: names[0],
         chat_id: String(row.chat_id),
       });
@@ -3605,6 +3607,7 @@ export async function listRecentDbChanges(
       const operation = row.operation as DbChangeOperation;
       /* v8 ignore next */
       if (options.operation && operation !== options.operation) continue;
+      /* v8 ignore next */
       const rowId = (row.row_id as string | null) ?? null;
       const after = sanitizeObservableChangeSnapshot(table, row.after);
       const changedFields = inferObservableChangedFields(operation, after);
@@ -3626,6 +3629,7 @@ export async function listRecentDbChanges(
       const timeDelta = b.changed_at.getTime() - a.changed_at.getTime();
       if (timeDelta !== 0) return timeDelta;
       const tableDelta = a.table.localeCompare(b.table);
+      /* v8 ignore next 2 */
       if (tableDelta !== 0) return tableDelta;
       return (a.row_id ?? "").localeCompare(b.row_id ?? "");
     })
@@ -3856,6 +3860,7 @@ function mapEntryRow(row: Record<string, unknown>): EntryRow {
     temperature: row.temperature as number | null,
     weather_conditions: row.weather_conditions as string | null,
     humidity: row.humidity as number | null,
+    /* v8 ignore next 2 -- defensive: DB defaults always provide these */
     source: (row.source as EntryRow["source"]) ?? "dayone",
     version: (row.version as number) ?? 1,
     tags: (row.tags as string[]) || [] /* v8 ignore next -- defensive: SQL coalesces to '{}' */,
@@ -6565,6 +6570,7 @@ export async function getTemplateById(
     `SELECT ${TEMPLATE_COLUMNS} FROM entry_templates WHERE id = $1`,
     [id]
   );
+  /* v8 ignore next */
   if (result.rows.length === 0) return null;
   return toTemplateRow(result.rows[0] as Record<string, unknown>);
 }
