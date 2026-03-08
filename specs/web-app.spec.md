@@ -13,8 +13,9 @@ Implemented feature set:
 - Global quick switcher (`Cmd+K` / `Ctrl+K`) for title navigation
 - Semantic links/backlinks (`[[Title]]`) with related panel in editor
 - Graph view (semantic, explicit, shared-tag, shared-source edges)
+- Weight tracking UI (`/weight`): quick log, editable history, trend chart, pattern cards
 - Todo CRUD with statuses (`active`, `waiting`, `done`)
-- Top nav inside auth gate: `Knowledge Base` and `Todos`
+- Top nav inside auth gate: `Knowledge Base`, `Weight`, and `Todos`
 
 For implementation rollout details, see `specs/web-feature-rollout.md`.
 
@@ -35,6 +36,7 @@ For implementation rollout details, see `specs/web-feature-rollout.md`.
 |---|---|---|
 | `/` | `ArtifactList` | Artifact list + search/filter + list/graph toggle |
 | `/new` | `ArtifactCreate` | Create artifact |
+| `/weight` | `Weight` | Log daily weight, review history, view trend/pattern metrics |
 | `/:id` | `ArtifactEdit` | Edit artifact, related panel, preview toggle |
 | `/todos` | `TodoList` | Todo list with status filters + pagination |
 | `/todos/new` | `TodoCreate` | Create todo |
@@ -57,6 +59,10 @@ All endpoints require bearer token auth (`MCP_SECRET`) from the auth gate.
 | `/api/artifacts/:id` | PUT | `{ kind?, title?, body?, tags?, source_entry_uuids?, expected_version }` | `Artifact` (`409` on conflict) |
 | `/api/artifacts/:id` | DELETE | — | `{ status: "deleted" }` |
 | `/api/entries/search` | GET | `?q&limit` | `{ uuid, created_at, preview }[]` |
+| `/api/weights` | GET | `?from&to&limit&offset` | `{ items: WeightEntry[], total: number }` |
+| `/api/weights/:date` | PUT | `{ weight_kg }` | `WeightEntry` |
+| `/api/weights/:date` | DELETE | — | `{ status: "deleted" }` |
+| `/api/weights/patterns` | GET | `?from&to` | `WeightPatterns` |
 | `/api/todos` | GET | `?status&limit&offset` | `{ items: Todo[], total: number }` |
 | `/api/todos/:id` | GET | — | `Todo` |
 | `/api/todos` | POST | `{ title, status?, next_step?, body?, tags? }` | `Todo` |
@@ -87,6 +93,13 @@ All endpoints require bearer token auth (`MCP_SECRET`) from the auth gate.
 - Status lifecycle: `active`, `waiting`, `done`.
 - List supports status filtering and pagination with URL page params.
 - Create/edit pages follow artifact-style manual save pattern.
+
+### Weight
+- Quick log card upserts weight for a selected date.
+- Range pills (`30d`, `90d`, `365d`, `All`) drive history and pattern metrics.
+- History table supports inline edit/delete and delta vs previous logged day.
+- Trend chart shows raw series plus 7-point and 30-point moving averages.
+- Pattern cards show deltas, pace, consistency, streak, volatility, and plateau flag.
 
 ## Theming
 

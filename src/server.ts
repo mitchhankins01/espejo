@@ -8,7 +8,6 @@ import { handleOnThisDay } from "./tools/on-this-day.js";
 import { handleFindSimilar } from "./tools/find-similar.js";
 import { handleListTags } from "./tools/list-tags.js";
 import { handleEntryStats } from "./tools/entry-stats.js";
-import { handleLogWeight } from "./tools/log-weight.js";
 import { handleConjugateVerb } from "./tools/conjugate-verb.js";
 import { handleLogVocabulary } from "./tools/log-vocabulary.js";
 import { handleSpanishQuiz } from "./tools/spanish-quiz.js";
@@ -42,7 +41,6 @@ export const toolHandlers: Record<string, ToolHandler> = {
   find_similar: handleFindSimilar,
   list_tags: handleListTags,
   entry_stats: handleEntryStats,
-  log_weight: handleLogWeight,
   conjugate_verb: handleConjugateVerb,
   log_vocabulary: handleLogVocabulary,
   spanish_quiz: handleSpanishQuiz,

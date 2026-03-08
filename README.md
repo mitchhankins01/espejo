@@ -29,14 +29,14 @@ A personal AI journal system built on PostgreSQL + pgvector. Started as an MCP s
 │   │                        Core Services                                │   │
 │   │                             │                                       │   │
 │   │   ┌─────────────────────────┼──────────────────────────────────┐    │   │
-│   │   │              30 MCP Tools (spec-driven)                    │    │   │
+│   │   │              MCP Tools (spec-driven)                       │    │   │
 │   │   │                                                            │    │   │
 │   │   │  Journal:  search · get_entry · get_entries_by_date        │    │   │
 │   │   │           on_this_day · find_similar · list_tags            │    │   │
 │   │   │           entry_stats                                      │    │   │
 │   │   │                                                            │    │   │
-│   │   │  Health:   log_weight · get_oura_summary                   │    │   │
-│   │   │           get_oura_weekly · get_oura_trends                │    │   │
+│   │   │  Health:   get_oura_summary · get_oura_weekly              │    │   │
+│   │   │           get_oura_trends                                  │    │   │
 │   │   │           get_oura_analysis · oura_compare_periods         │    │   │
 │   │   │           oura_correlate                                   │    │   │
 │   │   │                                                            │    │   │
@@ -195,17 +195,18 @@ Every entry fits in a single embedding (max ~8K tokens). No chunking needed.
 | `list_tags` | All tags with usage counts |
 | `entry_stats` | Writing frequency, word counts, trends |
 
-### Health & Biometrics (7)
+### Health & Biometrics (6 MCP tools + web weight UI)
 
 | Tool | Description |
 |------|-------------|
-| `log_weight` | Daily weight logging (upserts by date) |
 | `get_oura_summary` | Single-day health snapshot: sleep, readiness, activity, HRV, stress, workouts |
 | `get_oura_weekly` | 7-day overview with daily scores, averages, best/worst days |
 | `get_oura_trends` | N-day trend analysis with rolling averages and day-of-week patterns |
 | `get_oura_analysis` | Multi-type analysis: sleep quality, anomalies, HRV trends, temperature, best sleep conditions |
 | `oura_compare_periods` | Side-by-side metrics comparison between two date ranges |
 | `oura_correlate` | Pearson correlation between any two health metrics |
+
+Weight logging moved to the web app (`/weight`) with history, charting, and pattern metrics. API endpoints: `GET /api/weights`, `PUT/DELETE /api/weights/:date`, `GET /api/weights/patterns`.
 
 ### Spanish Learning (3)
 
@@ -241,7 +242,7 @@ cd web && pnpm e2e
 
 ## Telegram Chatbot
 
-An optional conversational interface that wraps a 21-tool MCP set in a Telegram bot with long-term memory and an evolving personality. Enabled when `TELEGRAM_BOT_TOKEN` is set.
+An optional conversational interface that wraps the MCP tool set in a Telegram bot with long-term memory and an evolving personality. Enabled when `TELEGRAM_BOT_TOKEN` is set.
 
 ### What It Does
 
@@ -311,7 +312,11 @@ Authenticated via `MCP_SECRET` bearer token:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/metrics` | POST | Ingest one or more metric records (`{ date, weight_kg }`) |
+| `/api/weights` | GET | List weight history (`from`, `to`, `limit`, `offset`) |
+| `/api/weights/:date` | PUT | Upsert daily weight (`{ weight_kg }`) |
+| `/api/weights/:date` | DELETE | Delete daily weight value |
+| `/api/weights/patterns` | GET | Weight trend/consistency pattern summary |
+| `/api/metrics` | POST | Legacy metrics ingestion endpoint (`{ date, weight_kg }`) |
 | `/api/activity` | GET | Recent activity logs (`limit`, `since`, `tool`) |
 | `/api/activity/:id` | GET | Single activity log |
 | `/api/spanish/:chatId/dashboard` | GET | Aggregated Spanish learning analytics |

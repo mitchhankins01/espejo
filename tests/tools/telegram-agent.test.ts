@@ -2962,11 +2962,6 @@ describe("truncateToolResult", () => {
     expect(result).toContain("...");
   });
 
-  it("returns full result for log_weight", () => {
-    const result = truncateToolResult("log_weight", "Logged weight: 80.5 kg on 2025-01-10");
-    expect(result).toBe("Logged weight: 80.5 kg on 2025-01-10");
-  });
-
   it("truncates search_entries at line boundaries", () => {
     const lines = Array.from({ length: 20 }, (_, i) => `Entry ${i}: ${"y".repeat(100)}`);
     const result = truncateToolResult("search_entries", lines.join("\n"));

@@ -296,35 +296,6 @@ export const toolSpecs = {
       },
     ],
   },
-  log_weight: {
-    name: "log_weight" as const,
-    description:
-      "Log a daily weight measurement. Use when the user mentions their weight. " +
-      "Upserts the value — if a weight already exists for the date, it is overwritten.",
-    params: z.object({
-      weight_kg: z
-        .number()
-        .positive()
-        .describe("Weight in kilograms"),
-      date: dateString
-        .optional()
-        .describe(
-          "Date in YYYY-MM-DD format. Defaults to today in the configured timezone."
-        ),
-    }),
-    examples: [
-      {
-        input: { weight_kg: 76.5 },
-        behavior:
-          "Logs weight for today using configured timezone",
-      },
-      {
-        input: { weight_kg: 80.0, date: "2025-03-15" },
-        behavior:
-          "Logs weight for a specific date",
-      },
-    ],
-  },
   conjugate_verb: {
     name: "conjugate_verb" as const,
     description:

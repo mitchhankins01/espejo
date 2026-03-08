@@ -52,7 +52,7 @@ Also update `specs/schema.sql` with the new tables.
 
 - **Spec** in `specs/tools.spec.ts`: params = `{ verb: string, tense?: string, mood?: string }`
 - **Query** in `src/db/queries.ts`: `getVerbConjugations(pool, verb, tense?, mood?)`
-- **Handler** in `src/tools/conjugate-verb.ts` (follows `log-weight.ts` pattern)
+- **Handler** in `src/tools/conjugate-verb.ts` (follows existing tool handler pattern)
 - **Formatter** in `src/formatters/conjugation.ts` — readable table with all persons
 - **Register** in `src/server.ts`
 
@@ -91,9 +91,8 @@ Use the [ts-fsrs](https://github.com/open-spaced-repetition/ts-fsrs) npm package
 In `buildSystemPrompt()`, update tool list and add Spanish tutoring guidelines:
 
 ```
-You have access to 11 tools:
+You have access to 10 tools:
 - 7 journal tools: search_entries, get_entry, get_entries_by_date, on_this_day, find_similar, list_tags, entry_stats
-- log_weight: log daily weight measurements
 - conjugate_verb: look up Spanish verb conjugations
 - log_vocabulary: track Spanish vocabulary
 - spanish_quiz: spaced repetition reviews and stats

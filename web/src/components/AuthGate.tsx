@@ -42,6 +42,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   if (authed) {
     const onTodos = location.pathname.startsWith("/todos");
+    const onWeight = location.pathname.startsWith("/weight");
+    const onKnowledge = !onTodos && !onWeight;
     return (
       <div className="min-h-screen bg-surface-alt">
         <nav className="border-b border-border bg-surface">
@@ -49,12 +51,22 @@ export function AuthGate({ children }: { children: ReactNode }) {
             <Link
               to="/"
               className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                onTodos
-                  ? "text-text-muted hover:text-text-primary"
-                  : "bg-pine-600 dark:bg-pine-500 text-white"
+                onKnowledge
+                  ? "bg-pine-600 dark:bg-pine-500 text-white"
+                  : "text-text-muted hover:text-text-primary"
               }`}
             >
               Knowledge Base
+            </Link>
+            <Link
+              to="/weight"
+              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                onWeight
+                  ? "bg-pine-600 dark:bg-pine-500 text-white"
+                  : "text-text-muted hover:text-text-primary"
+              }`}
+            >
+              Weight
             </Link>
             <Link
               to="/todos"

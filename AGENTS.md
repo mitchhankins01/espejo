@@ -66,7 +66,6 @@ src/
     find-similar.ts — Cosine similarity from a source entry.
     list-tags.ts    — All tags with counts.
     entry-stats.ts  — Writing frequency and trends.
-    log-weight.ts   — Daily weight logging (reuses upsertDailyMetric).
     conjugate-verb.ts — Spanish verb conjugation lookup from reference DB.
     log-vocabulary.ts — Track Spanish vocabulary with SRS state per chat.
     spanish-quiz.ts — Spaced-repetition quiz: get due cards, record reviews, stats.
@@ -552,9 +551,9 @@ A Telegram chatbot with pattern-based long-term memory and an evolving personali
 
 **What it does:**
 - Conversational interface powered by Anthropic or OpenAI (configurable provider)
-- Uses a 21-tool MCP set in the Telegram agent loop (journal retrieval + Spanish learning + weight logging + Oura analytics + memory tools)
+- Uses MCP tools in the Telegram agent loop (journal retrieval + Spanish learning + Oura analytics + memory tools + todos)
 - Spanish language tutor: conducts conversations primarily in Spanish, corrects conjugation mistakes, tracks vocabulary with FSRS spaced repetition, and adapts difficulty based on real review performance
-- Logs weight via natural language ("I weighed in at 76.5 today")
+- Redirects weight logging to the web Weight page (`/weight`) instead of MCP tool calls
 - Accepts text, voice, photo, and document messages (with OCR/text extraction for media)
 - Voice messages transcribed via OpenAI Whisper
 - Optionally responds with Telegram voice notes using adaptive/fallback rules
@@ -731,7 +730,11 @@ Beyond MCP transport and Telegram webhook, the HTTP server (`src/transports/http
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/metrics` | POST | Ingest one or many daily metrics (`{ date, weight_kg }`) |
+| `/api/weights` | GET | List weight history (`from`, `to`, `limit`, `offset`) |
+| `/api/weights/:date` | PUT | Upsert daily weight (`{ weight_kg }`) |
+| `/api/weights/:date` | DELETE | Delete daily weight by date |
+| `/api/weights/patterns` | GET | Weight trend/consistency/plateau summary |
+| `/api/metrics` | POST | Legacy metrics ingestion (`{ date, weight_kg }`) |
 | `/api/activity` | GET | Recent activity logs (supports `limit`, `since`, `tool`) |
 | `/api/activity/:id` | GET | Single activity log by ID |
 | `/api/spanish/:chatId/dashboard` | GET | Aggregated Spanish learning analytics (retention, funnel, trends, assessment) |

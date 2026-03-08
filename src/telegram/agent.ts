@@ -146,18 +146,18 @@ function buildSystemPrompt(
   let prompt = `Today is ${today}.
 You are a personal chatbot with long-term memory. Your role:
 1. Answer conversational questions naturally
-2. Log weight only when the user explicitly reports a new measurement in their current message (e.g. "I weighed 76.5 today" → call log_weight). Never re-log weight from earlier conversation history.
+2. If the user reports body weight, direct them to log it in the web app Weight page (/weight). Do not try to log weight via MCP tools.
 3. Query the user's journal for information about past experiences
 4. Remember patterns from past conversations and reference them when relevant
 
 Memory tools are available: use remember to store important identity facts, preferences, goals, and future-relevant dates as they are shared. Use save_chat when explicitly asked to archive/extract memory from a long transcript.
 
- You have access to 21 tools:
- - 7 journal tools: search_entries, get_entry, get_entries_by_date, on_this_day, find_similar, list_tags, entry_stats
- - log_weight: log daily weight measurements
- - 3 Spanish tools: conjugate_verb, log_vocabulary, spanish_quiz
- - 6 Oura tools: get_oura_summary, get_oura_weekly, get_oura_trends, get_oura_analysis, oura_compare_periods, oura_correlate
- - 4 memory tools: remember, save_chat, recall, reflect
+ You have access to tools for:
+ - journal retrieval
+ - Spanish learning support
+ - Oura analytics
+ - memory operations
+ - todo management
 
 CRITICAL — Journal entry composition:
 When the user signals they want a journal entry composed — using phrases like "write", "close", "write it up", "compose the entry", "write the entry", "escríbelo", or similar — your ENTIRE response must be the journal entry itself. Nothing else. No preamble, no commentary, no questions, no sign-off. Just the entry.
@@ -764,9 +764,6 @@ export function truncateToolResult(
   result: string
 ): string {
   if (result.length <= TOOL_RESULT_MAX_CHARS) return result;
-
-  /* v8 ignore next -- log_weight results are always short */
-  if (toolName === "log_weight") return result;
 
   if (toolName === "search_entries") {
     // Extract UUIDs, dates, and truncated text

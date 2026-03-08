@@ -49,6 +49,10 @@ vi.mock("../../src/telegram/notify.js", () => ({
 const {
   mockPool,
   mockUpsertDailyMetric,
+  mockUpsertWeight,
+  mockDeleteWeight,
+  mockListWeights,
+  mockGetWeightPatterns,
   mockGetActivityLog,
   mockGetRecentActivityLogs,
   mockGetRetentionByInterval,
@@ -91,6 +95,10 @@ const {
 } = vi.hoisted(() => ({
   mockPool: {},
   mockUpsertDailyMetric: vi.fn(),
+  mockUpsertWeight: vi.fn(),
+  mockDeleteWeight: vi.fn(),
+  mockListWeights: vi.fn(),
+  mockGetWeightPatterns: vi.fn(),
   mockGetActivityLog: vi.fn(),
   mockGetRecentActivityLogs: vi.fn(),
   mockGetRetentionByInterval: vi.fn(),
@@ -142,6 +150,10 @@ vi.mock("../../src/db/embeddings.js", () => ({
 
 vi.mock("../../src/db/queries.js", () => ({
   upsertDailyMetric: mockUpsertDailyMetric,
+  upsertWeight: mockUpsertWeight,
+  deleteWeight: mockDeleteWeight,
+  listWeights: mockListWeights,
+  getWeightPatterns: mockGetWeightPatterns,
   getActivityLog: mockGetActivityLog,
   getRecentActivityLogs: mockGetRecentActivityLogs,
   getRetentionByInterval: mockGetRetentionByInterval,
@@ -195,6 +207,10 @@ describe("startHttpServer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUpsertDailyMetric.mockReset();
+    mockUpsertWeight.mockReset();
+    mockDeleteWeight.mockReset();
+    mockListWeights.mockReset();
+    mockGetWeightPatterns.mockReset();
     mockGetActivityLog.mockReset();
     mockGetRecentActivityLogs.mockReset();
     mockGetRetentionByInterval.mockReset();
@@ -635,6 +651,370 @@ describe("startHttpServer", () => {
     await metricsHandler(mockReq, mockRes);
 
     expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  it("registers /api/weights endpoint", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/weights");
+    expect(call).toBeTruthy();
+  });
+
+  it("/api/weights returns list data", async () => {
+    mockListWeights.mockResolvedValue({
+      rows: [{ date: new Date("2026-02-21"), weight_kg: 82.3, created_at: new Date("2026-02-21") }],
+      count: 1,
+    });
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/weights");
+    const handler = call![1];
+    const mockReq = {
+      headers: {},
+      query: { from: "2026-02-01", to: "2026-02-28", limit: "50", offset: "10" },
+    };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+
+    expect(mockListWeights).toHaveBeenCalledWith(mockPool, {
+      from: "2026-02-01",
+      to: "2026-02-28",
+      limit: 50,
+      offset: 10,
+    });
+    expect(mockRes.json).toHaveBeenCalledWith({
+      items: expect.any(Array),
+      total: 1,
+    });
+  });
+
+  it("/api/weights falls back to default pagination for invalid values", async () => {
+    mockListWeights.mockResolvedValue({ rows: [], count: 0 });
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/weights");
+    const handler = call![1];
+    const mockReq = { headers: {}, query: { limit: "NaN", offset: "NaN" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+
+    expect(mockListWeights).toHaveBeenCalledWith(
+      mockPool,
+      expect.objectContaining({
+        limit: 100,
+        offset: 0,
+      })
+    );
+  });
+
+  it("/api/weights validates from date", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/weights");
+    const handler = call![1];
+    const mockReq = { headers: {}, query: { from: "bad-date" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+  });
+
+  it("/api/weights validates to date", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/weights");
+    const handler = call![1];
+    const mockReq = { headers: {}, query: { to: "bad-date" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+  });
+
+  it("/api/weights returns 500 on query failure", async () => {
+    mockListWeights.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/weights");
+    const handler = call![1];
+    const mockReq = { headers: {}, query: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  it("/api/weights rejects unauthorized requests", async () => {
+    const { config } = await import("../../src/config.js");
+    (config as any).server.mcpSecret = "test-secret";
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/weights");
+    const handler = call![1];
+    const mockReq = { headers: {}, query: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(401);
+    (config as any).server.mcpSecret = "";
+  });
+
+  it("registers /api/weights/patterns endpoint", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/weights/patterns");
+    expect(call).toBeTruthy();
+  });
+
+  it("/api/weights/patterns returns aggregate metrics", async () => {
+    mockGetWeightPatterns.mockResolvedValue({
+      latest: { date: new Date("2026-02-21"), weight_kg: 82.3, created_at: new Date("2026-02-21") },
+      delta_7d: -0.2,
+      delta_30d: -1.1,
+      weekly_pace_kg: -0.25,
+      consistency: 0.8,
+      streak_days: 4,
+      volatility_14d: 0.18,
+      plateau: false,
+      range_days: 30,
+      logged_days: 24,
+    });
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/weights/patterns");
+    const handler = call![1];
+    const mockReq = { headers: {}, query: { from: "2026-02-01", to: "2026-02-21" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+
+    expect(mockGetWeightPatterns).toHaveBeenCalledWith(mockPool, {
+      from: "2026-02-01",
+      to: "2026-02-21",
+    });
+    expect(mockRes.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        latest: { date: "2026-02-21", weight_kg: 82.3 },
+        delta_30d: -1.1,
+      })
+    );
+  });
+
+  it("/api/weights/patterns returns latest: null when no data exists", async () => {
+    mockGetWeightPatterns.mockResolvedValue({
+      latest: null,
+      delta_7d: null,
+      delta_30d: null,
+      weekly_pace_kg: null,
+      consistency: null,
+      streak_days: 0,
+      volatility_14d: null,
+      plateau: false,
+      range_days: 0,
+      logged_days: 0,
+    });
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/weights/patterns");
+    const handler = call![1];
+    const mockReq = { headers: {}, query: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+
+    expect(mockRes.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        latest: null,
+        logged_days: 0,
+      })
+    );
+  });
+
+  it("/api/weights/patterns validates from date", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/weights/patterns");
+    const handler = call![1];
+    const mockReq = { headers: {}, query: { from: "bad-date" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+  });
+
+  it("/api/weights/patterns validates to date", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/weights/patterns");
+    const handler = call![1];
+    const mockReq = { headers: {}, query: { to: "bad-date" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+  });
+
+  it("/api/weights/patterns returns 500 on query failure", async () => {
+    mockGetWeightPatterns.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/weights/patterns");
+    const handler = call![1];
+    const mockReq = { headers: {}, query: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  it("/api/weights/patterns rejects unauthorized requests", async () => {
+    const { config } = await import("../../src/config.js");
+    (config as any).server.mcpSecret = "test-secret";
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/weights/patterns");
+    const handler = call![1];
+    const mockReq = { headers: {}, query: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(401);
+    (config as any).server.mcpSecret = "";
+  });
+
+  it("registers /api/weights/:date PUT endpoint", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/weights/:date");
+    expect(call).toBeTruthy();
+  });
+
+  it("/api/weights/:date upserts a weight value", async () => {
+    mockUpsertWeight.mockResolvedValue({
+      date: new Date("2026-02-21"),
+      weight_kg: 82.3,
+      created_at: new Date("2026-02-21"),
+    });
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/weights/:date");
+    const handler = call![1];
+    const mockReq = {
+      headers: {},
+      params: { date: "2026-02-21" },
+      body: { weight_kg: 82.3 },
+    };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockUpsertWeight).toHaveBeenCalledWith(mockPool, "2026-02-21", 82.3);
+    expect(mockRes.json).toHaveBeenCalledWith(
+      expect.objectContaining({ weight_kg: 82.3 })
+    );
+  });
+
+  it("/api/weights/:date PUT validates date", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/weights/:date");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { date: "bad-date" }, body: { weight_kg: 82.3 } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+  });
+
+  it("/api/weights/:date PUT validates body", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/weights/:date");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { date: "2026-02-21" }, body: { weight_kg: 0 } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+  });
+
+  it("/api/weights/:date PUT returns 500 on failure", async () => {
+    mockUpsertWeight.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/weights/:date");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { date: "2026-02-21" }, body: { weight_kg: 82.3 } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  it("/api/weights/:date PUT rejects unauthorized requests", async () => {
+    const { config } = await import("../../src/config.js");
+    (config as any).server.mcpSecret = "test-secret";
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/weights/:date");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { date: "2026-02-21" }, body: { weight_kg: 82.3 } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(401);
+    (config as any).server.mcpSecret = "";
+  });
+
+  it("registers /api/weights/:date DELETE endpoint", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.delete.mock.calls.find((c: any[]) => c[0] === "/api/weights/:date");
+    expect(call).toBeTruthy();
+  });
+
+  it("/api/weights/:date DELETE removes a measurement", async () => {
+    mockDeleteWeight.mockResolvedValue(true);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.delete.mock.calls.find((c: any[]) => c[0] === "/api/weights/:date");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { date: "2026-02-21" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockDeleteWeight).toHaveBeenCalledWith(mockPool, "2026-02-21");
+    expect(mockRes.json).toHaveBeenCalledWith({ status: "deleted" });
+  });
+
+  it("/api/weights/:date DELETE returns 404 when missing", async () => {
+    mockDeleteWeight.mockResolvedValue(false);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.delete.mock.calls.find((c: any[]) => c[0] === "/api/weights/:date");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { date: "2026-02-21" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(404);
+  });
+
+  it("/api/weights/:date DELETE validates date", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.delete.mock.calls.find((c: any[]) => c[0] === "/api/weights/:date");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { date: "bad-date" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+  });
+
+  it("/api/weights/:date DELETE returns 500 on failure", async () => {
+    mockDeleteWeight.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.delete.mock.calls.find((c: any[]) => c[0] === "/api/weights/:date");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { date: "2026-02-21" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  it("/api/weights/:date DELETE rejects unauthorized requests", async () => {
+    const { config } = await import("../../src/config.js");
+    (config as any).server.mcpSecret = "test-secret";
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.delete.mock.calls.find((c: any[]) => c[0] === "/api/weights/:date");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { date: "2026-02-21" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(401);
+    (config as any).server.mcpSecret = "";
   });
 
   it("registers /api/activity endpoint", async () => {

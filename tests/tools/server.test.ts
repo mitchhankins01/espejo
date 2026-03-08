@@ -10,7 +10,6 @@ const { mockRegisterTool, mockHandlers } = vi.hoisted(() => ({
     handleFindSimilar: vi.fn(),
     handleListTags: vi.fn(),
     handleEntryStats: vi.fn(),
-    handleLogWeight: vi.fn(),
     handleConjugateVerb: vi.fn(),
     handleLogVocabulary: vi.fn(),
     handleSpanishQuiz: vi.fn(),
@@ -47,9 +46,6 @@ vi.mock("../../src/tools/list-tags.js", () => ({
 }));
 vi.mock("../../src/tools/entry-stats.js", () => ({
   handleEntryStats: mockHandlers.handleEntryStats,
-}));
-vi.mock("../../src/tools/log-weight.js", () => ({
-  handleLogWeight: mockHandlers.handleLogWeight,
 }));
 vi.mock("../../src/tools/conjugate-verb.js", () => ({
   handleConjugateVerb: mockHandlers.handleConjugateVerb,

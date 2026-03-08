@@ -6,6 +6,7 @@ Comprehensive record of the implemented web and API additions:
 
 - `note` artifact kind support
 - Todo system (schema + API + web UI)
+- Weight tracking migration from MCP tooling to web UI + REST endpoints
 - Tag filtering in artifact list
 - Cmd/Ctrl+K quick switcher
 - Semantic links + explicit backlinks

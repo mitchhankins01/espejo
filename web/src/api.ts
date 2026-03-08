@@ -80,6 +80,25 @@ export interface Todo {
   children?: Todo[];
 }
 
+export interface WeightEntry {
+  date: string;
+  weight_kg: number;
+  created_at: string;
+}
+
+export interface WeightPatterns {
+  latest: { date: string; weight_kg: number } | null;
+  delta_7d: number | null;
+  delta_30d: number | null;
+  weekly_pace_kg: number | null;
+  consistency: number | null;
+  streak_days: number;
+  volatility_14d: number | null;
+  plateau: boolean;
+  range_days: number;
+  logged_days: number;
+}
+
 const TOKEN_KEY = "espejo_token";
 
 export function getToken(): string | null {
@@ -290,4 +309,43 @@ export function clearFocus(): Promise<void> {
 
 export function getFocus(): Promise<Todo | null> {
   return apiFetch("/api/todos/focus");
+}
+
+export function listWeights(params?: {
+  from?: string;
+  to?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ items: WeightEntry[]; total: number }> {
+  const qs = new URLSearchParams();
+  if (params?.from) qs.set("from", params.from);
+  if (params?.to) qs.set("to", params.to);
+  if (params?.limit) qs.set("limit", String(params.limit));
+  if (params?.offset) qs.set("offset", String(params.offset));
+  const query = qs.toString();
+  return apiFetch(`/api/weights${query ? `?${query}` : ""}`);
+}
+
+export function upsertWeight(date: string, weightKg: number): Promise<WeightEntry> {
+  return apiFetch(`/api/weights/${encodeURIComponent(date)}`, {
+    method: "PUT",
+    body: JSON.stringify({ weight_kg: weightKg }),
+  });
+}
+
+export function deleteWeight(date: string): Promise<{ status: "deleted" }> {
+  return apiFetch(`/api/weights/${encodeURIComponent(date)}`, {
+    method: "DELETE",
+  });
+}
+
+export function getWeightPatterns(params?: {
+  from?: string;
+  to?: string;
+}): Promise<WeightPatterns> {
+  const qs = new URLSearchParams();
+  if (params?.from) qs.set("from", params.from);
+  if (params?.to) qs.set("to", params.to);
+  const query = qs.toString();
+  return apiFetch(`/api/weights/patterns${query ? `?${query}` : ""}`);
 }

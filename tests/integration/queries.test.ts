@@ -16,6 +16,11 @@ import {
   listTags,
   getEntryStats,
   upsertDailyMetric,
+  getWeightByDate,
+  upsertWeight,
+  deleteWeight,
+  listWeights,
+  getWeightPatterns,
   getSpanishProfile,
   upsertSpanishProfile,
   getVerbConjugations,
@@ -539,6 +544,119 @@ describe("upsertDailyMetric", () => {
       ["2024-03-15"]
     );
     expect(result.rows[0].weight_kg).toBe(99.9);
+  });
+});
+
+describe("weight query APIs", () => {
+  it("upserts and fetches weight by date", async () => {
+    const saved = await upsertWeight(pool, "2026-03-01", 81.2);
+    expect(saved.weight_kg).toBe(81.2);
+
+    const fetched = await getWeightByDate(pool, "2026-03-01");
+    expect(fetched).not.toBeNull();
+    expect(fetched!.weight_kg).toBe(81.2);
+  });
+
+  it("returns null when getWeightByDate is missing", async () => {
+    const fetched = await getWeightByDate(pool, "2030-01-01");
+    expect(fetched).toBeNull();
+  });
+
+  it("deletes weight rows by date", async () => {
+    await upsertWeight(pool, "2026-03-01", 81.2);
+    const deleted = await deleteWeight(pool, "2026-03-01");
+    expect(deleted).toBe(true);
+
+    const missingDelete = await deleteWeight(pool, "2026-03-01");
+    expect(missingDelete).toBe(false);
+  });
+
+  it("lists weights with date filters and pagination", async () => {
+    await upsertWeight(pool, "2026-01-01", 82.0);
+    await upsertWeight(pool, "2026-01-02", 81.8);
+    await upsertWeight(pool, "2026-01-03", 81.7);
+
+    const all = await listWeights(pool, {
+      from: "2026-01-01",
+      to: "2026-01-31",
+      limit: 10,
+      offset: 0,
+    });
+    expect(all.count).toBe(3);
+    expect(all.rows).toHaveLength(3);
+    expect(all.rows.map((row) => row.weight_kg)).toEqual([81.7, 81.8, 82.0]);
+
+    const paged = await listWeights(pool, {
+      from: "2026-01-01",
+      to: "2026-01-31",
+      limit: 1,
+      offset: 1,
+    });
+    expect(paged.count).toBe(3);
+    expect(paged.rows).toHaveLength(1);
+    expect(paged.rows[0].weight_kg).toBe(81.8);
+  });
+
+  it("computes pattern metrics for seeded history", async () => {
+    const patterns = await getWeightPatterns(pool);
+    expect(patterns.latest).not.toBeNull();
+    expect(patterns.delta_7d).not.toBeNull();
+    expect(patterns.delta_30d).not.toBeNull();
+    expect(patterns.weekly_pace_kg).not.toBeNull();
+    expect(patterns.consistency).toBeGreaterThan(0);
+    expect(patterns.streak_days).toBeGreaterThanOrEqual(1);
+    expect(patterns.volatility_14d).not.toBeNull();
+    expect(patterns.plateau).toBe(false);
+    expect(patterns.range_days).toBeGreaterThan(0);
+    expect(patterns.logged_days).toBeGreaterThan(0);
+  });
+
+  it("returns null deltas/volatility when only one point exists in range", async () => {
+    await upsertWeight(pool, "2026-05-10", 80.0);
+    const patterns = await getWeightPatterns(pool, {
+      from: "2026-05-10",
+      to: "2026-05-10",
+    });
+    expect(patterns.latest).not.toBeNull();
+    expect(patterns.delta_7d).toBeNull();
+    expect(patterns.delta_30d).toBeNull();
+    expect(patterns.weekly_pace_kg).toBeNull();
+    expect(patterns.volatility_14d).toBeNull();
+    expect(patterns.streak_days).toBe(1);
+  });
+
+  it("detects plateau when 30-day change and volatility are both low", async () => {
+    await upsertWeight(pool, "2026-01-01", 80.0);
+    await upsertWeight(pool, "2026-01-08", 80.0);
+    await upsertWeight(pool, "2026-01-15", 80.1);
+    await upsertWeight(pool, "2026-01-22", 80.1);
+    await upsertWeight(pool, "2026-01-31", 80.1);
+
+    const patterns = await getWeightPatterns(pool, {
+      from: "2026-01-01",
+      to: "2026-01-31",
+    });
+    expect(patterns.delta_30d).not.toBeNull();
+    expect(Math.abs(patterns.delta_30d!)).toBeLessThan(0.2);
+    expect(patterns.volatility_14d).not.toBeNull();
+    expect(patterns.plateau).toBe(true);
+  });
+
+  it("returns empty summary for ranges with no data", async () => {
+    const patterns = await getWeightPatterns(pool, {
+      from: "2030-01-01",
+      to: "2030-01-31",
+    });
+    expect(patterns.latest).toBeNull();
+    expect(patterns.delta_7d).toBeNull();
+    expect(patterns.delta_30d).toBeNull();
+    expect(patterns.weekly_pace_kg).toBeNull();
+    expect(patterns.consistency).toBeNull();
+    expect(patterns.streak_days).toBe(0);
+    expect(patterns.volatility_14d).toBeNull();
+    expect(patterns.plateau).toBe(false);
+    expect(patterns.range_days).toBe(0);
+    expect(patterns.logged_days).toBe(0);
   });
 });
 
