@@ -1,6 +1,6 @@
 # Web-First Journaling — Replacing Day One
 
-> **Status: Planned (Reviewed)**
+> **Status: Implemented**
 
 ## Context
 

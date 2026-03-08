@@ -11,6 +11,7 @@ Comprehensive record of the implemented web and API additions:
 - Cmd/Ctrl+K quick switcher
 - Semantic links + explicit backlinks
 - Graph view for artifact relationships
+- Web journaling: entry CRUD, media upload, entry templates
 
 ---
 
@@ -245,7 +246,66 @@ pnpm e2e
 
 ---
 
-## 5) Production rollout note
+## 5) Web Journaling (March 2026)
+
+Full design: `specs/web-journaling.md`.
+
+### Applied migrations
+
+- `entries` additions: `source` column (`dayone`/`web`/`telegram`), `version` column for optimistic locking, index on `(source, created_at DESC)`.
+- `entry_templates` table: slug, name, description, body, default_tags, sort_order. Updated_at trigger. Seeded `morning`, `evening`, `freeform` templates.
+
+### Query layer (`src/db/queries.ts`)
+
+Added:
+- `createEntry`, `updateEntry` (optimistic lock), `deleteEntry`
+- `listEntries`, `countEntries` with shared filter builder
+- `upsertEntryTags`
+- `insertMedia`, `getMediaForEntry`, `deleteMedia`
+- `listTemplates`, `getTemplateById`, `createTemplate`, `updateTemplate`, `deleteTemplate`
+- `updateEntryEmbeddingIfVersionMatches` (stale-safe async embedding write)
+
+### HTTP endpoints (`src/transports/http.ts`)
+
+- `GET /api/entries` — Paginated list with filters (date range, tag, source, text search)
+- `POST /api/entries` — Create entry (`source='web'`, `version=1`)
+- `GET /api/entries/:uuid` — Full entry with tags, media, version, source
+- `PUT /api/entries/:uuid` — Update with `expected_version`; 409 on conflict
+- `DELETE /api/entries/:uuid` — Delete entry and dependent rows
+- `POST /api/entries/:uuid/media` — Multipart image upload → R2 → media row (multer, 10 MB cap, MIME allowlist)
+- `DELETE /api/media/:id` — Delete media row + best-effort R2 cleanup
+- `GET /api/templates` — List templates ordered by sort_order
+- `POST /api/templates` — Create template
+- `GET /api/templates/:id` — Get single template
+- `PUT /api/templates/:id` — Update template
+- `DELETE /api/templates/:id` — Delete template
+
+### Frontend additions
+
+New pages:
+- `EntryList` — Timeline grouped by day, filters for date/source/tag/text
+- `EntryCreate` — Template picker + markdown editor + tags + media upload
+- `EntryEdit` — Editor with media gallery + optimistic conflict handling
+- `TemplateList` — List/manage templates
+- `TemplateCreate` / `TemplateEdit` — Template CRUD
+
+New components:
+- `TemplatePicker` — Template selection on entry create
+- `MediaUpload` — Image upload with drag-and-drop
+- `MediaGallery` — Entry media display with delete
+
+Navigation:
+- Added `Journal` link to top nav
+- Extended quick switcher with journal shortcuts
+
+### Day One sync compatibility
+
+- Sync script upserts with explicit `source='dayone'`
+- Conflict updates target Day One-origin rows only
+
+---
+
+## 6) Production rollout note
 
 Before deploying schema-dependent changes:
 

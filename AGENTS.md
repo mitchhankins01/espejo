@@ -150,6 +150,7 @@ specs/
   web-semantic-links.md — [Implemented] Cosine similarity + wiki-link based artifact linking.
   web-graph-view.md — [Implemented] Force-directed graph visualization of artifact connections.
   web-feature-rollout.md — [Implemented] Record of completed web feature additions.
+  web-journaling.md — [Implemented] Web-first journaling (entry CRUD, media upload, templates).
   — Research:
   ltm-research.md   — [Research] Evidence-based long-term memory architecture analysis.
   — Planned / Stub specs:
@@ -164,12 +165,12 @@ packages/
   shared/           — @espejo/shared workspace. Shared TypeScript types between MCP server and web frontend.
 web/                — React + Vite frontend (@espejo/web workspace). Knowledge base CRUD editor.
   src/
-    main.tsx        — Entry point. Routes: /, /new, /:id, /todos, /todos/new, /todos/:id.
-    api.ts          — API client for artifacts (list/search/related/graph), entries picker, and todos.
+    main.tsx        — Entry point. Routes: /, /new, /:id, /todos, /todos/new, /todos/:id, /journal, /journal/new, /journal/:uuid, /templates, /templates/new, /templates/:id.
+    api.ts          — API client for artifacts (list/search/related/graph), entries (CRUD/media), templates (CRUD), and todos.
     index.css       — Tailwind CSS v4 entry + theme vars (artifact kind badges + todo status badges).
     constants/      — Shared artifact constants (kinds, labels, badge class mapping).
-    pages/          — ArtifactList/ArtifactCreate/ArtifactEdit + TodoList/TodoCreate/TodoEdit.
-    components/     — AuthGate nav, KindSelect, StatusSelect, EisenhowerMatrix, TagInput, SourcePicker, MarkdownEditor, QuickSwitcher, GraphView.
+    pages/          — ArtifactList/ArtifactCreate/ArtifactEdit + TodoList/TodoCreate/TodoEdit + EntryList/EntryCreate/EntryEdit + TemplateList/TemplateCreate/TemplateEdit.
+    components/     — AuthGate nav, KindSelect, StatusSelect, EisenhowerMatrix, TagInput, SourcePicker, MarkdownEditor, QuickSwitcher, GraphView, MediaGallery, MediaUpload, TemplatePicker.
   e2e/              — Playwright e2e tests (auth, CRUD, filters, pagination, theme).
 ```
 
@@ -544,6 +545,7 @@ pnpm telegram:setup --delete
 | `@aws-sdk/client-s3` | Cloudflare R2 media storage (S3-compatible) |
 | `better-sqlite3` | Read DayOne.sqlite during sync |
 | `@anthropic-ai/sdk` | Claude agent for Telegram chatbot conversations |
+| `multer` | Multipart form-data parsing for media upload |
 
 ## Telegram Chatbot
 
@@ -758,6 +760,18 @@ Beyond MCP transport and Telegram webhook, the HTTP server (`src/transports/http
 | `/api/todos/:id/complete` | POST | Complete todo (sets done + completed_at + clears focus) |
 | `/api/todos/focus` | POST | Set focus `{ id }` or clear `{ clear: true }` |
 | `/api/todos/:id` | DELETE | Delete todo |
+| `/api/entries` | GET | Paginated entry list with filters (`limit`, `offset`, `from`, `to`, `tag`, `source`, `q`). Returns `{ items, total }` |
+| `/api/entries` | POST | Create journal entry (`source='web'`, `version=1`) |
+| `/api/entries/:uuid` | GET | Full entry with tags, media, version, source |
+| `/api/entries/:uuid` | PUT | Update entry with optimistic locking (`expected_version`, 409 on conflict) |
+| `/api/entries/:uuid` | DELETE | Delete entry and dependent rows |
+| `/api/entries/:uuid/media` | POST | Upload image (`multipart/form-data`) → R2 → media row |
+| `/api/media/:id` | DELETE | Delete media row and best-effort R2 cleanup |
+| `/api/templates` | GET | List entry templates ordered by `sort_order` |
+| `/api/templates` | POST | Create entry template |
+| `/api/templates/:id` | GET | Get single entry template |
+| `/api/templates/:id` | PUT | Update entry template |
+| `/api/templates/:id` | DELETE | Delete entry template |
 | `/api/telegram` | POST | Telegram webhook endpoint (validated via `X-Telegram-Bot-Api-Secret-Token`) |
 
 ## Spec Planning Workflow
@@ -773,7 +787,7 @@ pnpm spec:plan <name> <description>
 Do not implement these (they're planned future work, not part of the current build):
 
 - Clustering analysis (HDBSCAN/k-means over embeddings)
-- Write/update/delete tools (this server is read-only for journal entries; artifacts have CRUD via REST API)
+- Write/update/delete MCP tools for journal entries (entries now have CRUD via REST API and web UI; artifacts have CRUD via REST API)
 - Multi-user support or auth beyond MCP SDK defaults
 - Chunking strategies (entries fit in single embeddings)
 - Auto-purge of compacted messages (function exists in `queries.ts`, not wired up)

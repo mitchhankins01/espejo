@@ -122,6 +122,10 @@ Phase 7 ─── Oura Ring ──────────────── Hou
 Phase 8 ─── Memory v2 ──────────────── 3 memory kinds (identity/preference/goal),
                                          4 MCP memory tools, hybrid recall,
                                          decoupled compaction, global soul state
+  │
+Phase 9 ─── Web Journaling ────────── Entry CRUD with optimistic locking,
+                                         media upload to R2, entry templates,
+                                         source/version tracking, async embeddings
 ```
 
 Design documents for each phase live in `specs/`:
@@ -139,6 +143,7 @@ Design documents for each phase live in `specs/`:
 | 8 | `specs/memory-v2.md` | Deployed |
 | — | `specs/ltm-research.md` | Research |
 | — | `specs/web-app.spec.md` | Deployed |
+| 9 | `specs/web-journaling.md` | Deployed |
 | — | `specs/aws-sst-migration-plan.md` | Planned |
 
 ## Why This Exists
@@ -227,6 +232,7 @@ Newly added/updated features:
 - Global quick switcher (`Cmd+K` / `Ctrl+K`) with fuzzy title navigation
 - Semantic links + backlinks (`[[Title]]` detection + `artifact_links` table + related panel)
 - Graph view (semantic + explicit + shared-tag + shared-source edges)
+- Web journaling: entry CRUD with optimistic locking, media upload (R2), entry templates, async embeddings
 
 Primary docs:
 - `specs/web-feature-rollout.md` (full implementation and verification checklist)
@@ -331,6 +337,12 @@ Authenticated via `MCP_SECRET` bearer token:
 | `/api/content/search` | GET | Unified search across entries + artifacts |
 | `/api/todos` | GET/POST | List todos or create todo |
 | `/api/todos/:id` | GET/PUT/DELETE | Get/update/delete todo |
+| `/api/entries` | GET/POST | List entries (with filters) or create entry |
+| `/api/entries/:uuid` | GET/PUT/DELETE | Get/update/delete entry |
+| `/api/entries/:uuid/media` | POST | Upload image media to entry |
+| `/api/media/:id` | DELETE | Delete media |
+| `/api/templates` | GET/POST | List or create entry templates |
+| `/api/templates/:id` | GET/PUT/DELETE | Get/update/delete template |
 
 ## Development
 

@@ -15,9 +15,11 @@ Implemented feature set:
 - Graph view (semantic, explicit, shared-tag, shared-source edges)
 - Weight tracking UI (`/weight`): quick log, editable history, trend chart, pattern cards
 - Todo CRUD with statuses (`active`, `waiting`, `done`)
-- Top nav inside auth gate: `Knowledge Base`, `Weight`, and `Todos`
+- Journal entry CRUD with optimistic locking, `source`/`version` columns, media upload (R2), async embeddings
+- Entry templates with slug, default tags, sort order
+- Top nav inside auth gate: `Knowledge Base`, `Journal`, `Weight`, and `Todos`
 
-For implementation rollout details, see `specs/web-feature-rollout.md`.
+For implementation rollout details, see `specs/web-feature-rollout.md` and `specs/web-journaling.md`.
 
 ## Stack
 
@@ -28,6 +30,7 @@ For implementation rollout details, see `specs/web-feature-rollout.md`.
 | Editor | MDXEditor | Markdown editing |
 | Styling | Tailwind CSS v4 | Theming and layout |
 | Graph | react-force-graph-2d | Force-directed artifact graph |
+| Upload | multer | Multipart media upload |
 | Testing | Playwright | End-to-end coverage |
 
 ## Routes
@@ -41,6 +44,12 @@ For implementation rollout details, see `specs/web-feature-rollout.md`.
 | `/todos` | `TodoList` | Todo list with status filters + pagination |
 | `/todos/new` | `TodoCreate` | Create todo |
 | `/todos/:id` | `TodoEdit` | Edit/delete todo |
+| `/journal` | `EntryList` | Entry timeline grouped by day with filters |
+| `/journal/new` | `EntryCreate` | Create entry with template picker + media upload |
+| `/journal/:uuid` | `EntryEdit` | Edit entry with media gallery + conflict handling |
+| `/templates` | `TemplateList` | List/manage entry templates |
+| `/templates/new` | `TemplateCreate` | Create entry template |
+| `/templates/:id` | `TemplateEdit` | Edit entry template |
 
 ## REST contract used by the web app
 
@@ -68,6 +77,18 @@ All endpoints require bearer token auth (`MCP_SECRET`) from the auth gate.
 | `/api/todos` | POST | `{ title, status?, next_step?, body?, tags? }` | `Todo` |
 | `/api/todos/:id` | PUT | `{ title?, status?, next_step?, body?, tags? }` | `Todo` |
 | `/api/todos/:id` | DELETE | — | `{ status: "deleted" }` |
+| `/api/entries` | GET | `?limit&offset&from&to&tag&source&q` | `{ items: Entry[], total: number }` |
+| `/api/entries` | POST | `{ text, tags?, timezone?, city?, ... }` | `Entry` |
+| `/api/entries/:uuid` | GET | — | `Entry` (with tags, media, version, source) |
+| `/api/entries/:uuid` | PUT | `{ text?, tags?, expected_version, ... }` | `Entry` (`409` on conflict) |
+| `/api/entries/:uuid` | DELETE | — | `{ status: "deleted" }` |
+| `/api/entries/:uuid/media` | POST | `multipart/form-data` image | `Media` |
+| `/api/media/:id` | DELETE | — | `{ status: "deleted" }` |
+| `/api/templates` | GET | — | `Template[]` |
+| `/api/templates` | POST | `{ slug, name, body?, description?, default_tags?, sort_order? }` | `Template` |
+| `/api/templates/:id` | GET | — | `Template` |
+| `/api/templates/:id` | PUT | `{ name?, body?, description?, default_tags?, sort_order? }` | `Template` |
+| `/api/templates/:id` | DELETE | — | `{ status: "deleted" }` |
 
 ## UI behavior
 
@@ -93,6 +114,18 @@ All endpoints require bearer token auth (`MCP_SECRET`) from the auth gate.
 - Status lifecycle: `active`, `waiting`, `done`.
 - List supports status filtering and pagination with URL page params.
 - Create/edit pages follow artifact-style manual save pattern.
+
+### Journal entries
+- Entry list: timeline grouped by day with filters (date range, source, tag, text search).
+- Entry create: template picker pre-fills body/tags, markdown editor, media upload.
+- Entry edit: same editor with media gallery, optimistic conflict handling (409 on stale version).
+- Source column tracks origin (`dayone`, `web`, `telegram`).
+- Async embedding generation on create/update, version-guarded to prevent stale overwrites.
+
+### Templates
+- Entry templates with slug, name, description, body, default tags, sort order.
+- Template CRUD pages follow artifact-style manual save pattern.
+- Template picker on entry create page.
 
 ### Weight
 - Quick log card upserts weight for a selected date.
