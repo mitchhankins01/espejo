@@ -158,13 +158,19 @@ body {
 }
 
 .mdx-editor-wrapper .mdxeditor-root-contenteditable {
-  padding: 1rem;
+  padding: 0.5rem;
   min-height: 250px;
   font-size: 1rem;
   line-height: 1.6;
   color: var(--color-text-primary) !important;
   display: flex;
   flex-direction: column;
+}
+
+@media (min-width: 640px) {
+  .mdx-editor-wrapper .mdxeditor-root-contenteditable {
+    padding: 1rem;
+  }
 }
 
 .mdx-editor-wrapper .mdxeditor-root-contenteditable > div {
