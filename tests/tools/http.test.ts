@@ -30,6 +30,7 @@ vi.mock("../../src/config.js", () => ({
     server: { port: 3000, mcpSecret: "", oauthClientId: "", oauthClientSecret: "" },
     telegram: { botToken: "", secretToken: "", allowedChatId: "" },
     oura: { accessToken: "" },
+    checkins: { enabled: false, intervalMinutes: 15, ignoreThreshold: 3 },
   },
 }));
 
@@ -40,6 +41,10 @@ vi.mock("../../src/transports/oauth.js", () => ({
 
 vi.mock("../../src/oura/sync.js", () => ({
   startOuraSyncTimer: vi.fn(),
+}));
+
+vi.mock("../../src/checkins/scheduler.js", () => ({
+  startCheckinTimer: vi.fn(),
 }));
 
 vi.mock("../../src/telegram/notify.js", () => ({
@@ -92,6 +97,11 @@ const {
   mockSetTodoFocus,
   mockGetFocusTodo,
   mockGenerateEmbedding,
+  mockUpsertUserSettings,
+  mockListObservableTables,
+  mockListObservableTableRows,
+  mockListRecentDbChanges,
+  mockIsObservableDbTableName,
 } = vi.hoisted(() => ({
   mockPool: {},
   mockUpsertDailyMetric: vi.fn(),
@@ -138,6 +148,11 @@ const {
   mockSetTodoFocus: vi.fn(),
   mockGetFocusTodo: vi.fn(),
   mockGenerateEmbedding: vi.fn(),
+  mockUpsertUserSettings: vi.fn(),
+  mockListObservableTables: vi.fn(),
+  mockListObservableTableRows: vi.fn(),
+  mockListRecentDbChanges: vi.fn(),
+  mockIsObservableDbTableName: vi.fn(),
 }));
 
 vi.mock("../../src/db/client.js", () => ({
@@ -192,6 +207,11 @@ vi.mock("../../src/db/queries.js", () => ({
   completeTodo: mockCompleteTodo,
   setTodoFocus: mockSetTodoFocus,
   getFocusTodo: mockGetFocusTodo,
+  upsertUserSettings: mockUpsertUserSettings,
+  listObservableTables: mockListObservableTables,
+  listObservableTableRows: mockListObservableTableRows,
+  listRecentDbChanges: mockListRecentDbChanges,
+  isObservableDbTableName: mockIsObservableDbTableName,
 }));
 
 const mockHandleRequest = vi.fn();
@@ -239,6 +259,17 @@ describe("startHttpServer", () => {
     mockCompleteTodo.mockReset();
     mockSetTodoFocus.mockReset();
     mockGetFocusTodo.mockReset();
+    mockUpsertUserSettings.mockReset();
+    mockListObservableTables.mockReset();
+    mockListObservableTableRows.mockReset();
+    mockListRecentDbChanges.mockReset();
+    mockIsObservableDbTableName.mockReset();
+    mockIsObservableDbTableName.mockImplementation(
+      (table: string) =>
+        table === "todos" ||
+        table === "activity_logs" ||
+        table === "knowledge_artifacts"
+    );
     mockServer.on.mockReset();
     // Restore mock implementations after clearAllMocks
     mockApp.set.mockReturnThis();
@@ -1342,6 +1373,236 @@ describe("startHttpServer", () => {
 
     expect(mockRes.sendStatus).toHaveBeenCalledWith(204);
     expect(mockNext).not.toHaveBeenCalled();
+  });
+
+  // =========================================================================
+  // DB observability endpoints
+  // =========================================================================
+
+  it("registers /api/db/tables endpoint", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/db/tables");
+    expect(call).toBeTruthy();
+  });
+
+  it("/api/db/tables returns metadata", async () => {
+    const rows = [
+      {
+        name: "todos",
+        row_count: 2,
+        last_changed_at: new Date("2026-03-01T12:00:00Z"),
+        default_sort_column: "updated_at",
+      },
+    ];
+    mockListObservableTables.mockResolvedValue(rows);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/db/tables");
+    const handler = call![1];
+    const mockReq = { headers: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+
+    expect(mockListObservableTables).toHaveBeenCalledWith(mockPool);
+    expect(mockRes.json).toHaveBeenCalledWith(rows);
+  });
+
+  it("/api/db/tables rejects unauthorized requests", async () => {
+    const { config } = await import("../../src/config.js");
+    (config as any).server.mcpSecret = "test-secret";
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/db/tables");
+    const handler = call![1];
+    const mockReq = { headers: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+
+    expect(mockRes.status).toHaveBeenCalledWith(401);
+    expect(mockListObservableTables).not.toHaveBeenCalled();
+    (config as any).server.mcpSecret = "";
+  });
+
+  it("/api/db/tables returns 500 on query failure", async () => {
+    mockListObservableTables.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/db/tables");
+    const handler = call![1];
+    const mockReq = { headers: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  it("/api/db/tables/:table/rows validates table allowlist", async () => {
+    mockIsObservableDbTableName.mockReturnValue(false);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find(
+      (c: any[]) => c[0] === "/api/db/tables/:table/rows"
+    );
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { table: "bad_table" }, query: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+    expect(mockListObservableTableRows).not.toHaveBeenCalled();
+  });
+
+  it("/api/db/tables/:table/rows validates timestamp and order params", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find(
+      (c: any[]) => c[0] === "/api/db/tables/:table/rows"
+    );
+    const handler = call![1];
+
+    const badFromReq = {
+      headers: {},
+      params: { table: "todos" },
+      query: { from: "2026-03-01" },
+    };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+    await handler(badFromReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+
+    const badOrderReq = {
+      headers: {},
+      params: { table: "todos" },
+      query: { order: "sideways" },
+    };
+    await handler(badOrderReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+  });
+
+  it("/api/db/tables/:table/rows returns row data", async () => {
+    mockListObservableTableRows.mockResolvedValue({
+      items: [{ id: "todo-1", title: "Write tests" }],
+      total: 1,
+      columns: [{ name: "id", type: "uuid", hidden: false }],
+    });
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find(
+      (c: any[]) => c[0] === "/api/db/tables/:table/rows"
+    );
+    const handler = call![1];
+    const mockReq = {
+      headers: {},
+      params: { table: "todos" },
+      query: {
+        limit: "25",
+        offset: "10",
+        sort: "updated_at",
+        order: "asc",
+        q: "write",
+      },
+    };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+
+    expect(mockListObservableTableRows).toHaveBeenCalledWith(mockPool, "todos", {
+      limit: 25,
+      offset: 10,
+      sort: "updated_at",
+      order: "asc",
+      q: "write",
+      from: undefined,
+      to: undefined,
+    });
+    expect(mockRes.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        total: 1,
+      })
+    );
+  });
+
+  it("/api/db/tables/:table/rows maps unsupported errors to 400", async () => {
+    mockListObservableTableRows.mockRejectedValue(
+      new Error("Unsupported sort column")
+    );
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find(
+      (c: any[]) => c[0] === "/api/db/tables/:table/rows"
+    );
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { table: "todos" }, query: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+  });
+
+  it("/api/db/changes validates filters and returns changes", async () => {
+    mockListRecentDbChanges.mockResolvedValue([
+      {
+        changed_at: new Date("2026-03-01T12:00:00Z"),
+        table: "activity_logs",
+        operation: "tool_call",
+        row_id: "1",
+        summary: "Tool calls: search_entries",
+      },
+    ]);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/db/changes");
+    const handler = call![1];
+    const mockReq = {
+      headers: {},
+      query: {
+        table: "activity_logs",
+        operation: "tool_call",
+        limit: "12",
+        since: "2026-03-01T00:00:00.000Z",
+      },
+    };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+
+    expect(mockListRecentDbChanges).toHaveBeenCalledWith(mockPool, {
+      limit: 12,
+      since: new Date("2026-03-01T00:00:00.000Z"),
+      table: "activity_logs",
+      operation: "tool_call",
+    });
+    expect(mockRes.json).toHaveBeenCalledWith(expect.any(Array));
+  });
+
+  it("/api/db/changes validates table, operation, and since", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/db/changes");
+    const handler = call![1];
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    mockIsObservableDbTableName.mockReturnValue(false);
+    await handler({ headers: {}, query: { table: "bad_table" } }, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+
+    await handler({ headers: {}, query: { operation: "wrong" } }, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+
+    await handler({ headers: {}, query: { since: "not-timestamp" } }, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+  });
+
+  it("/api/db/changes returns 500 on query failure", async () => {
+    mockListRecentDbChanges.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/db/changes");
+    const handler = call![1];
+    const mockReq = { headers: {}, query: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
   });
 
   // =========================================================================
@@ -2639,6 +2900,79 @@ describe("startHttpServer", () => {
     const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/todos/focus");
     const handler = call![1];
     const mockReq = { headers: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  // =========================================================================
+  // POST /api/settings/timezone
+  // =========================================================================
+
+  it("POST /api/settings/timezone updates timezone", async () => {
+    mockUpsertUserSettings.mockResolvedValue({ timezone: "America/New_York" });
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.post.mock.calls.find(
+      (c: any[]) => c[0] === "/api/settings/timezone"
+    );
+    const handler = call![1];
+    const mockReq = {
+      headers: {},
+      body: { timezone: "America/New_York" },
+    };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockUpsertUserSettings).toHaveBeenCalledWith(
+      mockPool,
+      "0",
+      { timezone: "America/New_York" }
+    );
+    expect(mockRes.json).toHaveBeenCalledWith({
+      status: "ok",
+      timezone: "America/New_York",
+    });
+  });
+
+  it("POST /api/settings/timezone rejects missing timezone", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.post.mock.calls.find(
+      (c: any[]) => c[0] === "/api/settings/timezone"
+    );
+    const handler = call![1];
+    const mockReq = { headers: {}, body: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+  });
+
+  it("POST /api/settings/timezone rejects invalid timezone", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.post.mock.calls.find(
+      (c: any[]) => c[0] === "/api/settings/timezone"
+    );
+    const handler = call![1];
+    const mockReq = { headers: {}, body: { timezone: "Invalid/Zone" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+  });
+
+  it("POST /api/settings/timezone returns 500 on error", async () => {
+    mockUpsertUserSettings.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.post.mock.calls.find(
+      (c: any[]) => c[0] === "/api/settings/timezone"
+    );
+    const handler = call![1];
+    const mockReq = { headers: {}, body: { timezone: "Europe/Madrid" } };
     const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
 
     await handler(mockReq, mockRes);
