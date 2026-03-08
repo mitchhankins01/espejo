@@ -42,7 +42,8 @@
     "telegram:setup": "tsx scripts/telegram-setup.ts",
     "deploy:smoke": "tsx scripts/deploy-smoke.ts",
     "check:all": "pnpm -w check && pnpm --filter @espejo/web check",
-    "sync:oura": "tsx scripts/sync-oura.ts"
+    "sync:oura": "tsx scripts/sync-oura.ts",
+    "spec:plan": "bash scripts/spec-plan.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
