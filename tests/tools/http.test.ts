@@ -133,6 +133,7 @@ const {
   mockUpdateTemplate,
   mockDeleteTemplate,
   mockUpdateEntryEmbeddingIfVersionMatches,
+  mockListTags,
 } = vi.hoisted(() => ({
   mockPool: {},
   mockUpsertDailyMetric: vi.fn(),
@@ -198,6 +199,7 @@ const {
   mockUpdateTemplate: vi.fn(),
   mockDeleteTemplate: vi.fn(),
   mockUpdateEntryEmbeddingIfVersionMatches: vi.fn(),
+  mockListTags: vi.fn(),
 }));
 
 vi.mock("../../src/db/client.js", () => ({
@@ -271,6 +273,7 @@ vi.mock("../../src/db/queries.js", () => ({
   updateTemplate: mockUpdateTemplate,
   deleteTemplate: mockDeleteTemplate,
   updateEntryEmbeddingIfVersionMatches: mockUpdateEntryEmbeddingIfVersionMatches,
+  listTags: mockListTags,
 }));
 
 const mockHandleRequest = vi.fn();
@@ -3041,6 +3044,35 @@ describe("startHttpServer", () => {
   // ====================================================================
   // Journal Entries CRUD
   // ====================================================================
+
+  it("GET /api/entries/tags returns tag list", async () => {
+    mockListTags.mockResolvedValue([{ name: "morning", count: 5 }]);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/entries/tags");
+    const handler = call![1];
+
+    const mockReq = { headers: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockListTags).toHaveBeenCalledWith(mockPool);
+    expect(mockRes.json).toHaveBeenCalledWith([{ name: "morning", count: 5 }]);
+  });
+
+  it("GET /api/entries/tags returns 500 on error", async () => {
+    mockListTags.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/entries/tags");
+    const handler = call![1];
+
+    const mockReq = { headers: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
 
   it("GET /api/entries returns paginated list", async () => {
     const items = [{ uuid: "e1", text: "hello", source: "web", version: 1, tags: [] }];

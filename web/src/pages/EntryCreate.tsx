@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   createEntry,
   getTemplate,
+  listEntryTags,
   uploadEntryMedia,
   type EntryTemplate,
 } from "../api.ts";
@@ -25,6 +26,20 @@ function localDateTimeToIso(value: string): string | undefined {
   return date.toISOString();
 }
 
+function formatLocalDateTime(value: string): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, {
+    weekday: "short",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 export function EntryCreate() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -35,6 +50,7 @@ export function EntryCreate() {
   );
   const [text, setText] = useState("");
   const [tags, setTags] = useState<string[]>([]);
+  const [tagSuggestions, setTagSuggestions] = useState<string[]>([]);
   const [timezone, setTimezone] = useState(
     Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
   );
@@ -43,6 +59,8 @@ export function EntryCreate() {
   const [progressByKey, setProgressByKey] = useState<Record<string, number>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [editingDate, setEditingDate] = useState(false);
+  const [editingTimezone, setEditingTimezone] = useState(false);
 
   useEffect(() => {
     if (!templateFromQuery) return;
@@ -56,6 +74,12 @@ export function EntryCreate() {
         setSelectedTemplateId(null);
       });
   }, [templateFromQuery]);
+
+  useEffect(() => {
+    listEntryTags()
+      .then((result) => setTagSuggestions(result.map((t) => t.name)))
+      .catch(() => {});
+  }, []);
 
   function applyTemplate(template: EntryTemplate | null): void {
     setSelectedTemplateId(template?.id ?? null);
@@ -97,7 +121,7 @@ export function EntryCreate() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8">
+    <div className="max-w-3xl mx-auto px-2 sm:px-4 py-8">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold text-text-primary">New Journal Entry</h1>
         <Link
@@ -120,45 +144,51 @@ export function EntryCreate() {
           <TemplatePicker selectedId={selectedTemplateId} onSelect={applyTemplate} />
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label
-              htmlFor="entry-create-date"
-              className="block text-sm text-text-muted mb-1.5 font-medium"
-            >
-              Date and time
-            </label>
+        <MarkdownEditor
+          value={text}
+          onChange={setText}
+          placeholder="Write what happened, what you felt, what you noticed..."
+        />
+
+        <div className="flex items-center gap-2 text-sm text-text-muted">
+          {editingDate ? (
             <input
               id="entry-create-date"
               type="datetime-local"
               value={createdAtLocal}
               onChange={(event) => setCreatedAtLocal(event.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-text-primary"
+              onBlur={() => setEditingDate(false)}
+              autoFocus
+              className="px-2 py-1 rounded border border-border bg-surface text-text-primary text-sm"
             />
-          </div>
-          <div>
-            <label
-              htmlFor="entry-create-timezone"
-              className="block text-sm text-text-muted mb-1.5 font-medium"
+          ) : (
+            <button
+              type="button"
+              onClick={() => setEditingDate(true)}
+              className="hover:text-text-primary transition-colors"
             >
-              Timezone
-            </label>
+              {formatLocalDateTime(createdAtLocal) || "Set date"}
+            </button>
+          )}
+          <span className="text-text-muted/40">|</span>
+          {editingTimezone ? (
             <input
               id="entry-create-timezone"
               value={timezone}
               onChange={(event) => setTimezone(event.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-text-primary"
+              onBlur={() => setEditingTimezone(false)}
+              autoFocus
+              className="px-2 py-1 rounded border border-border bg-surface text-text-primary text-sm w-48"
             />
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-sm text-text-muted mb-1.5 font-medium">Entry</label>
-          <MarkdownEditor
-            value={text}
-            onChange={setText}
-            placeholder="Write what happened, what you felt, what you noticed..."
-          />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setEditingTimezone(true)}
+              className="hover:text-text-primary transition-colors"
+            >
+              {timezone || "Set timezone"}
+            </button>
+          )}
         </div>
 
         <div>
@@ -168,7 +198,7 @@ export function EntryCreate() {
           >
             Tags
           </label>
-          <TagInput id="entry-create-tags" tags={tags} onChange={setTags} />
+          <TagInput id="entry-create-tags" tags={tags} onChange={setTags} suggestions={tagSuggestions} />
         </div>
 
         <div>

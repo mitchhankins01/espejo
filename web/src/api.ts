@@ -326,6 +326,10 @@ export function searchEntries(q: string): Promise<EntrySearchResult[]> {
   return apiFetch(`/api/entries/search?q=${encodeURIComponent(q)}`);
 }
 
+export function listEntryTags(): Promise<{ name: string; count: number }[]> {
+  return apiFetch("/api/entries/tags");
+}
+
 export function listEntries(params?: {
   limit?: number;
   offset?: number;

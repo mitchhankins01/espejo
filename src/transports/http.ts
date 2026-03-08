@@ -73,6 +73,7 @@ import {
   updateTemplate,
   deleteTemplate,
   updateEntryEmbeddingIfVersionMatches,
+  listTags,
 } from "../db/queries.js";
 import { generateEmbedding } from "../db/embeddings.js";
 import {
@@ -1178,6 +1179,20 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
   // ====================================================================
   // Journal Entries CRUD
   // ====================================================================
+
+  // GET /api/entries/tags — list tags used on entries with counts
+  app.get("/api/entries/tags", async (req, res) => {
+    /* v8 ignore next */
+    if (!requireBearerAuth(req, res)) return;
+
+    try {
+      const tags = await listTags(pool);
+      res.json(tags);
+    } catch (err) {
+      console.error("Entry tags error:", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
 
   // GET /api/entries — list entries with filters
   app.get("/api/entries", async (req, res) => {

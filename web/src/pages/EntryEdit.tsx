@@ -4,6 +4,7 @@ import {
   deleteEntry,
   deleteEntryMedia,
   getEntry,
+  listEntryTags,
   updateEntry,
   uploadEntryMedia,
   type Entry,
@@ -26,6 +27,20 @@ function localDateTimeToIso(value: string): string | undefined {
   return date.toISOString();
 }
 
+function formatLocalDateTime(value: string): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, {
+    weekday: "short",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 export function EntryEdit() {
   const { uuid } = useParams<{ uuid: string }>();
   const navigate = useNavigate();
@@ -33,11 +48,14 @@ export function EntryEdit() {
   const [entry, setEntry] = useState<Entry | null>(null);
   const [text, setText] = useState("");
   const [tags, setTags] = useState<string[]>([]);
+  const [tagSuggestions, setTagSuggestions] = useState<string[]>([]);
   const [timezone, setTimezone] = useState("");
   const [createdAtLocal, setCreatedAtLocal] = useState("");
   const [version, setVersion] = useState(0);
   const [newFiles, setNewFiles] = useState<File[]>([]);
   const [progressByKey, setProgressByKey] = useState<Record<string, number>>({});
+  const [editingDate, setEditingDate] = useState(false);
+  const [editingTimezone, setEditingTimezone] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -69,6 +87,12 @@ export function EntryEdit() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    listEntryTags()
+      .then((result) => setTagSuggestions(result.map((t) => t.name)))
+      .catch(() => {});
+  }, []);
 
   const dayOneMetadata = useMemo(() => {
     if (!entry || entry.source !== "dayone") return null;
@@ -157,7 +181,7 @@ export function EntryEdit() {
 
   if (loading) {
     return (
-      <div className="max-w-3xl mx-auto px-4 py-8">
+      <div className="max-w-3xl mx-auto px-2 sm:px-4 py-8">
         <div className="text-center py-16 text-text-muted">Loading...</div>
       </div>
     );
@@ -165,7 +189,7 @@ export function EntryEdit() {
 
   if (!entry) {
     return (
-      <div className="max-w-3xl mx-auto px-4 py-8">
+      <div className="max-w-3xl mx-auto px-2 sm:px-4 py-8">
         <div className="text-red-600 dark:text-red-400 text-sm bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg px-4 py-3 mb-4">
           {error || "Entry not found."}
         </div>
@@ -177,7 +201,7 @@ export function EntryEdit() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8">
+    <div className="max-w-3xl mx-auto px-2 sm:px-4 py-8">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <Link
@@ -224,48 +248,54 @@ export function EntryEdit() {
       )}
 
       <div className="space-y-5">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label
-              htmlFor="entry-edit-date"
-              className="block text-sm text-text-muted mb-1.5 font-medium"
-            >
-              Date and time
-            </label>
+        <MarkdownEditor value={text} onChange={setText} />
+
+        <div className="flex items-center gap-2 text-sm text-text-muted">
+          {editingDate ? (
             <input
               id="entry-edit-date"
               type="datetime-local"
               value={createdAtLocal}
               onChange={(event) => setCreatedAtLocal(event.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-text-primary"
+              onBlur={() => setEditingDate(false)}
+              autoFocus
+              className="px-2 py-1 rounded border border-border bg-surface text-text-primary text-sm"
             />
-          </div>
-          <div>
-            <label
-              htmlFor="entry-edit-timezone"
-              className="block text-sm text-text-muted mb-1.5 font-medium"
+          ) : (
+            <button
+              type="button"
+              onClick={() => setEditingDate(true)}
+              className="hover:text-text-primary transition-colors"
             >
-              Timezone
-            </label>
+              {formatLocalDateTime(createdAtLocal) || "Set date"}
+            </button>
+          )}
+          <span className="text-text-muted/40">|</span>
+          {editingTimezone ? (
             <input
               id="entry-edit-timezone"
               value={timezone}
               onChange={(event) => setTimezone(event.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-text-primary"
+              onBlur={() => setEditingTimezone(false)}
+              autoFocus
+              className="px-2 py-1 rounded border border-border bg-surface text-text-primary text-sm w-48"
             />
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-sm text-text-muted mb-1.5 font-medium">Entry</label>
-          <MarkdownEditor value={text} onChange={setText} />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setEditingTimezone(true)}
+              className="hover:text-text-primary transition-colors"
+            >
+              {timezone || "Set timezone"}
+            </button>
+          )}
         </div>
 
         <div>
           <label htmlFor="entry-edit-tags" className="block text-sm text-text-muted mb-1.5 font-medium">
             Tags
           </label>
-          <TagInput id="entry-edit-tags" tags={tags} onChange={setTags} />
+          <TagInput id="entry-edit-tags" tags={tags} onChange={setTags} suggestions={tagSuggestions} />
         </div>
 
         {dayOneMetadata && (
