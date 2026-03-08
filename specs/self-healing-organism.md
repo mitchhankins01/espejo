@@ -26,7 +26,7 @@ soul_quality_signals (existing)
         │
         ├──▶ soul_state_history     (audit trail: before/after + reason)
         ├──▶ pulse_checks           (diagnosis log: what was detected)
-        └──▶ chat_soul_state        (updated soul state)
+        └──▶ soul_state             (updated global soul state)
 ```
 
 ## Diagnosis Model

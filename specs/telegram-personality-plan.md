@@ -1,6 +1,6 @@
 # Telegram Soul Plan (One Personality That Evolves)
 
-> **Status: Implemented** — Soul state table, evolution during compaction, quality signals, and prompt injection. See `src/telegram/soul.ts`.
+> **Status: Implemented (v1), then updated by Memory v2** — Soul state now lives in global `soul_state` and memory extraction is decoupled from compaction. See `specs/memory-v2.md` and `src/telegram/soul.ts`.
 
 ## Problem
 The bot is useful but feels generic. It needs one stable identity that grows with you over time, not a menu of styles.
@@ -43,8 +43,8 @@ Split personality into:
 
 The response prompt always includes both.
 
-## 2) Soul State Model (Per Chat)
-Add one persistent record per `chat_id`, for example `chat_soul_state`:
+## 2) Soul State Model (Global Singleton in v2)
+Use one persistent global record in `soul_state`:
 - `identity_summary` (short paragraph of who the assistant is becoming in this relationship)
 - `relational_commitments` (how it should show up for you)
 - `tone_signature` (style cues that remain stable)
@@ -110,14 +110,14 @@ Success criteria:
 
 ## Phase 2: Persistent Soul State
 Changes:
-- Add migration for `chat_soul_state`.
+- Add migration for `soul_state` singleton.
 - Add DB queries:
-  - `getSoulState(chatId)`
-  - `upsertSoulState(chatId, state)`
+  - `getSoulState()`
+  - `upsertSoulState(state)`
 - Load state at reply time and inject into prompt.
 
 Tests:
-- read/write persistence by chat id;
+- read/write persistence of the global singleton;
 - state survives restarts and deploys.
 
 Success criteria:

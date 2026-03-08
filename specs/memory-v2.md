@@ -1,6 +1,6 @@
 # Memory v2 — Memory Architecture & Shared Personality
 
-## Status: Spec (ready for implementation)
+## Status: Implemented
 
 ## What
 
@@ -115,7 +115,7 @@ Params:
   kind?: string         — Filter to specific kind
 ```
 
-- `consolidate`: Find clusters of similar active patterns (cosine > 0.78), send to LLM for merge proposals
+- `consolidate`: Find clusters of similar active patterns (cosine > 0.78), reinforce keeper patterns, add aliases/relations, and supersede overlaps
 - `review_stale`: Return patterns not seen in 90+ days
 - `stats`: Pattern counts by kind/status, avg confidence, total active
 
@@ -157,7 +157,7 @@ Fewer, higher-quality patterns make lower thresholds safer.
 
 ### Hybrid retrieval
 
-The `patterns` table already has a `text_search` tsvector column with GIN index — currently unused. Add text-based retrieval path and merge with RRF (k=60), mirroring how `search_entries` works:
+The `patterns` table uses a hybrid path: semantic retrieval + text retrieval merged with RRF (k=60), mirroring how `search_entries` works:
 
 ```typescript
 const [semantic, textual] = await Promise.all([
@@ -193,7 +193,7 @@ CREATE TABLE IF NOT EXISTS soul_state (
 
 ### Periodic background work
 - Wired into hourly Oura sync timer
-- Find clusters of similar active patterns (cosine > 0.78 within same kind), LLM merge, supersede originals
+- Find clusters of similar active patterns (cosine > 0.78 within same kind), reinforce + alias + supersede
 - Active pattern cap: 40 max, deprecate lowest-scored excess
 - Prune expired patterns (based on `expires_at`)
 
@@ -203,7 +203,7 @@ Background workers send summaries via Telegram when they act on memory:
 - "Deprecated 2 stale patterns (not seen in 90+ days): ..."
 - "Active pattern count: 28/40"
 
-## Implementation Phases
+## Implementation Phases (Delivered)
 
 | Phase | What | Schema changes |
 |-------|------|---------------|
@@ -214,11 +214,11 @@ Background workers send summaries via Telegram when they act on memory:
 | 5 | Shared soul state — global singleton | New `soul_state` table |
 | 6 | Automated consolidation + Telegram notifications | None |
 
-Each phase is independently deployable.
+All phases shipped and deployed.
 
-## Files to Create/Modify
+## Files Added/Modified
 
-**New files:**
+**Added files:**
 - `src/tools/remember.ts` — MCP remember tool
 - `src/tools/save-chat.ts` — MCP save_chat tool
 - `src/tools/recall.ts` — MCP recall tool

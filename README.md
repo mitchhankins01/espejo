@@ -29,7 +29,7 @@ A personal AI journal system built on PostgreSQL + pgvector. Started as an MCP s
 │   │                        Core Services                                │   │
 │   │                             │                                       │   │
 │   │   ┌─────────────────────────┼──────────────────────────────────┐    │   │
-│   │   │              17 MCP Tools (spec-driven)                    │    │   │
+│   │   │              30 MCP Tools (spec-driven)                    │    │   │
 │   │   │                                                            │    │   │
 │   │   │  Journal:  search · get_entry · get_entries_by_date        │    │   │
 │   │   │           on_this_day · find_similar · list_tags            │    │   │
@@ -41,12 +41,20 @@ A personal AI journal system built on PostgreSQL + pgvector. Started as an MCP s
 │   │   │           oura_correlate                                   │    │   │
 │   │   │                                                            │    │   │
 │   │   │  Spanish:  conjugate_verb · log_vocabulary · spanish_quiz  │    │   │
+│   │   │                                                            │    │   │
+│   │   │  Memory:   remember · save_chat · recall · reflect         │    │   │
+│   │   │                                                            │    │   │
+│   │   │  Artifacts: get_artifact · list_artifacts                  │    │   │
+│   │   │             search_artifacts · search_content              │    │   │
+│   │   │                                                            │    │   │
+│   │   │  Todos:    list_todos · create_todo · update_todo          │    │   │
+│   │   │            complete_todo · set_todo_focus                  │    │   │
 │   │   └────────────────────────────────────────────────────────────┘    │   │
 │   │                                                                     │   │
 │   │   ┌────────────────────────────────────────────────────────────┐    │   │
 │   │   │              Telegram Agent                                │    │   │
 │   │   │                                                            │    │   │
-│   │   │  Conversational AI  ·  Pattern memory (9 kinds)            │    │   │
+│   │   │  Conversational AI  ·  Pattern memory (3 kinds)            │    │   │
 │   │   │  Soul personality   ·  Self-healing quality loop           │    │   │
 │   │   │  Voice (Whisper/TTS) · Photo/document processing           │    │   │
 │   │   │  Spanish tutoring   ·  Spaced repetition (FSRS)           │    │   │
@@ -88,7 +96,7 @@ Phase 0 ─── MCP Server ──────────────── Hy
   │                                      7 tools: search, get, date, similar, tags, stats
   │
 Phase 1 ─── Telegram Chatbot ────────── Webhook handler, agent loop, pattern-based memory
-  │                                      9 pattern kinds with typed decay + dedup
+  │                                      v1 memory extraction during compaction
   │
 Phase 2 ─── Soul Personality ────────── One evolving identity per chat
   │                                      State snapshots, version control, audit trail
@@ -96,7 +104,7 @@ Phase 2 ─── Soul Personality ────────── One evolving i
 Phase 3 ─── Self-Healing Loop ───────── Autonomous quality monitoring
   │                                      Pulse checks, drift detection, soul repairs
   │
-Phase 4 ─── Episodic Memory ─────────── fact + event pattern kinds
+Phase 4 ─── Episodic Memory ─────────── v1 fact/event memory additions
   │                                      Provenance tracking, retrieval logs
   │
 Phase 5 ─── Spanish Learning ────────── Verb conjugations, vocabulary tracking
@@ -110,6 +118,10 @@ Phase 7 ─── Oura Ring ──────────────── Hou
                                          6 tools: summary, weekly, trends,
                                          analysis, compare periods, correlate
                                          1100-line analysis module (pure functions)
+  │
+Phase 8 ─── Memory v2 ──────────────── 3 memory kinds (identity/preference/goal),
+                                         4 MCP memory tools, hybrid recall,
+                                         decoupled compaction, global soul state
 ```
 
 Design documents for each phase live in `specs/`:
@@ -124,8 +136,9 @@ Design documents for each phase live in `specs/`:
 | 5 | `specs/spanish-learning.md` | Deployed |
 | 6 | (observability — no dedicated spec) | Deployed |
 | 7 | `specs/oura-integration-plan.md` | Deployed |
+| 8 | `specs/memory-v2.md` | Deployed |
 | — | `specs/ltm-research.md` | Research |
-| — | `specs/web-app.spec.md` | Early scaffold |
+| — | `specs/web-app.spec.md` | Deployed |
 | — | `specs/aws-sst-migration-plan.md` | Planned |
 
 ## Why This Exists
@@ -228,7 +241,7 @@ cd web && pnpm e2e
 
 ## Telegram Chatbot
 
-An optional conversational interface that wraps all 17 MCP tools in a Telegram bot with long-term memory and an evolving personality. Enabled when `TELEGRAM_BOT_TOKEN` is set.
+An optional conversational interface that wraps a 21-tool MCP set in a Telegram bot with long-term memory and an evolving personality. Enabled when `TELEGRAM_BOT_TOKEN` is set.
 
 ### What It Does
 
@@ -243,23 +256,14 @@ An optional conversational interface that wraps all 17 MCP tools in a Telegram b
 
 Conversations are short-term. Patterns are long-term memory.
 
-When the context grows too large (>48k chars) or enough time passes (12+ hours, 10+ messages), the agent compacts: it extracts recurring themes into typed patterns rather than keeping a flat transcript.
+Memory v2 is implemented:
 
-**9 pattern kinds**, each with typed decay:
-
-| Kind | Half-life | Example |
-|------|-----------|---------|
-| `fact` | 3650 days | "Born in 1990", "Lives in Barcelona" |
-| `event` | 60 days | "Started new job in January" |
-| `behavior` | 365 days | "Journals every morning" |
-| `emotion` | 180 days | "Anxiety around work deadlines" |
-| `belief` | 730 days | "Values deep work over meetings" |
-| `goal` | 365 days | "Learning Spanish to B2" |
-| `preference` | 365 days | "Prefers direct feedback" |
-| `temporal` | 180 days | "Energy dips after lunch" |
-| `causal` | 365 days | "Nicotine crashes dopamine baseline" |
-
-Patterns are deduplicated by canonical hash (exact match) and ANN embedding similarity (0.82+ threshold). On each turn, relevant patterns are retrieved via semantic search → MMR reranking → budget cap (2000 tokens) → injected into the system prompt.
+- **3 memory kinds**: `identity`, `preference`, `goal`
+- **Intentional writes**: `remember` (single memory) and `save_chat` (batch extraction)
+- **Compaction is context management only**: summarize + mark compacted (no extraction side effects)
+- **Dedup pipeline**: canonical hash + embedding similarity
+- **Retrieval**: hybrid semantic + text search merged with RRF and score floors
+- **Maintenance**: consolidation (`superseded`), stale review, and active cap enforcement
 
 ### Soul Personality
 
@@ -271,7 +275,7 @@ One evolving identity per chat — not a fixed persona, but a personality that g
 - **Growth notes** — what changed recently
 - **Version counter + audit trail** — every mutation is logged with a reason
 
-The soul evolves during compaction. The LLM analyzes the conversation and proposes updates. Guardrails prevent hard personality jumps.
+The soul evolves in the main agent loop with guardrails, and the pulse system can apply additional repairs. Guardrails prevent hard personality jumps.
 
 ### Self-Healing Quality Loop
 
@@ -297,7 +301,7 @@ Observability across three tiers:
 |---------|-------------|
 | `/morning` | Free-flow morning journal session |
 | `/evening` | Guided evening review with somatic check-ins |
-| `/compact` | Force pattern extraction from recent conversation |
+| `/compact` | Force compaction summary from recent conversation |
 | `/digest` | Spanish learning summary: vocab stats, retention, trends |
 | `/assess` | LLM-as-judge evaluation of recent Spanish conversation quality |
 
