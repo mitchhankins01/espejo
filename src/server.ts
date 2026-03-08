@@ -22,6 +22,11 @@ import { handleGetArtifact } from "./tools/get-artifact.js";
 import { handleListArtifacts } from "./tools/list-artifacts.js";
 import { handleSearchArtifacts } from "./tools/search-artifacts.js";
 import { handleSearchContent } from "./tools/search-content.js";
+import { handleListTodos } from "./tools/list-todos.js";
+import { handleCreateTodo } from "./tools/create-todo.js";
+import { handleUpdateTodo } from "./tools/update-todo.js";
+import { handleCompleteTodo } from "./tools/complete-todo.js";
+import { handleSetTodoFocus } from "./tools/set-todo-focus.js";
 
 export type ToolHandler = (pool: pg.Pool, input: unknown) => Promise<string>;
 
@@ -47,6 +52,11 @@ export const toolHandlers: Record<string, ToolHandler> = {
   list_artifacts: handleListArtifacts,
   search_artifacts: handleSearchArtifacts,
   search_content: handleSearchContent,
+  list_todos: handleListTodos,
+  create_todo: handleCreateTodo,
+  update_todo: handleUpdateTodo,
+  complete_todo: handleCompleteTodo,
+  set_todo_focus: handleSetTodoFocus,
 };
 
 export function createServer(pool: pg.Pool, version: string): McpServer {

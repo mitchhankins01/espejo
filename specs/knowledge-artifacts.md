@@ -1,6 +1,6 @@
 # Knowledge Base Spec (Knowledge Artifacts, Revised)
 
-Synthesized knowledge (insights, theories, models, and references) as a first-class content type in Postgres, searchable alongside journal entries, editable through a web app, and readable through MCP.
+Synthesized knowledge (insights, theories, models, references, and notes) as a first-class content type in Postgres, searchable alongside journal entries, editable through a web app, and readable through MCP.
 
 ---
 
@@ -51,8 +51,7 @@ Synthesized knowledge (insights, theories, models, and references) as a first-cl
 - [x] Run `pnpm check` clean at the end of each implementation step.
 - [x] MDXEditor with markdown shortcuts (toolbar, headings, lists, links, code blocks).
 - [x] Markdown preview/render with XSS sanitization (rehype-sanitize on list page).
-- [ ] Session auth (httpOnly cookie via `APP_SECRET`) — deferred, single-user.
-- [ ] CSRF protection for write endpoints — deferred, no cookie auth.
+- [x] Bearer-token auth gate (`MCP_SECRET`) for web app and REST endpoints.
 
 ---
 
@@ -62,7 +61,7 @@ Synthesized knowledge (insights, theories, models, and references) as a first-cl
 2. Directly changing `search_entries` to return mixed content would be a breaking contract change. Replaced with a new unified search surface.
 3. Tag behavior was underspecified. Added normalization and filter semantics (`any` vs `all`).
 4. `updated_at`/`version` consistency depended entirely on API discipline. Added DB trigger requirement.
-5. Cookie auth lacked explicit CSRF handling. Added origin + CSRF requirements for write endpoints.
+5. Replaced cookie-auth assumptions with bearer-token auth behavior used by the implemented web app.
 
 ---
 
@@ -135,6 +134,22 @@ CREATE TABLE IF NOT EXISTS knowledge_artifact_sources (
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_artifact_sources_entry
   ON knowledge_artifact_sources (entry_uuid);
+```
+
+### `artifact_links`
+
+Explicit wiki-link edges (`[[Title]]`) between artifacts:
+
+```sql
+CREATE TABLE IF NOT EXISTS artifact_links (
+  source_id UUID NOT NULL REFERENCES knowledge_artifacts(id) ON DELETE CASCADE,
+  target_id UUID NOT NULL REFERENCES knowledge_artifacts(id) ON DELETE CASCADE,
+  PRIMARY KEY (source_id, target_id),
+  CHECK (source_id <> target_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_artifact_links_target
+  ON artifact_links (target_id);
 ```
 
 ### DB invariants
@@ -212,17 +227,19 @@ Served by existing Express app. All inputs validated with Zod.
 
 ### Auth
 
-- Web app uses httpOnly session cookie (`APP_SECRET`-backed).
-- Write endpoints (`POST/PUT/DELETE`) require CSRF protection:
-  - Validate `Origin`/`Referer`
-  - Require CSRF token header tied to session
-- `MCP_SECRET` remains server-side only.
+- Web app uses bearer token auth against `MCP_SECRET`.
+- Token is stored client-side and sent via `Authorization: Bearer <token>`.
+- No cookie session path is used for the knowledge base web app.
 
 ### Endpoints
 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/artifacts` | List/search artifacts. `q` triggers RRF search; otherwise list by `updated_at DESC`. Supports `kind`, `tags`, `tags_mode`, `limit`, `offset`. |
+| `GET` | `/api/artifacts/tags` | Artifact tag aggregation for filter pills (`{ name, count }[]`). |
+| `GET` | `/api/artifacts/titles` | Lightweight title/kind list for quick switcher and wiki-link picker. |
+| `GET` | `/api/artifacts/graph` | Graph payload (`nodes`, `edges`) for force-directed view. |
+| `GET` | `/api/artifacts/:id/related` | Related artifacts split by `semantic` and `explicit` links/backlinks. |
 | `GET` | `/api/artifacts/:id` | Get full artifact with sources and version. |
 | `POST` | `/api/artifacts` | Create: `{ kind, title, body, tags?, source_entry_uuids? }`. |
 | `PUT` | `/api/artifacts/:id` | Update: `{ kind?, title?, body?, tags?, source_entry_uuids?, expected_version }`. Returns `409` on version mismatch. |
@@ -246,19 +263,27 @@ Vite + React 19 app served as static files from existing Express service. See `s
 ### Routes
 
 ```text
-/        -> Artifact list (paginated, search + kind filter)
+/        -> Artifact list (search/filter list mode or graph mode)
 /new     -> Artifact editor (create)
-/:id     -> Artifact editor (edit with autosave)
+/:id     -> Artifact editor (manual save + related + preview)
+/todos   -> Todo list (status filters + pagination)
+/todos/new -> Todo create
+/todos/:id -> Todo edit
 ```
 
 ### Key behaviors
 
 - Bearer token auth gate (validates against `MCP_SECRET` via API).
 - MDXEditor for rich markdown editing with toolbar.
-- List page: paginated (`{ items, total }` response), 10 per page, kind filter pills, debounced RRF search (kind filter applies to search too).
-- Autosave in edit mode: 1500ms debounce, uses `expected_version`.
-- On `409`, pause autosave and show conflict banner with reload action.
-- Create mode uses explicit Save. Floating action button on list page.
+- List page supports kind + tag filters, search, and graph toggle.
+- Tag filtering uses `tags_mode='all'` for multi-tag AND behavior.
+- Quick switcher opens globally via `Cmd+K`/`Ctrl+K`.
+- Artifact edit uses manual save only (no autosave), with optimistic locking via `expected_version`.
+- Related panel combines:
+  - semantic neighbors (embedding similarity)
+  - explicit wiki links/backlinks stored in `artifact_links`
+- Preview mode resolves `[[Title]]` to internal links when title-ID mapping is available.
+- Todo pages follow the same manual-save pattern and URL pagination style.
 - Tailwind CSS v4 with dark mode via `prefers-color-scheme` (system preference). Pine green accent palette.
 
 ---
@@ -301,7 +326,7 @@ Must pass existing `pnpm check` pipeline with coverage enforcement.
 - Embedding invalidation only on title/body changes.
 - Artifact RRF ranking and `tags_mode` behavior (`any`/`all`).
 - Unified search returns both content types with stable discriminator.
-- CSRF rejection for state-changing API calls without token.
+- Bearer auth rejection for unauthorized API calls.
 
 ---
 

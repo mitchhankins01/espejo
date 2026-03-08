@@ -562,7 +562,7 @@ CREATE INDEX IF NOT EXISTS idx_oura_workouts_day ON oura_workouts(day DESC);
 
 CREATE TABLE IF NOT EXISTS knowledge_artifacts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    kind TEXT NOT NULL CHECK (kind IN ('insight', 'theory', 'model', 'reference')),
+    kind TEXT NOT NULL CHECK (kind IN ('insight', 'theory', 'model', 'reference', 'note')),
     title TEXT NOT NULL CHECK (char_length(title) BETWEEN 1 AND 300),
     body TEXT NOT NULL CHECK (char_length(body) > 0),
     tags TEXT[] NOT NULL DEFAULT '{}',
@@ -603,6 +603,16 @@ CREATE TABLE IF NOT EXISTS artifact_tags (
     PRIMARY KEY (artifact_id, tag_id)
 );
 
+CREATE TABLE IF NOT EXISTS artifact_links (
+    source_id UUID NOT NULL REFERENCES knowledge_artifacts(id) ON DELETE CASCADE,
+    target_id UUID NOT NULL REFERENCES knowledge_artifacts(id) ON DELETE CASCADE,
+    PRIMARY KEY (source_id, target_id),
+    CHECK (source_id != target_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_artifact_links_target
+    ON artifact_links (target_id);
+
 -- Trigger: auto-bump updated_at and version on UPDATE
 CREATE OR REPLACE FUNCTION knowledge_artifact_version_bump()
 RETURNS TRIGGER AS $$
@@ -618,6 +628,47 @@ CREATE TRIGGER trg_knowledge_artifact_version_bump
     BEFORE UPDATE ON knowledge_artifacts
     FOR EACH ROW
     EXECUTE FUNCTION knowledge_artifact_version_bump();
+
+-- ============================================================================
+-- Todos
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS todos (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title TEXT NOT NULL CHECK (char_length(title) BETWEEN 1 AND 300),
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'waiting', 'done', 'someday')),
+    next_step TEXT CHECK (next_step IS NULL OR char_length(next_step) <= 500),
+    body TEXT NOT NULL DEFAULT '',
+    tags TEXT[] NOT NULL DEFAULT '{}',
+    urgent BOOLEAN NOT NULL DEFAULT FALSE,
+    important BOOLEAN NOT NULL DEFAULT FALSE,
+    is_focus BOOLEAN NOT NULL DEFAULT FALSE,
+    parent_id UUID REFERENCES todos(id) ON DELETE CASCADE,
+    sort_order INT NOT NULL DEFAULT 0,
+    completed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_todos_status ON todos(status);
+CREATE INDEX IF NOT EXISTS idx_todos_updated ON todos(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_todos_parent ON todos(parent_id);
+CREATE INDEX IF NOT EXISTS idx_todos_focus ON todos(is_focus) WHERE is_focus = TRUE;
+CREATE INDEX IF NOT EXISTS idx_todos_quadrant ON todos(urgent, important, status);
+
+CREATE OR REPLACE FUNCTION todo_updated_at_bump()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at := NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_todo_updated_at_bump ON todos;
+CREATE TRIGGER trg_todo_updated_at_bump
+    BEFORE UPDATE ON todos
+    FOR EACH ROW
+    EXECUTE FUNCTION todo_updated_at_bump();
 
 -- ============================================================================
 -- Views

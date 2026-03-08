@@ -8,7 +8,7 @@ import { MarkdownEditor } from "../components/MarkdownEditor.tsx";
 
 export function ArtifactCreate() {
   const navigate = useNavigate();
-  const [kind, setKind] = useState("insight");
+  const [kind, setKind] = useState("note");
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [tags, setTags] = useState<string[]>([]);
@@ -87,6 +87,7 @@ export function ArtifactCreate() {
             value={body}
             onChange={setBody}
             placeholder="Write your artifact content in markdown..."
+            enableArtifactLinks
           />
         </div>
 

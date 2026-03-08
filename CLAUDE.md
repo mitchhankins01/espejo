@@ -14,7 +14,7 @@ This runs in order, short-circuiting on first failure:
 
 1. `tsc --noEmit` — Type errors mean interfaces don't match the spec
 2. `eslint` — Style violations, unused imports, dead code
-3. `vitest run --coverage` — Unit + integration tests with 100% coverage enforcement
+3. `vitest run --coverage` — Unit + integration tests with strict coverage thresholds (global 95/95/90/95 and 100% on critical modules)
 
 **Do not commit or move on until `pnpm check` passes.**
 
@@ -80,6 +80,13 @@ src/
     get-oura-analysis.ts — Multi-type analysis: sleep quality, anomalies, HRV trend, temperature, best sleep.
     oura-compare-periods.ts — Side-by-side metrics comparison between two date ranges.
     oura-correlate.ts — Pearson correlation between two health metrics.
+    list-todos.ts   — List/filter todos by status, quadrant, parent, focus.
+    create-todo.ts  — Create todo with urgency/importance/parent_id.
+    update-todo.ts  — Partial todo update, auto-sets completed_at on done.
+    complete-todo.ts — Mark todo done + clear focus.
+    set-todo-focus.ts — Set/clear "The One Thing" focus.
+  todos/
+    context.ts      — Todo context prompt builder for Telegram agent injection.
   telegram/
     webhook.ts      — Telegram webhook handler. Validates secret token, processes text/voice/photo/doc updates, dispatches responses. Routes /morning, /evening, /compact, /digest, /assess commands.
     updates.ts      — Update deduplication, per-chat queue, fragment reassembly.
@@ -133,18 +140,19 @@ specs/
   ltm-research.md   — Evidence-based research on long-term memory architecture.
   aws-sst-migration-plan.md — Future AWS/SST migration plan (not implemented).
   web-app.spec.md   — Web app spec (React + Vite knowledge base frontend).
+  todos.md          — Todo system spec (Eisenhower quadrants, focus, hierarchy).
   fixtures/
     seed.ts         — Test data with pre-computed embeddings for determinism.
 packages/
   shared/           — @espejo/shared workspace. Shared TypeScript types between MCP server and web frontend.
 web/                — React + Vite frontend (@espejo/web workspace). Knowledge base CRUD editor.
   src/
-    main.tsx        — Entry point. React Router with 3 routes: /, /new, /:id.
-    api.ts          — API client for artifact CRUD and entry search.
-    index.css       — Tailwind CSS v4 entry point with custom theme (pine green accent, dark mode).
-    pages/          — ArtifactList (paginated, search+filter pills), ArtifactCreate, ArtifactEdit page components.
-    components/     — AuthGate, KindSelect, TagInput, SourcePicker, MarkdownEditor reusable components.
-    hooks/          — useAutosave (debounced save with cancel).
+    main.tsx        — Entry point. Routes: /, /new, /:id, /todos, /todos/new, /todos/:id.
+    api.ts          — API client for artifacts (list/search/related/graph), entries picker, and todos.
+    index.css       — Tailwind CSS v4 entry + theme vars (artifact kind badges + todo status badges).
+    constants/      — Shared artifact constants (kinds, labels, badge class mapping).
+    pages/          — ArtifactList/ArtifactCreate/ArtifactEdit + TodoList/TodoCreate/TodoEdit.
+    components/     — AuthGate nav, KindSelect, StatusSelect, EisenhowerMatrix, TagInput, SourcePicker, MarkdownEditor, QuickSwitcher, GraphView.
   e2e/              — Playwright e2e tests (auth, CRUD, filters, pagination, theme).
 ```
 
@@ -373,13 +381,13 @@ pnpm embed --force   # Re-embeds all entries, not just those missing embeddings
 `.github/workflows/ci.yml` runs on every push/PR to `main` with two jobs:
 
 1. **lint** — `pnpm typecheck` + `pnpm lint`
-2. **test** (needs lint) — `pnpm test -- --coverage` (unit + integration + 100% coverage)
+2. **test** (needs lint) — `pnpm test -- --coverage` (unit + integration + strict coverage thresholds)
 
 Integration tests use Docker Compose inside CI (same as local). The vitest `globalSetup` starts the test DB container automatically. Docker is pre-installed on GitHub's `ubuntu-latest` runners.
 
 ### Coverage
 
-100% line/function/branch/statement coverage enforced via `@vitest/coverage-v8`. Thresholds configured in `vitest.config.ts`. `pnpm check` runs coverage locally too (`pnpm test:coverage`).
+Coverage is enforced via `@vitest/coverage-v8` with a mixed policy in `vitest.config.ts`: global thresholds (`lines/functions/statements=95`, `branches=90`) plus 100% thresholds for critical modules (`src/db/queries.ts`, `src/transports/http.ts`, `src/tools/search.ts`, `src/oura/analysis.ts`). `pnpm check` runs coverage locally too (`pnpm test:coverage`).
 
 Files excluded from coverage via config: `src/index.ts` (entry point), `src/db/client.ts` (module-level pool), `src/transports/oauth.ts` (runtime-only OAuth), and `src/oura/types.ts` (type-only). Defensive branches in `src/db/queries.ts`, `src/server.ts`, and `src/oura/analysis.ts` use `/* v8 ignore next */` pragmas.
 
@@ -573,8 +581,8 @@ Per-agent-run observability. Each time the bot processes a message, it logs:
 DB table: `activity_logs` with `chat_id`, `memories` (JSONB), `tool_calls` (JSONB), `cost_usd`.
 
 HTTP endpoints for inspection:
-- `GET /api/activity-logs/:chatId` — Recent activity logs for a chat
-- `GET /api/activity-logs/:chatId/:id` — Single activity log by ID
+- `GET /api/activity` — Recent activity logs (`limit`, `since`, `tool`)
+- `GET /api/activity/:id` — Single activity log by ID
 
 ### Spanish Learning Infrastructure
 
@@ -677,18 +685,30 @@ Beyond MCP transport and Telegram webhook, the HTTP server (`src/transports/http
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/activity-logs/:chatId` | GET | Recent activity logs (memories, tool calls, cost) |
-| `/api/activity-logs/:chatId/:id` | GET | Single activity log by ID |
+| `/api/metrics` | POST | Ingest one or many daily metrics (`{ date, weight_kg }`) |
+| `/api/activity` | GET | Recent activity logs (supports `limit`, `since`, `tool`) |
+| `/api/activity/:id` | GET | Single activity log by ID |
 | `/api/spanish/:chatId/dashboard` | GET | Aggregated Spanish learning analytics (retention, funnel, trends, assessment) |
 | `/api/spanish/:chatId/assessments` | GET | Spanish assessment history |
-| `/api/weight` | POST | Log daily weight (`{ weight_kg, date? }`) |
-| `/api/artifacts` | GET | List/search artifacts. Without `q`: returns `{ items, total }` for pagination. With `q`: returns array (RRF search). Filters: `kind`, `tags`, `limit`, `offset` |
+| `/api/artifacts` | GET | List/search artifacts. Without `q`: `{ items, total }`; with `q`: array (RRF). Filters: `kind`, `tags`, `tags_mode`, `limit`, `offset` |
+| `/api/artifacts/tags` | GET | Artifact tag counts for filter pills |
+| `/api/artifacts/titles` | GET | Lightweight artifact titles for quick switcher/link picker |
+| `/api/artifacts/graph` | GET | Graph payload (`nodes`, `edges`) for graph view |
+| `/api/artifacts/:id/related` | GET | Related artifacts (`semantic` + `explicit` links/backlinks) |
 | `/api/artifacts/:id` | GET | Get full artifact with sources and version |
 | `/api/artifacts` | POST | Create artifact (`{ kind, title, body, tags?, source_entry_uuids? }`) |
 | `/api/artifacts/:id` | PUT | Update artifact with optimistic locking (`expected_version`, 409 on conflict) |
 | `/api/artifacts/:id` | DELETE | Delete artifact and cascade source links |
 | `/api/entries/search` | GET | Lightweight entry search for source picker (`{ uuid, created_at, preview }`) |
 | `/api/content/search` | GET | Unified search across entries + artifacts |
+| `/api/todos` | GET | List todos. Filters: `status`, `urgent`, `important`, `parent_id`, `focus_only`, `include_children`, `limit`, `offset`. Returns `{ items, total }` |
+| `/api/todos/focus` | GET | Get current focus todo |
+| `/api/todos/:id` | GET | Get single todo with children |
+| `/api/todos` | POST | Create todo (`{ title, status?, next_step?, body?, tags?, urgent?, important?, parent_id? }`) |
+| `/api/todos/:id` | PUT | Update todo (`{ title?, status?, next_step?, body?, tags?, urgent?, important? }`) |
+| `/api/todos/:id/complete` | POST | Complete todo (sets done + completed_at + clears focus) |
+| `/api/todos/focus` | POST | Set focus `{ id }` or clear `{ clear: true }` |
+| `/api/todos/:id` | DELETE | Delete todo |
 | `/api/telegram` | POST | Telegram webhook endpoint (validated via `X-Telegram-Bot-Api-Secret-Token`) |
 
 ## What's Out of Scope

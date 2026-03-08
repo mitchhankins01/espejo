@@ -204,6 +204,28 @@ Every entry fits in a single embedding (max ~8K tokens). No chunking needed.
 
 Tool contracts are defined in `specs/tools.spec.ts` — the single source of truth for params, types, descriptions, and examples. Server registration, tests, and documentation all derive from it.
 
+## Knowledge Base Web App (March 2026)
+
+Newly added/updated features:
+- `note` artifact kind across schema, API validation, tool specs, and UI badges/filters
+- Todo system (`todos` table, CRUD API, `/todos` UI routes, status workflow)
+- Tag filtering in artifact list (multi-tag AND semantics via `tags_mode=all`)
+- Global quick switcher (`Cmd+K` / `Ctrl+K`) with fuzzy title navigation
+- Semantic links + backlinks (`[[Title]]` detection + `artifact_links` table + related panel)
+- Graph view (semantic + explicit + shared-tag + shared-source edges)
+
+Primary docs:
+- `specs/web-feature-rollout.md` (full implementation and verification checklist)
+- `specs/web-app.spec.md` (current web app behavior + API contract)
+- `specs/todos.md` and `specs/knowledge-artifacts.md` (domain specs)
+
+Quick validation:
+```bash
+pnpm check
+cd web && npx vite build
+cd web && pnpm e2e
+```
+
 ## Telegram Chatbot
 
 An optional conversational interface that wraps all 17 MCP tools in a Telegram bot with long-term memory and an evolving personality. Enabled when `TELEGRAM_BOT_TOKEN` is set.
@@ -285,11 +307,21 @@ Authenticated via `MCP_SECRET` bearer token:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/activity-logs/:chatId` | GET | Recent activity logs (memories, tool calls, cost) |
-| `/api/activity-logs/:chatId/:id` | GET | Single activity log |
+| `/api/metrics` | POST | Ingest one or more metric records (`{ date, weight_kg }`) |
+| `/api/activity` | GET | Recent activity logs (`limit`, `since`, `tool`) |
+| `/api/activity/:id` | GET | Single activity log |
 | `/api/spanish/:chatId/dashboard` | GET | Aggregated Spanish learning analytics |
 | `/api/spanish/:chatId/assessments` | GET | Spanish assessment history |
-| `/api/weight` | POST | Log daily weight |
+| `/api/artifacts` | GET/POST | List/search artifacts or create artifact |
+| `/api/artifacts/:id` | GET/PUT/DELETE | Get/update/delete artifact |
+| `/api/artifacts/tags` | GET | Artifact tag counts |
+| `/api/artifacts/titles` | GET | Lightweight artifact titles for quick switcher |
+| `/api/artifacts/:id/related` | GET | Semantic + explicit related artifacts |
+| `/api/artifacts/graph` | GET | Graph payload (`nodes`, `edges`) |
+| `/api/entries/search` | GET | Entry search for source picker |
+| `/api/content/search` | GET | Unified search across entries + artifacts |
+| `/api/todos` | GET/POST | List todos or create todo |
+| `/api/todos/:id` | GET/PUT/DELETE | Get/update/delete todo |
 
 ## Development
 
@@ -315,7 +347,7 @@ pnpm dev                          # Start MCP server (stdio)
 After every code change:
 
 ```bash
-pnpm check    # typecheck → lint → test + 100% coverage
+pnpm check    # typecheck → lint → test + coverage thresholds
 ```
 
 This runs `tsc --noEmit`, ESLint, and Vitest with coverage enforcement in order, short-circuiting on first failure. Do not commit until it passes.
@@ -327,7 +359,7 @@ Two tiers:
 - **Unit tests** (`tests/tools/`, `tests/formatters/`, `tests/oura/`, `tests/utils/`) — no database, fast, test param validation and spec conformance
 - **Integration tests** (`tests/integration/`) — Docker Compose auto-starts a test PostgreSQL on port 5433 (tmpfs-backed, RAM only)
 
-Fixtures include pre-computed 1536-dimension embedding vectors. No OpenAI calls during tests. 100% line/function/branch/statement coverage enforced.
+Fixtures include pre-computed 1536-dimension embedding vectors. No OpenAI calls during tests. Coverage policy: global `95/95/90/95` (`lines/functions/branches/statements`) with 100% enforcement on critical modules (`src/db/queries.ts`, `src/transports/http.ts`, `src/tools/search.ts`, `src/oura/analysis.ts`).
 
 ### Environment Separation
 
@@ -374,7 +406,7 @@ Supports both stdio transport (Claude Desktop) and HTTP/SSE transport (remote de
 | Media | Cloudflare R2 (S3-compatible) |
 | Validation | Zod |
 | Testing | Vitest + Docker Compose |
-| CI | GitHub Actions (lint → test + 100% coverage) |
+| CI | GitHub Actions (lint → test + strict coverage thresholds) |
 | Deploy | Railway |
 
 ## License

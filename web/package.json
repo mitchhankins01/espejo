@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:stack": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "e2e": "playwright test",
@@ -16,6 +17,7 @@
     "@tailwindcss/vite": "^4.2.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "react-force-graph-2d": "^1.26.0",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.6.1",
     "rehype-sanitize": "^6.0.0",

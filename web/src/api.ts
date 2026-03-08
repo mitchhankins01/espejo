@@ -1,6 +1,13 @@
+export type ArtifactKind =
+  | "insight"
+  | "theory"
+  | "model"
+  | "reference"
+  | "note";
+
 export interface Artifact {
   id: string;
-  kind: "insight" | "theory" | "model" | "reference";
+  kind: ArtifactKind;
   title: string;
   body: string;
   tags: string[];
@@ -11,10 +18,66 @@ export interface Artifact {
   source_entry_uuids: string[];
 }
 
+export interface ArtifactTitle {
+  id: string;
+  title: string;
+  kind: ArtifactKind;
+}
+
+export interface RelatedArtifacts {
+  semantic: Array<{
+    id: string;
+    title: string;
+    kind: ArtifactKind;
+    similarity: number;
+  }>;
+  explicit: Array<{
+    id: string;
+    title: string;
+    kind: ArtifactKind;
+    direction: "outgoing" | "incoming";
+  }>;
+}
+
+export interface GraphData {
+  nodes: Array<{
+    id: string;
+    title: string;
+    kind: ArtifactKind;
+    tags: string[];
+  }>;
+  edges: Array<{
+    source: string;
+    target: string;
+    type: "semantic" | "explicit" | "tag" | "source";
+    weight?: number;
+  }>;
+}
+
 export interface EntrySearchResult {
   uuid: string;
   created_at: string;
   preview: string;
+}
+
+export type TodoStatus = "active" | "waiting" | "done" | "someday";
+
+export interface Todo {
+  id: string;
+  title: string;
+  status: TodoStatus;
+  next_step: string | null;
+  body: string;
+  tags: string[];
+  urgent: boolean;
+  important: boolean;
+  is_focus: boolean;
+  parent_id: string | null;
+  sort_order: number;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  children?: Todo[];
 }
 
 const TOKEN_KEY = "espejo_token";
@@ -55,21 +118,32 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 export function listArtifacts(params?: {
   kind?: string;
   tags?: string;
+  tags_mode?: "any" | "all";
   limit?: number;
   offset?: number;
 }): Promise<{ items: Artifact[]; total: number }> {
   const qs = new URLSearchParams();
   if (params?.kind) qs.set("kind", params.kind);
   if (params?.tags) qs.set("tags", params.tags);
+  if (params?.tags_mode) qs.set("tags_mode", params.tags_mode);
   if (params?.limit) qs.set("limit", String(params.limit));
   if (params?.offset) qs.set("offset", String(params.offset));
   const query = qs.toString();
   return apiFetch(`/api/artifacts${query ? `?${query}` : ""}`);
 }
 
-export function searchArtifacts(q: string, kind?: string): Promise<Artifact[]> {
+export function searchArtifacts(
+  q: string,
+  kind?: string,
+  tags?: string,
+  tagsMode?: "any" | "all",
+  semantic?: boolean
+): Promise<Artifact[]> {
   const qs = new URLSearchParams({ q });
   if (kind) qs.set("kind", kind);
+  if (tags) qs.set("tags", tags);
+  if (tagsMode) qs.set("tags_mode", tagsMode);
+  if (semantic !== undefined) qs.set("semantic", String(semantic));
   return apiFetch(`/api/artifacts?${qs.toString()}`);
 }
 
@@ -115,6 +189,105 @@ export function listArtifactTags(): Promise<{ name: string; count: number }[]> {
   return apiFetch("/api/artifacts/tags");
 }
 
+export function listArtifactTitles(): Promise<ArtifactTitle[]> {
+  return apiFetch("/api/artifacts/titles");
+}
+
+export function getRelatedArtifacts(id: string): Promise<RelatedArtifacts> {
+  return apiFetch(`/api/artifacts/${id}/related`);
+}
+
+export function getArtifactGraph(): Promise<GraphData> {
+  return apiFetch("/api/artifacts/graph");
+}
+
 export function searchEntries(q: string): Promise<EntrySearchResult[]> {
   return apiFetch(`/api/entries/search?q=${encodeURIComponent(q)}`);
+}
+
+export function listTodos(params?: {
+  status?: TodoStatus;
+  urgent?: boolean;
+  important?: boolean;
+  parent_id?: string;
+  focus_only?: boolean;
+  include_children?: boolean;
+  limit?: number;
+  offset?: number;
+}): Promise<{ items: Todo[]; total: number }> {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set("status", params.status);
+  if (params?.urgent !== undefined) qs.set("urgent", String(params.urgent));
+  if (params?.important !== undefined) qs.set("important", String(params.important));
+  if (params?.parent_id) qs.set("parent_id", params.parent_id);
+  if (params?.focus_only) qs.set("focus_only", "true");
+  if (params?.include_children) qs.set("include_children", "true");
+  if (params?.limit) qs.set("limit", String(params.limit));
+  if (params?.offset) qs.set("offset", String(params.offset));
+  const query = qs.toString();
+  return apiFetch(`/api/todos${query ? `?${query}` : ""}`);
+}
+
+export function getTodo(id: string): Promise<Todo> {
+  return apiFetch(`/api/todos/${id}`);
+}
+
+export function createTodo(data: {
+  title: string;
+  status?: TodoStatus;
+  next_step?: string | null;
+  body?: string;
+  tags?: string[];
+  urgent?: boolean;
+  important?: boolean;
+  parent_id?: string;
+}): Promise<Todo> {
+  return apiFetch("/api/todos", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateTodo(
+  id: string,
+  data: {
+    title?: string;
+    status?: TodoStatus;
+    next_step?: string | null;
+    body?: string;
+    tags?: string[];
+    urgent?: boolean;
+    important?: boolean;
+  }
+): Promise<Todo> {
+  return apiFetch(`/api/todos/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteTodo(id: string): Promise<void> {
+  return apiFetch(`/api/todos/${id}`, { method: "DELETE" });
+}
+
+export function completeTodo(id: string): Promise<Todo> {
+  return apiFetch(`/api/todos/${id}/complete`, { method: "POST" });
+}
+
+export function setFocus(id: string): Promise<Todo> {
+  return apiFetch("/api/todos/focus", {
+    method: "POST",
+    body: JSON.stringify({ id }),
+  });
+}
+
+export function clearFocus(): Promise<void> {
+  return apiFetch("/api/todos/focus", {
+    method: "POST",
+    body: JSON.stringify({ clear: true }),
+  });
+}
+
+export function getFocus(): Promise<Todo | null> {
+  return apiFetch("/api/todos/focus");
 }

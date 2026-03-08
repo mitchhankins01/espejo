@@ -284,6 +284,8 @@ vi.mock("../../src/db/queries.js", () => ({
   upsertSpanishVocabulary: mockUpsertSpanishVocabulary,
   upsertSpanishProgressSnapshot: mockUpsertSpanishProgressSnapshot,
   insertActivityLog: mockInsertActivityLog,
+  getFocusTodo: vi.fn().mockResolvedValue(null),
+  listTodos: vi.fn().mockResolvedValue({ rows: [], count: 0 }),
 }));
 
 vi.mock("../../src/db/embeddings.js", () => ({

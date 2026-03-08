@@ -29,6 +29,22 @@
   --color-badge-model-text: #1a6b3a;
   --color-badge-reference-bg: #f5eadd;
   --color-badge-reference-text: #7a4a1e;
+  --color-badge-note-bg: #f0ece5;
+  --color-badge-note-text: #5a4d38;
+
+  --color-badge-active-bg: #daf0e2;
+  --color-badge-active-text: #1a6b3a;
+  --color-badge-waiting-bg: #fef3cd;
+  --color-badge-waiting-text: #856404;
+  --color-badge-done-bg: #e8e8e8;
+  --color-badge-done-text: #6b6b6b;
+  --color-badge-someday-bg: #e8e0f0;
+  --color-badge-someday-text: #6b4d8a;
+
+  --color-urgent-bg: #fee2e2;
+  --color-urgent-text: #b91c1c;
+  --color-important-bg: #dbeafe;
+  --color-important-text: #1d4ed8;
 
   --font-family-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     sans-serif;
@@ -53,6 +69,22 @@
     --color-badge-model-text: #82d8a0;
     --color-badge-reference-bg: #3a2e1a;
     --color-badge-reference-text: #e8b86a;
+    --color-badge-note-bg: #3a3428;
+    --color-badge-note-text: #d4c8a8;
+
+    --color-badge-active-bg: #1e3828;
+    --color-badge-active-text: #82d8a0;
+    --color-badge-waiting-bg: #3a3218;
+    --color-badge-waiting-text: #e8c86a;
+    --color-badge-done-bg: #333333;
+    --color-badge-done-text: #999999;
+    --color-badge-someday-bg: #2e1e3a;
+    --color-badge-someday-text: #c9a3ee;
+
+    --color-urgent-bg: #3b1111;
+    --color-urgent-text: #fca5a5;
+    --color-important-bg: #1e2d4a;
+    --color-important-text: #93bbec;
   }
 }
 

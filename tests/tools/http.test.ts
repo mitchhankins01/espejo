@@ -68,9 +68,25 @@ const {
   mockListArtifacts,
   mockCountArtifacts,
   mockSearchArtifacts,
+  mockSearchArtifactsKeyword,
   mockListArtifactTags,
+  mockListArtifactTitles,
+  mockResolveArtifactTitleToId,
+  mockSyncExplicitLinks,
+  mockFindSimilarArtifacts,
+  mockGetExplicitLinks,
+  mockGetExplicitBacklinks,
+  mockGetArtifactGraph,
   mockSearchContent,
   mockSearchEntriesForPicker,
+  mockListTodos,
+  mockGetTodoById,
+  mockCreateTodo,
+  mockUpdateTodo,
+  mockDeleteTodo,
+  mockCompleteTodo,
+  mockSetTodoFocus,
+  mockGetFocusTodo,
   mockGenerateEmbedding,
 } = vi.hoisted(() => ({
   mockPool: {},
@@ -94,9 +110,25 @@ const {
   mockListArtifacts: vi.fn(),
   mockCountArtifacts: vi.fn(),
   mockSearchArtifacts: vi.fn(),
+  mockSearchArtifactsKeyword: vi.fn(),
   mockListArtifactTags: vi.fn(),
+  mockListArtifactTitles: vi.fn(),
+  mockResolveArtifactTitleToId: vi.fn(),
+  mockSyncExplicitLinks: vi.fn(),
+  mockFindSimilarArtifacts: vi.fn(),
+  mockGetExplicitLinks: vi.fn(),
+  mockGetExplicitBacklinks: vi.fn(),
+  mockGetArtifactGraph: vi.fn(),
   mockSearchContent: vi.fn(),
   mockSearchEntriesForPicker: vi.fn(),
+  mockListTodos: vi.fn(),
+  mockGetTodoById: vi.fn(),
+  mockCreateTodo: vi.fn(),
+  mockUpdateTodo: vi.fn(),
+  mockDeleteTodo: vi.fn(),
+  mockCompleteTodo: vi.fn(),
+  mockSetTodoFocus: vi.fn(),
+  mockGetFocusTodo: vi.fn(),
   mockGenerateEmbedding: vi.fn(),
 }));
 
@@ -129,9 +161,25 @@ vi.mock("../../src/db/queries.js", () => ({
   listArtifacts: mockListArtifacts,
   countArtifacts: mockCountArtifacts,
   searchArtifacts: mockSearchArtifacts,
+  searchArtifactsKeyword: mockSearchArtifactsKeyword,
   listArtifactTags: mockListArtifactTags,
+  listArtifactTitles: mockListArtifactTitles,
+  resolveArtifactTitleToId: mockResolveArtifactTitleToId,
+  syncExplicitLinks: mockSyncExplicitLinks,
+  findSimilarArtifacts: mockFindSimilarArtifacts,
+  getExplicitLinks: mockGetExplicitLinks,
+  getExplicitBacklinks: mockGetExplicitBacklinks,
+  getArtifactGraph: mockGetArtifactGraph,
   searchContent: mockSearchContent,
   searchEntriesForPicker: mockSearchEntriesForPicker,
+  listTodos: mockListTodos,
+  getTodoById: mockGetTodoById,
+  createTodo: mockCreateTodo,
+  updateTodo: mockUpdateTodo,
+  deleteTodo: mockDeleteTodo,
+  completeTodo: mockCompleteTodo,
+  setTodoFocus: mockSetTodoFocus,
+  getFocusTodo: mockGetFocusTodo,
 }));
 
 const mockHandleRequest = vi.fn();
@@ -159,6 +207,22 @@ describe("startHttpServer", () => {
     mockGetSpanishAdaptiveContext.mockReset();
     mockGetSpanishAssessments.mockReset();
     mockGetLatestSpanishAssessment.mockReset();
+    mockListArtifactTitles.mockReset();
+    mockResolveArtifactTitleToId.mockReset();
+    mockSyncExplicitLinks.mockReset();
+    mockFindSimilarArtifacts.mockReset();
+    mockGetExplicitLinks.mockReset();
+    mockGetExplicitBacklinks.mockReset();
+    mockGetArtifactGraph.mockReset();
+    mockSearchArtifactsKeyword.mockReset();
+    mockListTodos.mockReset();
+    mockGetTodoById.mockReset();
+    mockCreateTodo.mockReset();
+    mockUpdateTodo.mockReset();
+    mockDeleteTodo.mockReset();
+    mockCompleteTodo.mockReset();
+    mockSetTodoFocus.mockReset();
+    mockGetFocusTodo.mockReset();
     mockServer.on.mockReset();
     // Restore mock implementations after clearAllMocks
     mockApp.set.mockReturnThis();
@@ -1172,6 +1236,47 @@ describe("startHttpServer", () => {
     expect(mockSearchArtifacts).toHaveBeenCalled();
   });
 
+  it("GET /api/artifacts uses keyword search when semantic=false", async () => {
+    mockSearchArtifactsKeyword.mockResolvedValue([mockArtifact]);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/artifacts");
+    const handler = call![1];
+
+    const mockReq = { headers: {}, query: { q: "class", semantic: "false" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+
+    expect(mockGenerateEmbedding).not.toHaveBeenCalled();
+    expect(mockSearchArtifacts).not.toHaveBeenCalled();
+    expect(mockSearchArtifactsKeyword).toHaveBeenCalledWith(
+      mockPool,
+      "class",
+      { kind: undefined, tags: undefined, tags_mode: "any" },
+      20
+    );
+    expect(mockRes.json).toHaveBeenCalledWith([mockArtifact]);
+  });
+
+  it("GET /api/artifacts accepts semantic=true explicitly", async () => {
+    mockGenerateEmbedding.mockResolvedValue([0.1, 0.2]);
+    mockSearchArtifacts.mockResolvedValue([mockArtifact]);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/artifacts");
+    const handler = call![1];
+
+    const mockReq = { headers: {}, query: { q: "class", semantic: "true" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+
+    expect(mockGenerateEmbedding).toHaveBeenCalledWith("class");
+    expect(mockSearchArtifacts).toHaveBeenCalled();
+    expect(mockSearchArtifactsKeyword).not.toHaveBeenCalled();
+  });
+
   it("GET /api/artifacts returns 500 on error", async () => {
     mockCountArtifacts.mockResolvedValue(0);
     mockListArtifacts.mockRejectedValue(new Error("db error"));
@@ -1251,6 +1356,158 @@ describe("startHttpServer", () => {
     expect(mockRes.status).toHaveBeenCalledWith(500);
   });
 
+  it("GET /api/artifacts/titles returns artifact titles", async () => {
+    mockListArtifactTitles.mockResolvedValue([
+      { id: "art-001", title: "First", kind: "insight" },
+    ]);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find(
+      (c: any[]) => c[0] === "/api/artifacts/titles"
+    );
+    const handler = call![1];
+
+    const mockReq = { headers: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockListArtifactTitles).toHaveBeenCalledWith(mockPool);
+    expect(mockRes.json).toHaveBeenCalledWith([
+      { id: "art-001", title: "First", kind: "insight" },
+    ]);
+  });
+
+  it("GET /api/artifacts/titles returns 500 on error", async () => {
+    mockListArtifactTitles.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find(
+      (c: any[]) => c[0] === "/api/artifacts/titles"
+    );
+    const handler = call![1];
+
+    const mockReq = { headers: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  it("GET /api/artifacts/graph returns graph payload", async () => {
+    mockGetArtifactGraph.mockResolvedValue({
+      artifacts: [
+        {
+          id: "art-001",
+          title: "One",
+          kind: "insight",
+          tags: ["health"],
+          has_embedding: true,
+        },
+        {
+          id: "art-002",
+          title: "Two",
+          kind: "theory",
+          tags: ["health", "sleep"],
+          has_embedding: true,
+        },
+      ],
+      explicitLinks: [{ source_id: "art-001", target_id: "art-002" }],
+      sharedSources: [{ artifact_id_1: "art-001", artifact_id_2: "art-002" }],
+      similarities: [{ id_1: "art-001", id_2: "art-002", similarity: 0.8 }],
+    });
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find(
+      (c: any[]) => c[0] === "/api/artifacts/graph"
+    );
+    const handler = call![1];
+    const mockReq = { headers: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nodes: expect.any(Array),
+        edges: expect.any(Array),
+      })
+    );
+  });
+
+  it("GET /api/artifacts/graph returns 500 on error", async () => {
+    mockGetArtifactGraph.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find(
+      (c: any[]) => c[0] === "/api/artifacts/graph"
+    );
+    const handler = call![1];
+    const mockReq = { headers: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  it("GET /api/artifacts/:id/related returns semantic and explicit links", async () => {
+    mockFindSimilarArtifacts.mockResolvedValue([
+      { id: "art-002", title: "Two", kind: "theory", similarity: 0.65 },
+    ]);
+    mockGetExplicitLinks.mockResolvedValue([
+      { id: "art-003", title: "Three", kind: "model" },
+    ]);
+    mockGetExplicitBacklinks.mockResolvedValue([
+      { id: "art-004", title: "Four", kind: "note" },
+    ]);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find(
+      (c: any[]) => c[0] === "/api/artifacts/:id/related"
+    );
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { id: "art-001" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockFindSimilarArtifacts).toHaveBeenCalledWith(
+      mockPool,
+      "art-001",
+      10,
+      0.3
+    );
+    expect(mockRes.json).toHaveBeenCalledWith({
+      semantic: [{ id: "art-002", title: "Two", kind: "theory", similarity: 0.65 }],
+      explicit: [
+        {
+          id: "art-003",
+          title: "Three",
+          kind: "model",
+          direction: "outgoing",
+        },
+        {
+          id: "art-004",
+          title: "Four",
+          kind: "note",
+          direction: "incoming",
+        },
+      ],
+    });
+  });
+
+  it("GET /api/artifacts/:id/related returns 500 on error", async () => {
+    mockFindSimilarArtifacts.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find(
+      (c: any[]) => c[0] === "/api/artifacts/:id/related"
+    );
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { id: "art-001" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
   it("GET /api/artifacts/:id returns artifact", async () => {
     mockGetArtifactById.mockResolvedValue(mockArtifact);
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
@@ -1309,6 +1566,43 @@ describe("startHttpServer", () => {
     await handler(mockReq, mockRes);
     expect(mockRes.status).toHaveBeenCalledWith(201);
     expect(mockRes.json).toHaveBeenCalledWith(mockArtifact);
+    expect(mockSyncExplicitLinks).toHaveBeenCalledWith(mockPool, "art-001", []);
+  });
+
+  it("POST /api/artifacts resolves and syncs wiki links", async () => {
+    mockCreateArtifact.mockResolvedValue({
+      ...mockArtifact,
+      body: "[[Theory A]] and [[Note B]]",
+    });
+    mockResolveArtifactTitleToId
+      .mockResolvedValueOnce("art-002")
+      .mockResolvedValueOnce("art-003");
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/artifacts");
+    const handler = call![1];
+
+    const mockReq = {
+      headers: {},
+      body: { kind: "insight", title: "Test", body: "[[Theory A]] and [[Note B]]" },
+    };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockResolveArtifactTitleToId).toHaveBeenNthCalledWith(
+      1,
+      mockPool,
+      "Theory A"
+    );
+    expect(mockResolveArtifactTitleToId).toHaveBeenNthCalledWith(
+      2,
+      mockPool,
+      "Note B"
+    );
+    expect(mockSyncExplicitLinks).toHaveBeenCalledWith(mockPool, "art-001", [
+      "art-002",
+      "art-003",
+    ]);
   });
 
   it("POST /api/artifacts rejects invalid body", async () => {
@@ -1354,6 +1648,7 @@ describe("startHttpServer", () => {
 
     await handler(mockReq, mockRes);
     expect(mockRes.json).toHaveBeenCalledWith(mockArtifact);
+    expect(mockSyncExplicitLinks).toHaveBeenCalledWith(mockPool, "art-001", []);
   });
 
   it("PUT /api/artifacts/:id returns 409 on version conflict", async () => {
@@ -1569,6 +1864,401 @@ describe("startHttpServer", () => {
     const handler = call![1];
 
     const mockReq = { headers: {}, query: { q: "test" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  it("GET /api/todos returns paginated todo list", async () => {
+    const items = [
+      {
+        id: "todo-1",
+        title: "Task",
+        status: "active",
+        next_step: null,
+        body: "",
+        tags: [],
+        urgent: false,
+        important: false,
+        is_focus: false,
+        parent_id: null,
+        sort_order: 0,
+        completed_at: null,
+      },
+    ];
+    mockListTodos.mockResolvedValue({ rows: items, count: 1 });
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/todos");
+    const handler = call![1];
+    const mockReq = { headers: {}, query: { status: "active", urgent: "true", important: "false", parent_id: "root", limit: "5", offset: "10" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockListTodos).toHaveBeenCalledWith(mockPool, {
+      status: "active",
+      urgent: true,
+      important: false,
+      parent_id: "root",
+      focus_only: undefined,
+      include_children: undefined,
+      limit: 5,
+      offset: 10,
+    });
+    expect(mockRes.json).toHaveBeenCalledWith({ items, total: 1 });
+  });
+
+  it("GET /api/todos/:id returns 404 for missing todo", async () => {
+    mockGetTodoById.mockResolvedValue(null);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/todos/:id");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { id: "todo-1" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(404);
+  });
+
+  it("GET /api/todos returns 500 on query error", async () => {
+    mockListTodos.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/todos");
+    const handler = call![1];
+    const mockReq = { headers: {}, query: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  it("GET /api/todos/:id returns a todo", async () => {
+    const todo = {
+      id: "todo-1",
+      title: "Task",
+      status: "active",
+      next_step: null,
+      body: "",
+      tags: [],
+    };
+    mockGetTodoById.mockResolvedValue(todo);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/todos/:id");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { id: "todo-1" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.json).toHaveBeenCalledWith(todo);
+  });
+
+  it("GET /api/todos/:id returns 500 on error", async () => {
+    mockGetTodoById.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/todos/:id");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { id: "todo-1" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  it("POST /api/todos creates a todo", async () => {
+    const todo = {
+      id: "todo-1",
+      title: "Task",
+      status: "active",
+      next_step: null,
+      body: "",
+      tags: [],
+    };
+    mockCreateTodo.mockResolvedValue(todo);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/todos");
+    const handler = call![1];
+    const mockReq = { headers: {}, body: { title: "Task" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(201);
+    expect(mockRes.json).toHaveBeenCalledWith(todo);
+  });
+
+  it("POST /api/todos returns 500 on error", async () => {
+    mockCreateTodo.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/todos");
+    const handler = call![1];
+    const mockReq = { headers: {}, body: { title: "Task" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  it("POST /api/todos rejects invalid body", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/todos");
+    const handler = call![1];
+    const mockReq = { headers: {}, body: { title: "" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+  });
+
+  it("PUT /api/todos/:id updates a todo", async () => {
+    const todo = {
+      id: "todo-1",
+      title: "Updated",
+      status: "done",
+      next_step: null,
+      body: "",
+      tags: [],
+    };
+    mockUpdateTodo.mockResolvedValue(todo);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/todos/:id");
+    const handler = call![1];
+    const mockReq = {
+      headers: {},
+      params: { id: "todo-1" },
+      body: { status: "done" },
+    };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.json).toHaveBeenCalledWith(todo);
+  });
+
+  it("PUT /api/todos/:id returns 404 when missing", async () => {
+    mockUpdateTodo.mockResolvedValue(null);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/todos/:id");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { id: "todo-1" }, body: { title: "X" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(404);
+  });
+
+  it("PUT /api/todos/:id rejects invalid body", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/todos/:id");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { id: "todo-1" }, body: { title: "" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+  });
+
+  it("PUT /api/todos/:id returns 500 on error", async () => {
+    mockUpdateTodo.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/todos/:id");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { id: "todo-1" }, body: { title: "X" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  it("DELETE /api/todos/:id deletes a todo", async () => {
+    mockDeleteTodo.mockResolvedValue(true);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.delete.mock.calls.find((c: any[]) => c[0] === "/api/todos/:id");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { id: "todo-1" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.json).toHaveBeenCalledWith({ status: "deleted" });
+  });
+
+  it("DELETE /api/todos/:id returns 404 for missing todo", async () => {
+    mockDeleteTodo.mockResolvedValue(false);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.delete.mock.calls.find((c: any[]) => c[0] === "/api/todos/:id");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { id: "todo-1" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(404);
+  });
+
+  it("DELETE /api/todos/:id returns 500 on error", async () => {
+    mockDeleteTodo.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.delete.mock.calls.find((c: any[]) => c[0] === "/api/todos/:id");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { id: "todo-1" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  it("POST /api/todos/:id/complete completes a todo", async () => {
+    const todo = { id: "todo-1", title: "Task", status: "done", completed_at: "2026-01-01T00:00:00Z" };
+    mockCompleteTodo.mockResolvedValue(todo);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/todos/:id/complete");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { id: "todo-1" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockCompleteTodo).toHaveBeenCalledWith(mockPool, "todo-1");
+    expect(mockRes.json).toHaveBeenCalledWith(todo);
+  });
+
+  it("POST /api/todos/:id/complete returns 404 for missing todo", async () => {
+    mockCompleteTodo.mockResolvedValue(null);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/todos/:id/complete");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { id: "todo-1" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(404);
+  });
+
+  it("POST /api/todos/:id/complete returns 500 on error", async () => {
+    mockCompleteTodo.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/todos/:id/complete");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { id: "todo-1" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  it("POST /api/todos/focus sets focus", async () => {
+    const todo = { id: "todo-1", title: "Task", is_focus: true };
+    mockSetTodoFocus.mockResolvedValue(todo);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/todos/focus");
+    const handler = call![1];
+    const mockReq = { headers: {}, body: { id: "todo-1" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockSetTodoFocus).toHaveBeenCalledWith(mockPool, "todo-1");
+    expect(mockRes.json).toHaveBeenCalledWith(todo);
+  });
+
+  it("POST /api/todos/focus clears focus", async () => {
+    mockSetTodoFocus.mockResolvedValue(null);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/todos/focus");
+    const handler = call![1];
+    const mockReq = { headers: {}, body: { clear: true } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.json).toHaveBeenCalledWith({ status: "cleared" });
+  });
+
+  it("POST /api/todos/focus returns 400 when no id or clear", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/todos/focus");
+    const handler = call![1];
+    const mockReq = { headers: {}, body: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+  });
+
+  it("POST /api/todos/focus returns 404 for missing todo", async () => {
+    mockSetTodoFocus.mockResolvedValue(null);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/todos/focus");
+    const handler = call![1];
+    const mockReq = { headers: {}, body: { id: "missing-id" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(404);
+  });
+
+  it("POST /api/todos/focus returns 500 on error", async () => {
+    mockSetTodoFocus.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/todos/focus");
+    const handler = call![1];
+    const mockReq = { headers: {}, body: { id: "todo-1" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+  });
+
+  it("GET /api/todos/focus returns current focus todo", async () => {
+    const todo = { id: "todo-1", title: "Task", is_focus: true };
+    mockGetFocusTodo.mockResolvedValue(todo);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/todos/focus");
+    const handler = call![1];
+    const mockReq = { headers: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.json).toHaveBeenCalledWith(todo);
+  });
+
+  it("GET /api/todos/focus returns null when no focus set", async () => {
+    mockGetFocusTodo.mockResolvedValue(null);
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/todos/focus");
+    const handler = call![1];
+    const mockReq = { headers: {} };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.json).toHaveBeenCalledWith(null);
+  });
+
+  it("GET /api/todos/focus returns 500 on error", async () => {
+    mockGetFocusTodo.mockRejectedValue(new Error("db error"));
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/todos/focus");
+    const handler = call![1];
+    const mockReq = { headers: {} };
     const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
 
     await handler(mockReq, mockRes);

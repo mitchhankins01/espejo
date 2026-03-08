@@ -546,7 +546,7 @@ export const toolSpecs = {
     description:
       "List knowledge artifacts with optional filtering by kind and tags. Ordered by most recently updated.",
     params: z.object({
-      kind: z.enum(["insight", "theory", "model", "reference"]).optional().describe("Filter by artifact kind"),
+      kind: z.enum(["insight", "theory", "model", "reference", "note"]).optional().describe("Filter by artifact kind"),
       tags: z.array(z.string()).optional().describe("Filter by tags"),
       tags_mode: z.enum(["any", "all"]).default("any").describe("Tag filter mode: 'any' (overlap) or 'all' (contains all)"),
       limit: limitParam(20, 100),
@@ -571,7 +571,7 @@ export const toolSpecs = {
       "Same RRF approach as search_entries but scoped to artifacts only.",
     params: z.object({
       query: z.string().min(1).describe("Search query"),
-      kind: z.enum(["insight", "theory", "model", "reference"]).optional().describe("Filter by artifact kind"),
+      kind: z.enum(["insight", "theory", "model", "reference", "note"]).optional().describe("Filter by artifact kind"),
       tags: z.array(z.string()).optional().describe("Filter by tags"),
       tags_mode: z.enum(["any", "all"]).default("any").describe("Tag filter mode"),
       limit: limitParam(10, 50),
@@ -597,7 +597,7 @@ export const toolSpecs = {
       date_to: dateString.optional().describe("Filter entries up to this date"),
       city: z.string().optional().describe("Filter entries by city"),
       entry_tags: z.array(z.string()).optional().describe("Filter entries by tags"),
-      artifact_kind: z.enum(["insight", "theory", "model", "reference"]).optional()
+      artifact_kind: z.enum(["insight", "theory", "model", "reference", "note"]).optional()
         .describe("Filter artifacts by kind"),
       artifact_tags: z.array(z.string()).optional().describe("Filter artifacts by tags"),
       limit: limitParam(10, 50),
@@ -610,6 +610,123 @@ export const toolSpecs = {
       {
         input: { query: "dopamine", content_types: ["knowledge_artifact"] },
         behavior: "Searches only knowledge artifacts for dopamine content",
+      },
+    ],
+  },
+
+  list_todos: {
+    name: "list_todos" as const,
+    description:
+      "List todos with filtering by status, Eisenhower quadrant (urgent/important), parent, or focus. " +
+      "Supports include_children to load subtasks inline.",
+    params: z.object({
+      status: z.enum(["active", "waiting", "done", "someday"]).optional().describe("Filter by status"),
+      urgent: z.boolean().optional().describe("Filter by urgency"),
+      important: z.boolean().optional().describe("Filter by importance"),
+      parent_id: z.string().optional().describe("Filter by parent ID, or 'root' for top-level only"),
+      focus_only: z.boolean().optional().describe("Only return the current focus todo"),
+      include_children: z.boolean().optional().describe("Include child todos inline"),
+      limit: limitParam(20, 100),
+      offset: z.number().int().min(0).default(0).describe("Pagination offset"),
+    }),
+    examples: [
+      {
+        input: { urgent: true, important: true, status: "active" },
+        behavior: "Returns 'Do First' quadrant items that are active",
+      },
+      {
+        input: { focus_only: true },
+        behavior: "Returns the current 'One Thing' focus todo",
+      },
+      {
+        input: { include_children: true, parent_id: "root" },
+        behavior: "Returns top-level todos with their subtasks",
+      },
+    ],
+  },
+
+  create_todo: {
+    name: "create_todo" as const,
+    description:
+      "Create a new todo with optional Eisenhower urgency/importance flags and parent for subtasks. " +
+      "Max 2 levels deep (parent must be root-level).",
+    params: z.object({
+      title: z.string().min(1).max(300).describe("Todo title"),
+      status: z.enum(["active", "waiting", "done", "someday"]).optional().describe("Status (default: active)"),
+      next_step: z.string().max(500).optional().describe("Current action step"),
+      body: z.string().optional().describe("Markdown notes/context"),
+      tags: z.array(z.string()).optional().describe("Tags"),
+      urgent: z.boolean().optional().describe("Is urgent (Eisenhower)"),
+      important: z.boolean().optional().describe("Is important (Eisenhower)"),
+      parent_id: z.string().optional().describe("Parent todo ID for subtasks"),
+    }),
+    examples: [
+      {
+        input: { title: "File Spanish taxes", urgent: true, important: true },
+        behavior: "Creates a Do First quadrant todo",
+      },
+      {
+        input: { title: "Send modelo 720 forms", parent_id: "abc-123" },
+        behavior: "Creates a subtask under the parent todo",
+      },
+    ],
+  },
+
+  update_todo: {
+    name: "update_todo" as const,
+    description:
+      "Update a todo's fields. Auto-sets completed_at when status → done, clears it otherwise.",
+    params: z.object({
+      id: z.string().min(1).describe("Todo ID"),
+      title: z.string().min(1).max(300).optional().describe("New title"),
+      status: z.enum(["active", "waiting", "done", "someday"]).optional().describe("New status"),
+      next_step: z.string().max(500).nullable().optional().describe("New next step (null to clear)"),
+      body: z.string().optional().describe("New body"),
+      tags: z.array(z.string()).optional().describe("New tags"),
+      urgent: z.boolean().optional().describe("Update urgency"),
+      important: z.boolean().optional().describe("Update importance"),
+    }),
+    examples: [
+      {
+        input: { id: "abc-123", status: "done" },
+        behavior: "Marks todo as done and auto-sets completed_at",
+      },
+    ],
+  },
+
+  complete_todo: {
+    name: "complete_todo" as const,
+    description:
+      "Mark a todo as done, set completed_at, and clear focus if it was the focus item. " +
+      "Convenience shortcut for the common case.",
+    params: z.object({
+      id: z.string().min(1).describe("Todo ID to complete"),
+    }),
+    examples: [
+      {
+        input: { id: "abc-123" },
+        behavior: "Sets status=done, completed_at=now, clears is_focus",
+      },
+    ],
+  },
+
+  set_todo_focus: {
+    name: "set_todo_focus" as const,
+    description:
+      "Set or clear 'The One Thing' focus. Only one todo can be focus at a time. " +
+      "Call with id to set, or with clear=true to unset.",
+    params: z.object({
+      id: z.string().optional().describe("Todo ID to set as focus"),
+      clear: z.boolean().optional().describe("Set to true to clear focus without setting a new one"),
+    }),
+    examples: [
+      {
+        input: { id: "abc-123" },
+        behavior: "Clears previous focus and sets this todo as The One Thing",
+      },
+      {
+        input: { clear: true },
+        behavior: "Clears the current focus without setting a new one",
       },
     ],
   },

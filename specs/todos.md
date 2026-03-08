@@ -1,6 +1,6 @@
 # Todo System Spec
 
-Lightweight task tracking with daily-step workflow. Each todo represents a multi-step goal where you either take one step to advance it (active) or wait because blocked (waiting). Example: Spanish taxes — contact lawyer, wait to hear back, send forms, etc.
+Eisenhower-style task tracking with urgency/importance quadrants, a "One Thing" daily focus, and parent/child project hierarchy. Each todo lives in one of four quadrants (Do First, Schedule, Delegate, Someday) based on `urgent` + `important` flags. The focus flag implements the "One Thing" philosophy — one active todo gets full attention.
 
 ---
 
@@ -12,16 +12,25 @@ Lightweight task tracking with daily-step workflow. Each todo represents a multi
 CREATE TABLE IF NOT EXISTS todos (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   title TEXT NOT NULL CHECK (char_length(title) BETWEEN 1 AND 300),
-  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'waiting', 'done')),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'waiting', 'done', 'someday')),
   next_step TEXT,
   body TEXT NOT NULL DEFAULT '',
   tags TEXT[] NOT NULL DEFAULT '{}',
+  urgent BOOLEAN NOT NULL DEFAULT FALSE,
+  important BOOLEAN NOT NULL DEFAULT FALSE,
+  is_focus BOOLEAN NOT NULL DEFAULT FALSE,
+  parent_id UUID REFERENCES todos(id) ON DELETE CASCADE,
+  sort_order INT NOT NULL DEFAULT 0,
+  completed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_todos_status ON todos(status);
 CREATE INDEX IF NOT EXISTS idx_todos_updated ON todos(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_todos_parent ON todos(parent_id);
+CREATE INDEX IF NOT EXISTS idx_todos_focus ON todos(is_focus) WHERE is_focus = TRUE;
+CREATE INDEX IF NOT EXISTS idx_todos_quadrant ON todos(urgent, important, status);
 ```
 
 ### Fields
@@ -29,15 +38,69 @@ CREATE INDEX IF NOT EXISTS idx_todos_updated ON todos(updated_at DESC);
 | Field | Purpose |
 |-------|---------|
 | `title` | What the todo is (e.g., "Spanish taxes 2025") |
-| `status` | `active` (take a step today), `waiting` (blocked, waiting on external), `done` (complete) |
-| `next_step` | At-a-glance current action (e.g., "Send accountant the modelo 720 forms"). Shown on list cards. |
-| `body` | Markdown for tracking history, notes, context. Updated as you progress. |
+| `status` | `active` (actionable now), `waiting` (blocked), `done` (complete), `someday` (parking lot) |
+| `next_step` | At-a-glance current action. Shown on list cards. |
+| `body` | Markdown for tracking history, notes, context. |
 | `tags` | Simple `TEXT[]` (not normalized junction table — todos are lightweight). |
+| `urgent` | Eisenhower urgency flag. |
+| `important` | Eisenhower importance flag. |
+| `is_focus` | "The One Thing" — only one todo can be focused at a time (enforced in app logic). |
+| `parent_id` | Self-referencing FK for project hierarchy. Max 2 levels enforced in app logic. |
+| `sort_order` | Manual ordering within a list or parent. |
+| `completed_at` | Auto-set when status → `done`, cleared when moved to another status. |
+
+### Eisenhower quadrants (derived)
+
+| Quadrant | urgent | important |
+|----------|--------|-----------|
+| Do First | true | true |
+| Schedule | false | true |
+| Delegate | true | false |
+| Someday | false | false |
 
 ### DB invariants
 
 - `updated_at` auto-bumped via trigger on UPDATE (same pattern as `knowledge_artifacts`).
 - Tags normalized in app layer: trim, lowercase, dedupe, stable sort.
+- `completed_at` set automatically in query layer when status → `done`, cleared on other status transitions.
+- `is_focus` uniqueness enforced in app layer — `setTodoFocus` clears all before setting new.
+- `parent_id` nesting depth (max 2 levels) enforced in app layer — parent must exist and have no parent itself.
+
+---
+
+## Status model
+
+| Status | Meaning |
+|--------|---------|
+| `active` | Actionable now (default) |
+| `waiting` | Blocked / waiting on someone |
+| `done` | Completed (sets `completed_at`) |
+| `someday` | Parking lot / maybe later |
+
+---
+
+## Query functions — `src/db/queries.ts`
+
+- `listTodos(pool, { status?, urgent?, important?, parent_id?, focus_only?, include_children?, limit?, offset? })` — returns `{ rows, count }`. `parent_id` accepts `"root"` (top-level only) or a UUID.
+- `getTodoById(pool, id)` — includes children array.
+- `createTodo(pool, { title, status?, next_step?, body?, tags?, urgent?, important?, parent_id? })` — validates parent exists and is root-level.
+- `updateTodo(pool, id, { title?, status?, next_step?, body?, tags?, urgent?, important? })` — auto-sets `completed_at` on done, clears on other status.
+- `deleteTodo(pool, id)`
+- `completeTodo(pool, id)` — sets done + completed_at + clears focus.
+- `setTodoFocus(pool, id?)` — clears all focus, optionally sets new. Returns focused todo or null.
+- `getFocusTodo(pool)` — returns current focus todo or null.
+
+---
+
+## MCP Tools — `specs/tools.spec.ts`
+
+| Tool | Purpose |
+|------|---------|
+| `list_todos` | Filter by status, quadrant, parent, focus. Supports `include_children`. |
+| `create_todo` | Create with urgency/importance/parent_id. |
+| `update_todo` | Partial update, auto-sets `completed_at` on done. |
+| `complete_todo` | Convenience: mark done + clear focus if needed. |
+| `set_todo_focus` | Set/clear "The One Thing". |
 
 ---
 
@@ -47,43 +110,14 @@ All endpoints require bearer token auth (`MCP_SECRET`). Inputs validated with Zo
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/todos` | List todos. Optional `?status=active\|waiting\|done`, `?limit=` (default 20, max 100), `?offset=`. Returns `{ items, total }`. Ordered by `updated_at DESC`. |
-| `GET` | `/api/todos/:id` | Get single todo. |
-| `POST` | `/api/todos` | Create: `{ title, status?, next_step?, body?, tags? }`. Status defaults to `active`. |
-| `PUT` | `/api/todos/:id` | Update: `{ title?, status?, next_step?, body?, tags? }`. No optimistic locking (single user). |
+| `GET` | `/api/todos` | List todos. Filters: `status`, `urgent`, `important`, `parent_id` (`root` or UUID), `focus_only`, `include_children`, `limit`, `offset`. Returns `{ items, total }`. |
+| `GET` | `/api/todos/focus` | Get current focus todo. |
+| `GET` | `/api/todos/:id` | Get single todo with children. |
+| `POST` | `/api/todos` | Create: `{ title, status?, next_step?, body?, tags?, urgent?, important?, parent_id? }`. |
+| `PUT` | `/api/todos/:id` | Update: `{ title?, status?, next_step?, body?, tags?, urgent?, important? }`. |
+| `POST` | `/api/todos/:id/complete` | Complete a todo (sets done + completed_at + clears focus). |
+| `POST` | `/api/todos/focus` | Set focus `{ id }` or clear `{ clear: true }`. |
 | `DELETE` | `/api/todos/:id` | Delete todo. |
-
-### Zod schemas
-
-```typescript
-const todoStatusSchema = z.enum(["active", "waiting", "done"]);
-
-const createTodoSchema = z.object({
-  title: z.string().min(1).max(300),
-  status: todoStatusSchema.optional(),
-  next_step: z.string().max(500).nullable().optional(),
-  body: z.string().optional(),
-  tags: z.array(z.string()).optional(),
-});
-
-const updateTodoSchema = z.object({
-  title: z.string().min(1).max(300).optional(),
-  status: todoStatusSchema.optional(),
-  next_step: z.string().max(500).nullable().optional(),
-  body: z.string().optional(),
-  tags: z.array(z.string()).optional(),
-});
-```
-
----
-
-## Query functions — `src/db/queries.ts`
-
-- `listTodos(pool, { status?, limit?, offset? })` — returns `{ rows, count }`
-- `getTodoById(pool, id)`
-- `createTodo(pool, { title, status?, next_step?, body?, tags? })`
-- `updateTodo(pool, id, { title?, status?, next_step?, body?, tags? })`
-- `deleteTodo(pool, id)`
 
 ---
 
@@ -92,115 +126,54 @@ const updateTodoSchema = z.object({
 ### Routes — `web/src/main.tsx`
 
 ```
-/todos       -> TodoList (filterable by status)
-/todos/new   -> TodoCreate
-/todos/:id   -> TodoEdit
+/todos       -> TodoList (filterable by status, list/matrix view)
+/todos/new   -> TodoCreate (with urgent/important toggles, parent picker)
+/todos/:id   -> TodoEdit (with focus toggle, complete button, subtasks)
 ```
 
-React Router v6 matches static segments before dynamic, so `/todos` won't conflict with existing `/:id` artifact route.
+### TodoList features
 
-### Navigation
+- Focus banner pinned at top (star icon, distinct background)
+- List view (default) and Eisenhower Matrix view toggle
+- Quadrant indicator badges on cards
+- Project cards show child count
+- Filter pills: All / Active / Waiting / Someday / Done
 
-Add a minimal nav bar inside `AuthGate` (above `<Routes>`) with two links:
-- "Knowledge Base" (`/`)
-- "Todos" (`/todos`)
+### TodoCreate features
 
-Highlight active link via `useLocation()`.
+- Urgent/important checkboxes
+- Parent picker dropdown (loads root-level todos)
+- Supports `?parent` URL param for creating subtasks
 
-### TodoList page — `web/src/pages/TodoList.tsx`
+### TodoEdit features
 
-Pattern from `ArtifactList.tsx`:
-- Status filter pills: All / Active / Waiting / Done
-- Cards show: status badge (colored), title, next_step preview (muted italic if present), tags, updated date
-- Cards link to `/todos/:id`
-- Floating action button → `/todos/new`
-- Pagination with URL search params (`?page=N`)
-
-### TodoCreate page — `web/src/pages/TodoCreate.tsx`
-
-Pattern from `ArtifactCreate.tsx`:
-- Title input (required)
-- Status defaults to "active"
-- Next step input (optional, single line)
-- Body (MarkdownEditor, optional)
-- Tags (TagInput component)
-- Create button → navigate to `/todos/:id`
-
-### TodoEdit page — `web/src/pages/TodoEdit.tsx`
-
-Pattern from `ArtifactEdit.tsx`:
-- Back arrow + "Edit Todo" header + Save/Delete buttons
-- Title, Status (StatusSelect dropdown), Next Step, Body (MarkdownEditor), Tags
-- Manual save (no autosave)
-- Save → `navigate(-1)` to preserve history
-
-### StatusSelect component — `web/src/components/StatusSelect.tsx`
-
-Simple dropdown for `active | waiting | done`. Same pattern as `KindSelect.tsx`.
-
-### Styling — `web/src/index.css`
-
-Add status badge CSS variables in `@theme` (light) and dark override:
-
-| Status | Light bg | Light text | Dark bg | Dark text |
-|--------|----------|------------|---------|-----------|
-| active | `#daf0e2` | `#1a6b3a` | `#1e3828` | `#82d8a0` |
-| waiting | `#fef3cd` | `#856404` | `#3a3218` | `#e8c86a` |
-| done | `#e8e8e8` | `#6b6b6b` | `#333333` | `#999999` |
-
-Use Tailwind classes in components: `bg-badge-active-bg text-badge-active-text`, etc.
-
-### Web API client — `web/src/api.ts`
-
-```typescript
-export interface Todo {
-  id: string;
-  title: string;
-  status: "active" | "waiting" | "done";
-  next_step: string | null;
-  body: string;
-  tags: string[];
-  created_at: string;
-  updated_at: string;
-}
-```
-
-Add CRUD functions using existing `apiFetch` helper.
+- Focus toggle button (★/☆)
+- Complete button
+- Urgent/important checkboxes
+- Children/subtasks section with inline "Add subtask" input
+- `completed_at` display
 
 ---
 
-## Implementation order
+## Telegram integration
 
-1. Migration 019: Add "note" kind to artifact CHECK constraint
-2. Migration 020: Create `todos` table with trigger
-3. Update `specs/schema.sql` with both changes
-4. Backend: queries in `src/db/queries.ts` + API endpoints in `src/transports/http.ts` + add "note" to `artifactKindSchema`
-5. MCP tools spec: add "note" to kind enums in `specs/tools.spec.ts`
-6. Frontend: API client, CSS, components, pages, routing, nav
-7. `npx vite build` to verify
-8. Production migration before push
+### Context injection — `src/todos/context.ts`
 
----
+`buildTodoContextPrompt()` injected into Telegram agent system prompt alongside Oura context:
+- Current focus todo
+- "Do First" quadrant items (urgent + important, active)
+- Waiting items count
+- Total active count
 
-## Note kind changes (alongside todo system)
+### Evening/morning prompts — `src/telegram/evening-review.ts`
 
-Add `"note"` to artifact kinds in these files:
-
-| File | Location |
-|------|----------|
-| `scripts/migrate.ts` | Migration 019: ALTER CHECK constraint |
-| `specs/schema.sql` | Line 565 |
-| `specs/tools.spec.ts` | Lines 549, 574, 600 |
-| `src/transports/http.ts` | `artifactKindSchema` (line 294) |
-| `web/src/api.ts` | `Artifact.kind` type (line 3) |
-| `web/src/pages/ArtifactList.tsx` | KINDS, KIND_LABELS, BADGE_COLORS |
-| `web/src/components/KindSelect.tsx` | KINDS array |
-| `web/src/index.css` | Badge colors: light `#f0ece5`/`#5a4d38`, dark `#3a3428`/`#d4c8a8` |
+- **Evening**: Asks "Did you do your one thing?", offers to complete/refocus
+- **Morning**: Surfaces focus and Do First items, encourages setting One Thing
 
 ---
 
 ## Out of scope (future)
 
-- MCP tools for todos (can add `list_todos`, `create_todo` etc. later for Telegram agent)
-- Todo search (no embedding/RRF — just list + filter for now)
+- Todo search (no embedding/RRF — just list + filter)
 - Todo reminders or scheduling
+- Recurring todos

@@ -82,9 +82,25 @@ import {
   listArtifacts,
   countArtifacts,
   searchArtifacts,
+  searchArtifactsKeyword,
   listArtifactTags,
+  listArtifactTitles,
+  resolveArtifactTitleToId,
+  syncExplicitLinks,
+  getExplicitLinks,
+  getExplicitBacklinks,
+  findSimilarArtifacts,
+  getArtifactGraph,
   searchContent,
   searchEntriesForPicker,
+  listTodos,
+  getTodoById,
+  createTodo,
+  updateTodo,
+  deleteTodo,
+  completeTodo,
+  setTodoFocus,
+  getFocusTodo,
 } from "../../src/db/queries.js";
 import { fixturePatterns, fixtureArtifacts } from "../../specs/fixtures/seed.js";
 
@@ -2443,6 +2459,62 @@ describe("searchArtifacts", () => {
   });
 });
 
+describe("searchArtifactsKeyword", () => {
+  it("matches title prefixes so 'class' finds 'classroom'", async () => {
+    const created = await createArtifact(pool, {
+      kind: "note",
+      title: "Classroom regulation protocol",
+      body: "Notes on classroom co-regulation and trauma-informed pacing.",
+      tags: ["education", "trauma"],
+      source_entry_uuids: [],
+    });
+
+    const results = await searchArtifactsKeyword(pool, "class", {}, 10);
+    expect(results.length).toBeGreaterThan(0);
+
+    const match = results.find((r) => r.id === created.id);
+    expect(match).toBeDefined();
+    expect(match?.has_semantic).toBe(false);
+    expect(match?.has_fulltext).toBe(true);
+  });
+
+  it("supports kind filter and tag filters in any/all modes", async () => {
+    const byKind = await searchArtifactsKeyword(pool, "sleep", { kind: "theory" }, 10);
+    expect(byKind.length).toBeGreaterThan(0);
+    for (const row of byKind) expect(row.kind).toBe("theory");
+
+    const byTagsAny = await searchArtifactsKeyword(
+      pool,
+      "sleep",
+      { tags: ["sleep"], tags_mode: "any" },
+      10
+    );
+    expect(byTagsAny.length).toBeGreaterThan(0);
+    for (const row of byTagsAny) expect(row.tags).toContain("sleep");
+
+    const byTagsDefaultMode = await searchArtifactsKeyword(
+      pool,
+      "sleep",
+      { tags: ["sleep"] },
+      10
+    );
+    expect(byTagsDefaultMode.length).toBeGreaterThan(0);
+    for (const row of byTagsDefaultMode) expect(row.tags).toContain("sleep");
+
+    const byTagsAll = await searchArtifactsKeyword(
+      pool,
+      "sleep",
+      { tags: ["health", "sleep"], tags_mode: "all" },
+      10
+    );
+    expect(byTagsAll.length).toBeGreaterThan(0);
+    for (const row of byTagsAll) {
+      expect(row.tags).toContain("health");
+      expect(row.tags).toContain("sleep");
+    }
+  });
+});
+
 // ============================================================================
 // Unified search — searchContent
 // ============================================================================
@@ -2595,6 +2667,395 @@ describe("searchEntriesForPicker", () => {
   it("returns empty for no matches", async () => {
     const results = await searchEntriesForPicker(pool, "zyxwvutsrq", 10);
     expect(results).toEqual([]);
+  });
+});
+
+describe("artifact title + link queries", () => {
+  it("listArtifactTitles returns latest artifacts first", async () => {
+    const created = await createArtifact(pool, {
+      kind: "note",
+      title: "Latest note",
+      body: "Body",
+    });
+
+    const titles = await listArtifactTitles(pool);
+    expect(titles.length).toBeGreaterThan(0);
+    expect(titles[0].id).toBe(created.id);
+    expect(titles[0].kind).toBe("note");
+  });
+
+  it("resolveArtifactTitleToId is case-insensitive", async () => {
+    const created = await createArtifact(pool, {
+      kind: "insight",
+      title: "Trauma Classroom Link",
+      body: "Body",
+    });
+
+    const resolved = await resolveArtifactTitleToId(pool, "trauma classroom link");
+    const missing = await resolveArtifactTitleToId(pool, "does not exist");
+
+    expect(resolved).toBe(created.id);
+    expect(missing).toBeNull();
+  });
+
+  it("syncExplicitLinks replaces outgoing links and supports backlinks", async () => {
+    const source = await createArtifact(pool, {
+      kind: "insight",
+      title: "Source Artifact",
+      body: "Body",
+    });
+    const alpha = await createArtifact(pool, {
+      kind: "theory",
+      title: "Alpha Target",
+      body: "Body",
+    });
+    const beta = await createArtifact(pool, {
+      kind: "model",
+      title: "Beta Target",
+      body: "Body",
+    });
+
+    await syncExplicitLinks(pool, source.id, [
+      beta.id,
+      alpha.id,
+      alpha.id,
+      source.id,
+    ]);
+
+    const outgoing = await getExplicitLinks(pool, source.id);
+    expect(outgoing.map((item) => item.id)).toEqual([alpha.id, beta.id]);
+
+    const incoming = await getExplicitBacklinks(pool, beta.id);
+    expect(incoming.some((item) => item.id === source.id)).toBe(true);
+
+    await syncExplicitLinks(pool, source.id, []);
+    const cleared = await getExplicitLinks(pool, source.id);
+    expect(cleared).toEqual([]);
+  });
+
+  it("findSimilarArtifacts returns similarity-ranked results for embedded artifacts", async () => {
+    const source = await createArtifact(pool, {
+      kind: "insight",
+      title: "Similarity Source",
+      body: "Body",
+    });
+    const target = await createArtifact(pool, {
+      kind: "theory",
+      title: "Similarity Target",
+      body: "Body",
+    });
+
+    const embeddingStr = `[${fixtureArtifacts[0].embedding.join(",")}]`;
+    await pool.query(
+      `UPDATE knowledge_artifacts SET embedding = $2::vector WHERE id = $1`,
+      [source.id, embeddingStr]
+    );
+    await pool.query(
+      `UPDATE knowledge_artifacts SET embedding = $2::vector WHERE id = $1`,
+      [target.id, embeddingStr]
+    );
+
+    const similar = await findSimilarArtifacts(pool, source.id, 10, 0.3);
+    expect(similar.length).toBeGreaterThan(0);
+    expect(similar.some((item) => item.id === target.id)).toBe(true);
+    expect(similar.every((item) => item.id !== source.id)).toBe(true);
+    for (let i = 1; i < similar.length; i++) {
+      expect(similar[i].similarity).toBeLessThanOrEqual(similar[i - 1].similarity);
+    }
+  });
+
+  it("getArtifactGraph returns semantic, explicit, and shared-source edges", async () => {
+    const first = await createArtifact(pool, {
+      kind: "insight",
+      title: "Graph A",
+      body: "Body A",
+      source_entry_uuids: ["ENTRY-001-WORK-STRESS"],
+    });
+    const second = await createArtifact(pool, {
+      kind: "theory",
+      title: "Graph B",
+      body: "Body B",
+      source_entry_uuids: ["ENTRY-001-WORK-STRESS"],
+    });
+
+    const embeddingStr = `[${fixtureArtifacts[0].embedding.join(",")}]`;
+    await pool.query(
+      `UPDATE knowledge_artifacts SET embedding = $2::vector WHERE id = $1`,
+      [first.id, embeddingStr]
+    );
+    await pool.query(
+      `UPDATE knowledge_artifacts SET embedding = $2::vector WHERE id = $1`,
+      [second.id, embeddingStr]
+    );
+
+    await syncExplicitLinks(pool, first.id, [second.id]);
+    const graph = await getArtifactGraph(pool);
+    const hasPair = (a: string, b: string, x: string, y: string): boolean =>
+      (a === x && b === y) || (a === y && b === x);
+
+    expect(
+      graph.explicitLinks.some(
+        (link) => link.source_id === first.id && link.target_id === second.id
+      )
+    ).toBe(true);
+    expect(
+      graph.sharedSources.some(
+        (pair) => hasPair(pair.artifact_id_1, pair.artifact_id_2, first.id, second.id)
+      )
+    ).toBe(true);
+    expect(
+      graph.similarities.some(
+        (pair) => hasPair(pair.id_1, pair.id_2, first.id, second.id)
+      )
+    ).toBe(true);
+  });
+});
+
+describe("todo queries", () => {
+  it("createTodo inserts and normalizes tags", async () => {
+    const todo = await createTodo(pool, {
+      title: "Spanish taxes 2025",
+      status: "active",
+      next_step: "Send docs",
+      body: "Track updates",
+      tags: [" admin ", "Finance", "finance"],
+    });
+
+    expect(todo.id).toBeTruthy();
+    expect(todo.status).toBe("active");
+    expect(todo.tags).toEqual(["admin", "finance"]);
+  });
+
+  it("getTodoById returns null for missing row", async () => {
+    const todo = await getTodoById(pool, "00000000-0000-0000-0000-000000000000");
+    expect(todo).toBeNull();
+  });
+
+  it("listTodos supports status filter and total count", async () => {
+    await createTodo(pool, { title: "Active todo", status: "active" });
+    await createTodo(pool, { title: "Waiting todo", status: "waiting" });
+
+    const all = await listTodos(pool, { limit: 20, offset: 0 });
+    const waiting = await listTodos(pool, {
+      status: "waiting",
+      limit: 20,
+      offset: 0,
+    });
+
+    expect(all.count).toBeGreaterThanOrEqual(2);
+    expect(waiting.rows).toHaveLength(1);
+    expect(waiting.rows[0].status).toBe("waiting");
+  });
+
+  it("updateTodo updates provided fields and keeps existing when empty update", async () => {
+    const created = await createTodo(pool, {
+      title: "Initial",
+      status: "active",
+      next_step: "Step 1",
+      body: "Body",
+      tags: ["one"],
+    });
+
+    const updated = await updateTodo(pool, created.id, {
+      status: "done",
+      next_step: null,
+      tags: ["Done", " done "],
+    });
+    expect(updated).not.toBeNull();
+    expect(updated!.status).toBe("done");
+    expect(updated!.next_step).toBeNull();
+    expect(updated!.tags).toEqual(["done"]);
+    expect(updated!.completed_at).not.toBeNull();
+
+    // Moving away from done clears completed_at
+    const reactivated = await updateTodo(pool, created.id, { status: "active" });
+    expect(reactivated!.completed_at).toBeNull();
+
+    const unchanged = await updateTodo(pool, created.id, {});
+    expect(unchanged).not.toBeNull();
+    expect(unchanged!.id).toBe(created.id);
+  });
+
+  it("updateTodo supports title/body updates", async () => {
+    const created = await createTodo(pool, {
+      title: "Original title",
+      body: "Original body",
+    });
+
+    const updated = await updateTodo(pool, created.id, {
+      title: "Updated title",
+      body: "Updated body",
+    });
+
+    expect(updated).not.toBeNull();
+    expect(updated!.title).toBe("Updated title");
+    expect(updated!.body).toBe("Updated body");
+  });
+
+  it("deleteTodo removes rows and returns false for missing ids", async () => {
+    const created = await createTodo(pool, { title: "Delete me" });
+    const deleted = await deleteTodo(pool, created.id);
+    const deletedAgain = await deleteTodo(
+      pool,
+      "00000000-0000-0000-0000-000000000000"
+    );
+
+    expect(deleted).toBe(true);
+    expect(deletedAgain).toBe(false);
+    expect(await getTodoById(pool, created.id)).toBeNull();
+  });
+
+  it("createTodo supports urgent/important flags", async () => {
+    const todo = await createTodo(pool, {
+      title: "Urgent + Important",
+      urgent: true,
+      important: true,
+    });
+    expect(todo.urgent).toBe(true);
+    expect(todo.important).toBe(true);
+    expect(todo.is_focus).toBe(false);
+    expect(todo.parent_id).toBeNull();
+  });
+
+  it("createTodo supports parent_id for subtasks", async () => {
+    const parent = await createTodo(pool, { title: "Parent project" });
+    const child = await createTodo(pool, {
+      title: "Subtask",
+      parent_id: parent.id,
+    });
+    expect(child.parent_id).toBe(parent.id);
+
+    // getTodoById loads children
+    const loaded = await getTodoById(pool, parent.id);
+    expect(loaded!.children).toHaveLength(1);
+    expect(loaded!.children![0].title).toBe("Subtask");
+  });
+
+  it("createTodo rejects nesting more than 2 levels", async () => {
+    const parent = await createTodo(pool, { title: "Root" });
+    const child = await createTodo(pool, {
+      title: "Child",
+      parent_id: parent.id,
+    });
+    await expect(
+      createTodo(pool, { title: "Grandchild", parent_id: child.id })
+    ).rejects.toThrow("Cannot nest more than 2 levels deep");
+  });
+
+  it("createTodo rejects invalid parent_id", async () => {
+    await expect(
+      createTodo(pool, {
+        title: "Orphan",
+        parent_id: "00000000-0000-0000-0000-000000000000",
+      })
+    ).rejects.toThrow("Parent todo not found");
+  });
+
+  it("listTodos filters by urgent/important (quadrant)", async () => {
+    await createTodo(pool, { title: "Do First", urgent: true, important: true });
+    await createTodo(pool, { title: "Schedule", urgent: false, important: true });
+    await createTodo(pool, { title: "Neither" });
+
+    const doFirst = await listTodos(pool, { urgent: true, important: true, limit: 20, offset: 0 });
+    expect(doFirst.rows).toHaveLength(1);
+    expect(doFirst.rows[0].title).toBe("Do First");
+
+    const schedule = await listTodos(pool, { urgent: false, important: true, limit: 20, offset: 0 });
+    expect(schedule.rows).toHaveLength(1);
+    expect(schedule.rows[0].title).toBe("Schedule");
+  });
+
+  it("listTodos supports parent_id=root, parent_id=uuid, and include_children", async () => {
+    const parent = await createTodo(pool, { title: "Project" });
+    const solo = await createTodo(pool, { title: "Solo task" });
+    await createTodo(pool, { title: "Step 1", parent_id: parent.id });
+    await createTodo(pool, { title: "Step 2", parent_id: parent.id });
+
+    const rootOnly = await listTodos(pool, { parent_id: "root", limit: 20, offset: 0 });
+    expect(rootOnly.rows.every((r) => r.parent_id === null)).toBe(true);
+
+    // Filter by specific parent_id (UUID)
+    const children = await listTodos(pool, { parent_id: parent.id, limit: 20, offset: 0 });
+    expect(children.rows).toHaveLength(2);
+    expect(children.rows.every((r) => r.parent_id === parent.id)).toBe(true);
+
+    const withChildren = await listTodos(pool, { parent_id: "root", include_children: true, limit: 20, offset: 0 });
+    const project = withChildren.rows.find((r) => r.id === parent.id);
+    expect(project!.children).toHaveLength(2);
+    // Solo task has no children — covers the ?? [] fallback branch
+    const soloTask = withChildren.rows.find((r) => r.id === solo.id);
+    expect(soloTask!.children).toHaveLength(0);
+  });
+
+  it("listTodos supports someday status", async () => {
+    await createTodo(pool, { title: "Maybe later", status: "someday" });
+    const result = await listTodos(pool, { status: "someday", limit: 20, offset: 0 });
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].status).toBe("someday");
+  });
+
+  it("completeTodo sets done + completed_at + clears focus", async () => {
+    const todo = await createTodo(pool, { title: "Finish this" });
+    await setTodoFocus(pool, todo.id);
+
+    const completed = await completeTodo(pool, todo.id);
+    expect(completed!.status).toBe("done");
+    expect(completed!.completed_at).not.toBeNull();
+    expect(completed!.is_focus).toBe(false);
+  });
+
+  it("completeTodo returns null for missing todo", async () => {
+    const result = await completeTodo(pool, "00000000-0000-0000-0000-000000000000");
+    expect(result).toBeNull();
+  });
+
+  it("setTodoFocus enforces uniqueness", async () => {
+    const a = await createTodo(pool, { title: "A" });
+    const b = await createTodo(pool, { title: "B" });
+
+    await setTodoFocus(pool, a.id);
+    const focusA = await getFocusTodo(pool);
+    expect(focusA!.id).toBe(a.id);
+
+    await setTodoFocus(pool, b.id);
+    const focusB = await getFocusTodo(pool);
+    expect(focusB!.id).toBe(b.id);
+
+    // A is no longer focus
+    const reloadedA = await getTodoById(pool, a.id);
+    expect(reloadedA!.is_focus).toBe(false);
+  });
+
+  it("setTodoFocus clears focus when called with no id", async () => {
+    const todo = await createTodo(pool, { title: "Focus me" });
+    await setTodoFocus(pool, todo.id);
+    expect((await getFocusTodo(pool))!.id).toBe(todo.id);
+
+    await setTodoFocus(pool);
+    expect(await getFocusTodo(pool)).toBeNull();
+  });
+
+  it("setTodoFocus returns null for missing todo", async () => {
+    const result = await setTodoFocus(pool, "00000000-0000-0000-0000-000000000000");
+    expect(result).toBeNull();
+  });
+
+  it("updateTodo supports urgent/important updates", async () => {
+    const todo = await createTodo(pool, { title: "Flip flags" });
+    expect(todo.urgent).toBe(false);
+
+    const updated = await updateTodo(pool, todo.id, { urgent: true, important: true });
+    expect(updated!.urgent).toBe(true);
+    expect(updated!.important).toBe(true);
+  });
+
+  it("listTodos focus_only filter works", async () => {
+    const todo = await createTodo(pool, { title: "My focus" });
+    await setTodoFocus(pool, todo.id);
+
+    const result = await listTodos(pool, { focus_only: true, limit: 20, offset: 0 });
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].id).toBe(todo.id);
   });
 });
 

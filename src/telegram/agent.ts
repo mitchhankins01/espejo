@@ -50,6 +50,7 @@ import {
 } from "../db/queries.js";
 import { toolHandlers } from "../server.js";
 import { buildOuraContextPrompt } from "../oura/context.js";
+import { buildTodoContextPrompt } from "../todos/context.js";
 import {
   buildSoulPromptSection,
   evolveSoulState,
@@ -1968,7 +1969,8 @@ export async function runAgent(params: {
   );
   const spanishContextPrompt = await buildSpanishContextPrompt(chatId);
   const ouraContextPrompt = await buildOuraContextPrompt(pool);
-  const contextSections = [spanishContextPrompt, ouraContextPrompt].filter((v) => v.length > 0);
+  const todoContextPrompt = await buildTodoContextPrompt(pool);
+  const contextSections = [spanishContextPrompt, ouraContextPrompt, todoContextPrompt].filter((v) => v.length > 0);
   const systemPrompt = contextSections.length > 0
     ? `${baseSystemPrompt}\n\n${contextSections.join("\n\n")}`
     : baseSystemPrompt;

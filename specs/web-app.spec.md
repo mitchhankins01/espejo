@@ -1,82 +1,111 @@
-# Web App — espejo Knowledge Base Frontend
+# Web App Spec (Knowledge Base + Todos)
 
-> React + Vite single-page app for managing knowledge artifacts.
+React + Vite single-page app for managing knowledge artifacts and todos.
 
-## Current Status
+## Current scope
 
-**Implemented:**
-- React 19 + React Router with 6 routes: `/` (artifact list), `/new` (create artifact), `/:id` (edit artifact), `/todos` (todo list), `/todos/new` (create todo), `/todos/:id` (edit todo)
-- MDXEditor for rich markdown editing (toolbar: headings, bold, italic, underline, lists, links)
-- Bearer token auth gate (validates against `MCP_SECRET` via API)
-- Artifact CRUD: create, read, update (manual save with optimistic locking), delete
-- Todo CRUD: create, read, update (manual save), delete with status workflow (active/waiting/done)
-- Paginated artifact list (10 per page) with kind filter pills and hybrid RRF search
-- Tag management (add/remove tags)
-- Source entry linking (search journal entries by text)
-- Light/dark mode via `prefers-color-scheme` (system preference, no toggle)
-- Tailwind CSS v4 with pine green accent palette and WCAG AA contrast ratios
-- Floating action button for artifact creation
-- Playwright e2e test suite (auth, CRUD, filters, pagination, theme)
+Implemented feature set:
+- Artifact CRUD with optimistic locking (manual save, no autosave)
+- Artifact kinds: `insight`, `theory`, `model`, `reference`, `note`
+- Artifact list: pagination, keyword search, kind filters, tag filters (`tags_mode=all`)
+- Global quick switcher (`Cmd+K` / `Ctrl+K`) for title navigation
+- Semantic links/backlinks (`[[Title]]`) with related panel in editor
+- Graph view (semantic, explicit, shared-tag, shared-source edges)
+- Todo CRUD with statuses (`active`, `waiting`, `done`)
+- Top nav inside auth gate: `Knowledge Base` and `Todos`
+
+For implementation rollout details, see `specs/web-feature-rollout.md`.
 
 ## Stack
 
 | Layer | Technology | Purpose |
-|-------|-----------|---------|
+|---|---|---|
 | Framework | React 19 + Vite | SPA with HMR |
-| Routing | React Router v7 | Client-side routing |
-| Editor | MDXEditor | Rich markdown editing |
-| Styling | Tailwind CSS v4 | Utility-first styling with dark mode support |
-| Testing | Playwright | E2e tests across light/dark mode |
-| API | REST via Vite dev proxy | Proxies `/api` to MCP HTTP server |
+| Routing | React Router | Client-side routing |
+| Editor | MDXEditor | Markdown editing |
+| Styling | Tailwind CSS v4 | Theming and layout |
+| Graph | react-force-graph-2d | Force-directed artifact graph |
+| Testing | Playwright | End-to-end coverage |
 
 ## Routes
 
 | Path | Component | Description |
-|------|-----------|-------------|
-| `/` | ArtifactList | Paginated list, search, kind filter pills |
-| `/new` | ArtifactCreate | Create form with kind, title, body, tags, sources |
-| `/:id` | ArtifactEdit | Edit form with manual save, version display, delete |
-| `/todos` | TodoList | Paginated list, status filter pills (active/waiting/done) |
-| `/todos/new` | TodoCreate | Create form with title, status, next_step, body, tags |
-| `/todos/:id` | TodoEdit | Edit form with manual save, delete |
+|---|---|---|
+| `/` | `ArtifactList` | Artifact list + search/filter + list/graph toggle |
+| `/new` | `ArtifactCreate` | Create artifact |
+| `/:id` | `ArtifactEdit` | Edit artifact, related panel, preview toggle |
+| `/todos` | `TodoList` | Todo list with status filters + pagination |
+| `/todos/new` | `TodoCreate` | Create todo |
+| `/todos/:id` | `TodoEdit` | Edit/delete todo |
 
-## API Contract
+## REST contract used by the web app
 
-The frontend communicates with the MCP HTTP server (`src/transports/http.ts`) via REST:
+All endpoints require bearer token auth (`MCP_SECRET`) from the auth gate.
 
 | Endpoint | Method | Request | Response |
-|----------|--------|---------|----------|
-| `/api/artifacts` | GET | `?limit=N&offset=N&kind=K` | `{ items: Artifact[], total: number }` |
-| `/api/artifacts` | GET | `?q=search&kind=K` | `Artifact[]` (RRF search, no pagination) |
+|---|---|---|---|
+| `/api/artifacts` | GET | `?limit&offset&kind&tags&tags_mode` | `{ items: Artifact[], total: number }` |
+| `/api/artifacts` | GET | `?q&kind&tags&tags_mode` | `Artifact[]` |
+| `/api/artifacts/tags` | GET | — | `{ name, count }[]` |
+| `/api/artifacts/titles` | GET | — | `{ id, title, kind }[]` |
+| `/api/artifacts/graph` | GET | — | `{ nodes, edges }` |
+| `/api/artifacts/:id/related` | GET | — | `{ semantic, explicit }` |
 | `/api/artifacts/:id` | GET | — | `Artifact` |
 | `/api/artifacts` | POST | `{ kind, title, body, tags?, source_entry_uuids? }` | `Artifact` |
-| `/api/artifacts/:id` | PUT | `{ kind?, title?, body?, tags?, source_entry_uuids?, expected_version }` | `Artifact` (409 on conflict) |
-| `/api/artifacts/:id` | DELETE | — | — |
-| `/api/entries/search` | GET | `?q=text` | `{ uuid, created_at, preview }[]` |
-| `/api/todos` | GET | `?status=S&limit=N&offset=N` | `{ items: Todo[], total: number }` |
+| `/api/artifacts/:id` | PUT | `{ kind?, title?, body?, tags?, source_entry_uuids?, expected_version }` | `Artifact` (`409` on conflict) |
+| `/api/artifacts/:id` | DELETE | — | `{ status: "deleted" }` |
+| `/api/entries/search` | GET | `?q&limit` | `{ uuid, created_at, preview }[]` |
+| `/api/todos` | GET | `?status&limit&offset` | `{ items: Todo[], total: number }` |
 | `/api/todos/:id` | GET | — | `Todo` |
 | `/api/todos` | POST | `{ title, status?, next_step?, body?, tags? }` | `Todo` |
 | `/api/todos/:id` | PUT | `{ title?, status?, next_step?, body?, tags? }` | `Todo` |
-| `/api/todos/:id` | DELETE | — | — |
+| `/api/todos/:id` | DELETE | — | `{ status: "deleted" }` |
+
+## UI behavior
+
+### Artifact list
+- List mode: search box, kind pills, tag pills, paginated cards (10/page).
+- Graph mode: hides list/search/filter controls and renders force graph.
+- View preference persists in `localStorage` (`espejo_view`).
+- Tag filtering is AND semantics by sending comma-separated tags + `tags_mode=all`.
+
+### Quick switcher
+- Opens on `Cmd+K` / `Ctrl+K` globally.
+- Fetches titles on open and caches for 30 seconds.
+- Keyboard controls: arrow up/down, Enter to navigate, Escape to close.
+- Empty query inserts `New artifact` shortcut (`/new`) as first result.
+
+### Artifact edit
+- Manual save only.
+- Related section combines semantic matches and explicit links/backlinks.
+- Preview mode renders `[[Title]]` as internal links when title-to-id resolution exists.
+- Markdown editor includes `[[]]` link insertion affordance.
+
+### Todos
+- Status lifecycle: `active`, `waiting`, `done`.
+- List supports status filtering and pagination with URL page params.
+- Create/edit pages follow artifact-style manual save pattern.
 
 ## Theming
 
-Tailwind CSS v4 with dark mode via `prefers-color-scheme` media strategy. No manual toggle.
+Custom CSS variables in `web/src/index.css` include:
+- Artifact badge colors including `note`
+- Todo status badges (`active`, `waiting`, `done`)
+- Light/dark values for both sets
 
-- **Light**: off-white backgrounds, dark green text, `#2e7d50` accent
-- **Dark**: deep forest backgrounds, sage text, `#5bb37a` accent
-- Kind badges, tags, and status indicators use semantic color classes
-- All text/background combinations meet WCAG AA contrast (4.5:1 minimum)
+## Verification
 
-## E2e Testing
-
-Playwright test suite in `web/e2e/`. Runs against the dev backend + Vite dev server.
-
+Automated:
 ```bash
-cd web
-pnpm e2e          # headless (light + dark)
-pnpm e2e:headed   # visible browser
-pnpm e2e:ui       # Playwright interactive UI
+pnpm check
+cd web && npx vite build
+cd web && pnpm e2e
 ```
 
-Tests run serially (shared dev database). Both light and dark mode projects test the full UI.
+Manual smoke checklist:
+1. Create/edit a `note` artifact and confirm badge/filter visibility.
+2. On `/`, combine kind + tag + search filters and verify results.
+3. Open quick switcher with `Cmd+K`/`Ctrl+K`, navigate by keyboard.
+4. Add `[[Title]]` in editor, save, verify explicit links/backlinks and preview links.
+5. Toggle graph view, verify node click navigation and edge variety.
+6. Create/edit/delete todos and verify status filters + pagination behavior.

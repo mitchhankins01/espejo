@@ -785,6 +785,82 @@ const migrations: Migration[] = [
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_name_lower ON tags (LOWER(name))`,
     ],
   },
+  {
+    name: "019-add-note-kind",
+    getSql: () => `
+      ALTER TABLE knowledge_artifacts
+        DROP CONSTRAINT IF EXISTS knowledge_artifacts_kind_check;
+
+      ALTER TABLE knowledge_artifacts
+        ADD CONSTRAINT knowledge_artifacts_kind_check
+        CHECK (kind IN ('insight', 'theory', 'model', 'reference', 'note'));
+    `,
+  },
+  {
+    name: "020-todos",
+    getSql: () => `
+      CREATE TABLE IF NOT EXISTS todos (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          title TEXT NOT NULL CHECK (char_length(title) BETWEEN 1 AND 300),
+          status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'waiting', 'done')),
+          next_step TEXT CHECK (next_step IS NULL OR char_length(next_step) <= 500),
+          body TEXT NOT NULL DEFAULT '',
+          tags TEXT[] NOT NULL DEFAULT '{}',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_todos_status ON todos(status);
+      CREATE INDEX IF NOT EXISTS idx_todos_updated ON todos(updated_at DESC);
+    `,
+    rawStatements: [
+      `CREATE OR REPLACE FUNCTION todo_updated_at_bump()
+       RETURNS TRIGGER AS $$
+       BEGIN
+           NEW.updated_at := NOW();
+           RETURN NEW;
+       END;
+       $$ LANGUAGE plpgsql`,
+      `DROP TRIGGER IF EXISTS trg_todo_updated_at_bump ON todos`,
+      `CREATE TRIGGER trg_todo_updated_at_bump
+           BEFORE UPDATE ON todos
+           FOR EACH ROW
+           EXECUTE FUNCTION todo_updated_at_bump()`,
+    ],
+  },
+  {
+    name: "021-artifact-links",
+    getSql: () => `
+      CREATE TABLE IF NOT EXISTS artifact_links (
+          source_id UUID NOT NULL REFERENCES knowledge_artifacts(id) ON DELETE CASCADE,
+          target_id UUID NOT NULL REFERENCES knowledge_artifacts(id) ON DELETE CASCADE,
+          PRIMARY KEY (source_id, target_id),
+          CHECK (source_id != target_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_artifact_links_target ON artifact_links (target_id);
+    `,
+  },
+  {
+    name: "022-todo-redesign",
+    getSql: () => `
+      ALTER TABLE todos
+        ADD COLUMN IF NOT EXISTS urgent BOOLEAN NOT NULL DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS important BOOLEAN NOT NULL DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS is_focus BOOLEAN NOT NULL DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES todos(id) ON DELETE CASCADE,
+        ADD COLUMN IF NOT EXISTS sort_order INT NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+
+      ALTER TABLE todos DROP CONSTRAINT IF EXISTS todos_status_check;
+      ALTER TABLE todos ADD CONSTRAINT todos_status_check
+        CHECK (status IN ('active', 'waiting', 'done', 'someday'));
+
+      CREATE INDEX IF NOT EXISTS idx_todos_parent ON todos(parent_id);
+      CREATE INDEX IF NOT EXISTS idx_todos_focus ON todos(is_focus) WHERE is_focus = TRUE;
+      CREATE INDEX IF NOT EXISTS idx_todos_quadrant ON todos(urgent, important, status);
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

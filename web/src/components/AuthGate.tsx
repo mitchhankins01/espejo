@@ -1,7 +1,9 @@
 import { useState, useEffect, type ReactNode } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { getToken, setToken, clearToken } from "../api.ts";
 
 export function AuthGate({ children }: { children: ReactNode }) {
+  const location = useLocation();
   const [authed, setAuthed] = useState(!!getToken());
   const [input, setInput] = useState("");
   const [error, setError] = useState("");
@@ -38,7 +40,38 @@ export function AuthGate({ children }: { children: ReactNode }) {
     );
   }
 
-  if (authed) return <>{children}</>;
+  if (authed) {
+    const onTodos = location.pathname.startsWith("/todos");
+    return (
+      <div className="min-h-screen bg-surface-alt">
+        <nav className="border-b border-border bg-surface">
+          <div className="max-w-3xl mx-auto px-4 py-3 flex items-center gap-2">
+            <Link
+              to="/"
+              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                onTodos
+                  ? "text-text-muted hover:text-text-primary"
+                  : "bg-pine-600 dark:bg-pine-500 text-white"
+              }`}
+            >
+              Knowledge Base
+            </Link>
+            <Link
+              to="/todos"
+              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                onTodos
+                  ? "bg-pine-600 dark:bg-pine-500 text-white"
+                  : "text-text-muted hover:text-text-primary"
+              }`}
+            >
+              Todos
+            </Link>
+          </div>
+        </nav>
+        {children}
+      </div>
+    );
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
