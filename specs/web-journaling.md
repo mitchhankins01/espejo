@@ -1,44 +1,58 @@
 # Web-First Journaling — Replacing Day One
 
-## Status: Planned
+> **Status: Planned (Reviewed)**
 
 ## Context
 
-Day One is currently the only way to create journal entries. The sync script imports from DayOne.sqlite into PostgreSQL where entries are read-only. The web app has full CRUD for artifacts and todos but no entry editing. This spec adds entry CRUD, media upload, and templates to the web app so it becomes the primary journaling interface. Day One sync remains for historical imports.
+Day One is currently the only write path for journal entries. Sync imports from DayOne.sqlite into PostgreSQL, and the web app is read-only for entries. This spec adds web-native journaling (entry CRUD + photo upload + templates) while keeping Day One sync for historical backfill.
+
+The reviewed version below includes guardrails for:
+- optimistic locking without accidental version bumps from background updates
+- stale async embedding writes
+- safe media upload constraints
+- idempotent template seeding
+
+---
+
+## Goals
+
+1. Make web journaling the primary write interface.
+2. Preserve compatibility with existing MCP tools and Telegram flows.
+3. Keep SQL centralized in `src/db/queries.ts` and API behavior aligned with existing web CRUD patterns.
+
+## Non-goals (v1)
+
+- Video/audio upload (photos only)
+- Geolocation/weather auto-detection
+- Telegram check-in auto-conversion to entries
+- Template interpolation/variables
 
 ---
 
 ## Phase 1: Schema Changes
 
-**File: `specs/schema.sql`** (source of truth) + new migration
+**File:** `specs/schema.sql` (source of truth), then add migration entry in `scripts/migrate.ts`.
 
-### Entries table additions
-
-```sql
-ALTER TABLE entries ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'dayone'
-  CHECK (source IN ('dayone', 'web', 'telegram'));
-ALTER TABLE entries ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 1;
-```
-
-Version bump trigger (mirrors `knowledge_artifact_version_bump`):
+### 1) `entries` additions
 
 ```sql
-CREATE OR REPLACE FUNCTION entry_version_bump() RETURNS TRIGGER AS $$
-BEGIN
-  NEW.modified_at := NOW();
-  NEW.version := OLD.version + 1;
-  RETURN NEW;
-END; $$ LANGUAGE plpgsql;
+ALTER TABLE entries
+  ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'dayone'
+    CHECK (source IN ('dayone', 'web', 'telegram')),
+  ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 1;
 
-CREATE TRIGGER trg_entry_version_bump BEFORE UPDATE ON entries
-  FOR EACH ROW EXECUTE FUNCTION entry_version_bump();
+CREATE INDEX IF NOT EXISTS idx_entries_source_created
+  ON entries (source, created_at DESC);
 ```
 
-### Entry templates table
+Important: do **not** add a global version-bump trigger on `entries`. `entries` is updated by sync and embed jobs; a blanket trigger would cause false version conflicts and noisy `modified_at` churn. Version bumps for optimistic locking happen only in the explicit web update query.
+
+### 2) `entry_templates` table
 
 ```sql
 CREATE TABLE IF NOT EXISTS entry_templates (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  slug TEXT UNIQUE NOT NULL CHECK (char_length(slug) BETWEEN 1 AND 80),
   name TEXT NOT NULL CHECK (char_length(name) BETWEEN 1 AND 100),
   description TEXT,
   body TEXT NOT NULL DEFAULT '',
@@ -47,190 +61,239 @@ CREATE TABLE IF NOT EXISTS entry_templates (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_entry_templates_sort
+  ON entry_templates (sort_order ASC, created_at ASC);
 ```
 
-Seed with morning/evening/freeform templates matching existing Telegram check-in prompts.
+Add `updated_at` trigger for templates:
+
+```sql
+CREATE OR REPLACE FUNCTION touch_updated_at() RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at := NOW();
+  RETURN NEW;
+END; $$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_entry_templates_touch_updated_at ON entry_templates;
+CREATE TRIGGER trg_entry_templates_touch_updated_at
+  BEFORE UPDATE ON entry_templates
+  FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+```
+
+### 3) Seed templates idempotently
+
+Seed `morning`, `evening`, and `freeform` with `INSERT ... ON CONFLICT (slug) DO UPDATE`.
 
 ---
 
-## Phase 2: REST API Endpoints
+## Phase 2: Query Layer
 
-**File: `src/transports/http.ts`**
+**File:** `src/db/queries.ts`
+
+Add:
+- `createEntry(pool, data)` -> inserts entry (`source='web'`, `version=1`)
+- `updateEntry(pool, uuid, expectedVersion, data)` -> optimistic lock update
+- `deleteEntry(pool, uuid)` -> delete by UUID
+- `listEntries(pool, filters)` + `countEntries(pool, filters)` -> shared filter builder
+- `upsertEntryTags(pool, entryId, tagNames)` -> normalize/dedupe tags
+- `insertMedia(pool, data)`, `getMediaForEntry(pool, entryId)`, `deleteMedia(pool, id)`
+- `listTemplates`, `getTemplateById`, `createTemplate`, `updateTemplate`, `deleteTemplate`
+- `updateEntryEmbeddingIfVersionMatches(pool, uuid, version, embedding)`
+
+Update `EntryRow` to include:
+- `source: 'dayone' | 'web' | 'telegram'`
+- `version: number`
+
+### Optimistic locking query shape
+
+`updateEntry` must atomically bump version only on intended web edits:
+
+```sql
+UPDATE entries
+SET
+  text = COALESCE($text, text),
+  timezone = COALESCE($timezone, timezone),
+  created_at = COALESCE($created_at, created_at),
+  modified_at = NOW(),
+  version = version + 1
+WHERE uuid = $uuid
+  AND version = $expected_version
+RETURNING *;
+```
+
+If `uuid` exists but version check fails, return `'version_conflict'`.
+
+All entry write operations that touch entry + tags + media should be wrapped in a transaction.
+
+---
+
+## Phase 3: REST API Endpoints
+
+**File:** `src/transports/http.ts`
+
+Reuse existing `requireBearerAuth` pattern and zod validation style.
 
 ### Entry CRUD
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/entries` | List entries (pagination, date range, tag, source, text search) → `{ items, total }` |
-| GET | `/api/entries/:uuid` | Get entry with tags + media + version |
-| POST | `/api/entries` | Create entry (`source = 'web'`, UUID via `crypto.randomUUID()`) |
-| PUT | `/api/entries/:uuid` | Update with optimistic locking (`expected_version`, 409 on conflict) |
-| DELETE | `/api/entries/:uuid` | Delete entry + cascade tags/media |
+| Method | Path | Behavior |
+|---|---|---|
+| GET | `/api/entries` | Paginated list with filters: `limit`, `offset`, `from`, `to`, `tag`, `source`, `q` -> `{ items, total }` |
+| GET | `/api/entries/:uuid` | Full entry with tags/media/version/source |
+| POST | `/api/entries` | Create (`uuid = crypto.randomUUID()`, `source='web'`) |
+| PUT | `/api/entries/:uuid` | Update with `expected_version`; 409 on conflict |
+| DELETE | `/api/entries/:uuid` | Delete entry and dependent rows |
 
 ### Media upload
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/entries/:uuid/media` | Multipart upload → R2 → media row |
-| DELETE | `/api/media/:id` | Delete media row |
+| Method | Path | Behavior |
+|---|---|---|
+| POST | `/api/entries/:uuid/media` | `multipart/form-data` image upload -> R2 -> media row |
+| DELETE | `/api/media/:id` | Delete media row and best-effort delete from R2 by `storage_key` |
 
-Upload flow: multipart/form-data → generate key `entries/{uuid}/{randomUUID}.{ext}` → R2 PUT → insert media row → return `{ id, url, type }`.
-
-**New dependency:** `multer` for multipart parsing.
-
-**File: `src/storage/r2.ts`** — Add `uploadMediaBuffer(client, buffer, key, contentType)` variant (current `uploadMedia` reads from file path).
+Constraints:
+- Use `multer` memory storage.
+- Enforce MIME allowlist (`image/jpeg`, `image/png`, `image/webp`, `image/gif`, `image/heic`).
+- Enforce file size cap (v1: 10 MB).
+- Store as `type='photo'`.
+- Key format: `entries/{uuid}/{randomUUID}.{ext}`.
 
 ### Template CRUD
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/templates` | List all, ordered by sort_order |
+| Method | Path | Behavior |
+|---|---|---|
+| GET | `/api/templates` | List ordered by `sort_order`, then `created_at` |
 | POST | `/api/templates` | Create template |
 | PUT | `/api/templates/:id` | Update template |
 | DELETE | `/api/templates/:id` | Delete template |
 
 ---
 
-## Phase 3: Query Functions
+## Phase 4: Embeddings (Async, Stale-Safe)
 
-**File: `src/db/queries.ts`**
+On entry create/update, trigger async embedding without blocking HTTP response:
 
-- `createEntry(pool, data)` — INSERT with `source = 'web'`, return full row
-- `updateEntry(pool, uuid, expectedVersion, data)` — UPDATE with version check, return row or `'version_conflict'`
-- `deleteEntry(pool, uuid)` — DELETE, return boolean
-- `listEntries(pool, filters)` — Paginated with date range, tag, source, text search
-- `countEntries(pool, filters)` — Count for pagination
-- `upsertEntryTags(pool, entryId, tagNames)` — Delete + insert pattern
-- `insertMedia(pool, data)` / `deleteMedia(pool, id)` / `getMediaForEntry(pool, entryId)`
-- `listTemplates` / `getTemplateById` / `createTemplate` / `updateTemplate` / `deleteTemplate`
-
-Update `EntryRow` interface to include `source` and `version`.
-
----
-
-## Phase 4: Embedding Generation
-
-Fire-and-forget on create/update (non-blocking):
-
-```typescript
-generateEmbedding(text)
-  .then(emb => updateEntryEmbedding(pool, uuid, emb))
-  .catch(err => console.error('Embedding failed:', err));
+```ts
+void generateEmbedding(text)
+  .then((embedding) =>
+    updateEntryEmbeddingIfVersionMatches(pool, uuid, version, embedding)
+  )
+  .catch((error) => {
+    // log via existing server logging path
+  });
 ```
 
-Batch `pnpm embed` remains as fallback for entries missing embeddings.
+Why version-guarded write:
+- prevents an older async embedding result from overwriting newer text embedding.
+
+`pnpm embed` remains fallback for NULL embeddings.
 
 ---
 
 ## Phase 5: Web UI
 
-**File: `web/src/main.tsx`** — New routes:
+**File:** `web/src/main.tsx`
+
+Add routes:
 
 ```
-/journal              → EntryList (timeline)
-/journal/new          → EntryCreate (?template=<id> to pre-fill)
-/journal/:uuid        → EntryEdit
-/templates            → TemplateList
-/templates/new        → TemplateCreate
-/templates/:id        → TemplateEdit
+/journal              -> EntryList
+/journal/new          -> EntryCreate (?template=<id>)
+/journal/:uuid        -> EntryEdit
+/templates            -> TemplateList
+/templates/new        -> TemplateCreate
+/templates/:id        -> TemplateEdit
 ```
 
 ### Pages
 
-**EntryList** — Timeline view with date headers grouping entries. Date/tag/source filters, photo thumbnails inline, "New Entry" button with template dropdown.
+- `EntryList`: timeline grouped by day; filters for date/source/tag/text.
+- `EntryCreate`: template picker + markdown editor + tags + media upload.
+- `EntryEdit`: same editor with media gallery + optimistic conflict handling.
+- `TemplateList`: list/manage templates.
+- `TemplateCreate`/`TemplateEdit`: name/slug/description/body/default tags/sort order.
 
-**EntryCreate** — Template picker at top, MarkdownEditor (reuse existing), TagInput (reuse), MediaUpload zone, auto-detected timezone from browser. Save → create entry → upload media → async embed.
+### Components
 
-**EntryEdit** — Same editor + media gallery for existing photos, delete capability, optimistic lock (409 → reload prompt). Read-only weather/location metadata display for Day One imports.
+- `TemplatePicker`
+- `MediaUpload`
+- `MediaGallery`
 
-**TemplateList** — Simple list of templates with name, description, sort order. Create/edit/delete.
+### Navigation and quick switcher
 
-**TemplateCreate/TemplateEdit** — Name, description, body (MarkdownEditor), default tags (TagInput), sort order.
+- Add `Journal` link to top nav.
+- Extend quick switcher with journal shortcuts:
+  - `New entry` -> `/journal/new`
+  - `Journal` -> `/journal`
+  - `Templates` -> `/templates`
 
-### New Components
+### API client
 
-- **TemplatePicker** — Horizontal cards or dropdown, fetches from `/api/templates`, calls `onSelect(template)`
-- **MediaUpload** — Drag-and-drop + file input, image/* only, shows upload progress, thumbnail preview
-- **MediaGallery** — Grid of existing photos with lightbox expand and delete
+**File:** `web/src/api.ts`
 
-### Nav Updates
-
-- Add "Journal" to nav alongside Knowledge Base, Todos, Weight
-- Add entries to QuickSwitcher results
-
-**File: `web/src/api.ts`** — Add `Entry`, `MediaItem`, `EntryTemplate` types and CRUD functions. `uploadEntryMedia` uses `FormData` (not JSON).
-
----
-
-## Phase 6: Sync Script Update
-
-**File: `scripts/sync-dayone.ts`** — Add `source = 'dayone'` to upsert. Non-breaking.
-
----
-
-## Compatibility
-
-- All existing MCP tools work unchanged (search_entries, get_entry, on_this_day, find_similar, etc.)
-- Telegram bot discovers web entries via existing search tools
-- Insight engine (temporal echoes, biometric correlations) picks up web entries automatically
-- Day One sync continues for historical imports, no UUID collision risk (different formats)
+Add:
+- `Entry`, `EntryTemplate`, `EntryMedia` types
+- entry CRUD API functions
+- template CRUD functions
+- `uploadEntryMedia` using `FormData` without forcing `Content-Type: application/json`
 
 ---
 
-## Design Decisions
+## Phase 6: Day One Sync Compatibility
 
-- **Templates:** Full CRUD in web UI (not just DB seeds)
-- **Entry list layout:** Timeline view with date headers grouping entries
-- **Media:** Photos only in v1, video/audio deferred
-- **Optimistic locking:** Version column + trigger, same pattern as artifacts
+**File:** `scripts/sync-dayone.ts`
 
-## Non-goals (v1)
-
-- Video/audio upload (photos only)
-- Geolocation/weather auto-detection
-- Converting Telegram check-in summaries to entries (remain as artifacts)
-- Template variables/interpolation (just pre-filled markdown)
+- Upsert with explicit `source='dayone'`.
+- Keep sync idempotent.
+- Protect against accidental source overwrite on conflict:
+  - conflict updates should target Day One-origin rows only.
 
 ---
 
-## Implementation Order
+## Tests
 
-1. Schema migration (source, version, templates table, trigger, seeds)
-2. Query functions in queries.ts + update EntryRow interface
-3. R2 buffer upload variant
-4. REST endpoints (entry CRUD, media upload, template CRUD) + multer dep
-5. Inline embedding on create/update
-6. Tests (unit + integration, maintain 95%+ coverage)
-7. Web UI:
-   - Entry pages: EntryList (timeline), EntryCreate, EntryEdit
-   - Template pages: TemplateList, TemplateCreate, TemplateEdit
-   - Components: TemplatePicker, MediaUpload, MediaGallery
-   - API client, routes, nav update
-8. Sync script source column update
+1. Query tests:
+   - create/update/delete entry
+   - optimistic lock conflict path
+   - list/count filters parity
+   - template CRUD
+2. HTTP tests:
+   - entry CRUD happy path + 409
+   - media validation failures (type/size)
+3. Embedding safety test:
+   - stale async write does not replace newer version embedding
+4. Web tests:
+   - create/edit entry flow
+   - create from template pre-fills body/tags
+
+Run after every change:
+
+```bash
+pnpm check
+```
 
 ---
 
-## Verification
+## Verification Checklist
 
-1. `pnpm check` passes (typecheck + lint + tests with coverage)
-2. Create entry via web → appears in `search_entries` MCP tool after embedding completes
-3. Upload photo → visible in entry edit page, URL resolves from R2
-4. Create from template → editor pre-filled with template body and tags
-5. Edit entry → version bumps, 409 on stale version
-6. Day One sync still works (`pnpm sync --skip-media`)
-7. `on_this_day` and `find_similar` return web-created entries
+1. `pnpm check` passes.
+2. Web-created entry appears in MCP search after async embedding completes.
+3. Photo upload renders in entry edit view and URL resolves.
+4. Stale client update returns 409 with no data loss.
+5. Day One sync still imports correctly (`pnpm sync --skip-media`).
+6. Existing entry tools (`search_entries`, `get_entry`, `on_this_day`, `find_similar`) include web entries.
 
 ---
 
 ## Critical Files
 
-- `specs/schema.sql` — Schema source of truth
-- `src/db/queries.ts` — All new SQL functions
-- `src/transports/http.ts` — REST endpoints
-- `src/storage/r2.ts` — Buffer upload variant
-- `web/src/main.tsx` — New routes
-- `web/src/api.ts` — Frontend API client
-- `web/src/pages/EntryList.tsx` — New page
-- `web/src/pages/EntryCreate.tsx` — New page
-- `web/src/pages/EntryEdit.tsx` — New page
-- `scripts/sync-dayone.ts` — Source column update
+- `specs/schema.sql`
+- `scripts/migrate.ts`
+- `src/db/queries.ts`
+- `src/transports/http.ts`
+- `src/storage/r2.ts`
+- `scripts/sync-dayone.ts`
+- `web/src/main.tsx`
+- `web/src/api.ts`
+- `web/src/components/AuthGate.tsx`
+- `web/src/components/QuickSwitcher.tsx`
