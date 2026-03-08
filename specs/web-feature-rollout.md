@@ -1,5 +1,7 @@
 # Web Feature Rollout (March 2026)
 
+> **Status: Implemented** — All features in this rollout are complete.
+
 Comprehensive record of the implemented web and API additions:
 
 - `note` artifact kind support

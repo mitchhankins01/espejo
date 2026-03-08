@@ -1,5 +1,7 @@
 # Telegram Soul Plan (One Personality That Evolves)
 
+> **Status: Implemented** — Soul state table, evolution during compaction, quality signals, and prompt injection. See `src/telegram/soul.ts`.
+
 ## Problem
 The bot is useful but feels generic. It needs one stable identity that grows with you over time, not a menu of styles.
 

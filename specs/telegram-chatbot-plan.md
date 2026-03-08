@@ -1,5 +1,7 @@
 # Telegram Chatbot with Pattern Memory
 
+> **Status: Implemented** — Full chatbot with pattern memory, voice/photo/document support, agent loop, and compaction. See `src/telegram/`.
+
 ## Context
 
 Replace the Claude Desktop + espejo MCP + Oura MCP workflow with a Telegram chatbot that has persistent memory. The bot:

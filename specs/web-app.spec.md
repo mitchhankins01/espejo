@@ -1,5 +1,7 @@
 # Web App Spec (Knowledge Base + Todos)
 
+> **Status: Implemented** — React + Vite SPA with artifact CRUD, todo CRUD, Tailwind CSS v4, dark mode, Playwright e2e tests. See `web/`.
+
 React + Vite single-page app for managing knowledge artifacts and todos.
 
 ## Current scope

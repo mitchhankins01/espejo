@@ -1,5 +1,9 @@
 # espejo-mcp — Full Project Specification
 
+> **DEPRECATED**: This was the original bootstrapping spec used to scaffold the project. It is no longer maintained.
+> The canonical project documentation is **`CLAUDE.md`**, which is kept up to date with every feature addition.
+> Individual feature designs live in `specs/*.md` — see CLAUDE.md's directory map for a full index with implementation status.
+
 You are scaffolding a new MCP server called `espejo-mcp`. This document contains every design decision already made. Do not re-derive or second-guess these decisions but challenge them if a better one is available — implement them as specified. If something is ambiguous, leave a `// TODO:` comment and move on.
 
 ## Reference Repo

@@ -1,5 +1,7 @@
 # Web App: Semantic Links + Backlinks
 
+> **Status: Implemented** — Cosine similarity + `[[Title]]` wiki links, artifact_links table, backlink panel. See `web/src/components/`.
+
 ## Context
 
 Artifacts discuss interconnected ideas but are currently isolated. The user wants **semantic** connections — "the classroom" and "trauma" might discuss the same core idea. Title matching is insufficient. Artifacts already have embedding vectors (generated via `pnpm embed`, stored in `knowledge_artifacts.embedding`). We use cosine similarity over these embeddings to automatically surface related artifacts, plus support explicit `[[Title]]` manual linking.

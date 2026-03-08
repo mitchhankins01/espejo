@@ -1,5 +1,7 @@
 # Web App: Tag Filtering in List View
 
+> **Status: Implemented** — Tag pill filtering with AND mode and count endpoint. See `web/src/pages/ArtifactList.tsx`.
+
 ## Context
 
 The artifact list page (`web/src/pages/ArtifactList.tsx`) has kind filter pills but no tag filtering. The backend API already supports `tags` and `tags_mode` query params, and `listArtifactTags()` already exists in `web/src/api.ts`. This is a frontend-only feature.

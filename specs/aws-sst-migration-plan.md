@@ -1,5 +1,7 @@
 # AWS Migration Plan (SST + Usage Alerts + CloudWatch/Error Logging)
 
+> **Status: Planned** — Not implemented. Future migration from Railway to AWS.
+
 ## Goal
 Migrate `espejo` from Railway-centric deployment to AWS with infrastructure managed in SST, while adding production-grade observability:
 - CloudWatch logs and dashboards

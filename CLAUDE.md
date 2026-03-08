@@ -125,22 +125,36 @@ scripts/
   import-verbs.ts   — Downloads Fred Jehle Spanish verb CSV from GitHub, bulk inserts ~11k conjugation rows.
   sync-weight.ts    — Sync weight data to production.
   sync-oura.ts      — Backfill/sync Oura biometrics into Postgres (pnpm sync:oura).
+  migrate-entries-to-artifacts.ts — One-time migration of entries into knowledge artifacts.
   deploy-smoke.ts   — Post-deploy smoke test.
   telegram-setup.ts — Set/check/delete Telegram webhook.
 specs/
   schema.sql        — Canonical DB schema.
   tools.spec.ts     — Tool contracts: params, types, descriptions, examples.
-  spanish-learning.md — Spanish learning infrastructure design (phases, tables, tools).
-  telegram-chatbot-plan.md — Original design for Telegram chatbot with pattern memory.
-  telegram-personality-plan.md — Soul personality system design (one evolving identity).
-  self-healing-organism.md — Autonomous quality loop design (pulse checks, soul repairs).
-  episodic-memory.md — Implemented episodic memory + hardening notes (fact + event).
-  oura-integration-plan.md — Oura Ring integration design (5 phases, all implemented).
-  knowledge-artifacts.md — Knowledge base spec (artifacts, unified search, web app).
-  ltm-research.md   — Evidence-based research on long-term memory architecture.
-  aws-sst-migration-plan.md — Future AWS/SST migration plan (not implemented).
-  web-app.spec.md   — Web app spec (React + Vite knowledge base frontend).
-  todos.md          — Todo system spec (Eisenhower quadrants, focus, hierarchy).
+  — Implemented specs:
+  spanish-learning.md — [Implemented] Spanish learning infrastructure (phases, tables, tools).
+  telegram-chatbot-plan.md — [Implemented] Telegram chatbot with pattern memory.
+  telegram-personality-plan.md — [Implemented] Soul personality system (one evolving identity).
+  self-healing-organism.md — [Implemented] Autonomous quality loop (pulse checks, soul repairs).
+  episodic-memory.md — [Implemented] Episodic memory + hardening notes (fact + event).
+  oura-integration-plan.md — [Implemented] Oura Ring integration (5 phases, 6 tools, 8 tables).
+  knowledge-artifacts.md — [Implemented] Knowledge base (artifacts, unified search, web app).
+  todos.md          — [Implemented] Todo system (Eisenhower quadrants, focus, hierarchy).
+  web-app.spec.md   — [Implemented] Web app (React + Vite knowledge base + todo frontend).
+  web-tag-filtering.md — [Implemented] Tag pill filtering on artifact list.
+  web-quick-switcher.md — [Implemented] Cmd+K global navigation with fuzzy search.
+  web-semantic-links.md — [Implemented] Cosine similarity + wiki-link based artifact linking.
+  web-graph-view.md — [Implemented] Force-directed graph visualization of artifact connections.
+  web-feature-rollout.md — [Implemented] Record of completed web feature additions.
+  — Research:
+  ltm-research.md   — [Research] Evidence-based long-term memory architecture analysis.
+  — Planned / Stub specs:
+  aws-sst-migration-plan.md — [Planned] Future AWS/SST migration (not implemented).
+  memory-v2.md      — [Stub] Memory architecture redesign + shared personality layer.
+  insight-engine.md — [Stub] Background dot-connecting worker with Telegram notifications.
+  chat-archive.md   — [Stub] Save Claude Desktop conversations as searchable content.
+  proactive-checkins.md — [Stub] Telegram bot proactive outreach for data gathering.
+  project-management.md — [Stub] ADHD-tailored project management extending todos.
   fixtures/
     seed.ts         — Test data with pre-computed embeddings for determinism.
 packages/
@@ -711,6 +725,14 @@ Beyond MCP transport and Telegram webhook, the HTTP server (`src/transports/http
 | `/api/todos/:id` | DELETE | Delete todo |
 | `/api/telegram` | POST | Telegram webhook endpoint (validated via `X-Telegram-Bot-Api-Secret-Token`) |
 
+## Spec Planning Workflow
+
+Automated multi-LLM spec planning. Claude drafts specs with codebase context, Codex reviews with fresh eyes, and they iterate to convergence.
+
+```bash
+pnpm spec:plan <name> <description>
+```
+
 ## What's Out of Scope
 
 Do not implement these (they're planned future work, not part of the current build):
@@ -720,3 +742,5 @@ Do not implement these (they're planned future work, not part of the current bui
 - Multi-user support or auth beyond MCP SDK defaults
 - Chunking strategies (entries fit in single embeddings)
 - Auto-purge of compacted messages (function exists in `queries.ts`, not wired up)
+
+See `specs/*.md` files marked `[Stub]` or `[Planned]` for upcoming features.

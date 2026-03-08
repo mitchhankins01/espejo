@@ -1,5 +1,7 @@
 # Knowledge Base Spec (Knowledge Artifacts, Revised)
 
+> **Status: Implemented** — Artifact CRUD, unified search, embedding similarity, REST API, web frontend. See `src/tools/get-artifact.ts`, `src/tools/search-artifacts.ts`, `src/tools/search-content.ts`.
+
 Synthesized knowledge (insights, theories, models, references, and notes) as a first-class content type in Postgres, searchable alongside journal entries, editable through a web app, and readable through MCP.
 
 ---

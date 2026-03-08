@@ -1,5 +1,7 @@
 # Spanish Language Learning Infrastructure
 
+> **Status: Implemented** — 3 MCP tools, FSRS spaced repetition, verb reference DB, adaptive coaching, LLM-as-judge assessments. See `src/tools/conjugate-verb.ts`, `src/tools/log-vocabulary.ts`, `src/tools/spanish-quiz.ts`, `src/spanish/`.
+
 ## Context
 
 The Telegram chatbot already tutors Spanish organically — correcting conjugation mistakes, weaving in B1-level Spanish, and teaching vocabulary through conversation. But it's all ephemeral. This adds structured infrastructure so the bot can:

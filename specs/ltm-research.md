@@ -1,5 +1,7 @@
 # Evidence‑Based Long‑Term Memory Architecture for a Pattern‑Storing Conversational Journal Assistant
 
+> **Status: Research** — Theoretical analysis informing memory design. Referenced by `specs/memory-v2.md`.
+
 ## Executive summary
 
 This report proposes an evidence‑based long‑term memory (LTM) architecture for a conversational journal assistant operating via entity["company","Telegram","messaging app"]. The core design choice is to store and retrieve **PATTERNS** (recurring themes/insights/behaviors) rather than conversation summaries. This aligns with well‑supported cognitive accounts in which episodic traces support later abstraction into schema‑like, gist‑level representations, while maintaining separable evidence links for accuracy and update. citeturn3search3turn8search13

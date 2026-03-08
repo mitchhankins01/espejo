@@ -1,5 +1,7 @@
 # Web App: Cmd+K Quick Switcher
 
+> **Status: Implemented** — Global Cmd+K/Ctrl+K with fuzzy search, title cache, keyboard navigation. See `web/src/components/QuickSwitcher.tsx`.
+
 ## Context
 
 Navigating between artifacts requires going back to the list and scrolling/searching. A Cmd+K quick switcher provides instant fuzzy-find navigation from any page, similar to Obsidian's quick switcher or VS Code's Cmd+P.

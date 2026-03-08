@@ -1,5 +1,7 @@
 # Web App: Graph View
 
+> **Status: Implemented** — Force-directed graph with semantic/explicit/tag/source edges, localStorage persistence. See `web/src/components/GraphView.tsx`.
+
 ## Context
 
 Artifacts connect through semantic similarity, explicit wiki-links, shared tags, and shared source entries. A force-directed graph visualizes these connections, making the knowledge base feel like an interconnected web rather than a flat list. Depends on Features 1-3 (tag filtering, quick switcher titles endpoint, semantic links + artifact_links table).

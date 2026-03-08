@@ -1,5 +1,7 @@
 # Self-Healing Organism (Phase 5: Autonomous Quality Loop)
 
+> **Status: Implemented** — Quality signals, pulse checks, `diagnoseQuality()` → `applySoulRepairs()` pipeline. See `src/telegram/pulse.ts`.
+
 ## Problem
 
 Quality signals are logged but never acted on. The bot can't tell when its personality is drifting, stale, or overcorrecting. Soul evolution only happens when the user explicitly says things like "be more direct" — there's no feedback loop from the signals the user is already giving (reactions, felt-generic clicks, implicit corrections).

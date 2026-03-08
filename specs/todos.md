@@ -1,5 +1,7 @@
 # Todo System Spec
 
+> **Status: Implemented** — Eisenhower quadrants, focus flag, parent/child hierarchy, 5 MCP tools, REST API, web frontend with matrix view. See `src/tools/list-todos.ts`, `src/todos/`, `web/src/pages/Todo*`.
+
 Eisenhower-style task tracking with urgency/importance quadrants, a "One Thing" daily focus, and parent/child project hierarchy. Each todo lives in one of four quadrants (Do First, Schedule, Delegate, Someday) based on `urgent` + `important` flags. The focus flag implements the "One Thing" philosophy — one active todo gets full attention.
 
 ---

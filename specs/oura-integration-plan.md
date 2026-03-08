@@ -1,5 +1,7 @@
 # Oura Ring Integration into Espejo
 
+> **Status: Implemented** — All 5 phases complete. 6 MCP tools, 8 DB tables, hourly sync, 1100-line analysis module. See `src/oura/`.
+
 ## Context
 
 The Telegram bot can't access Oura data today — only Claude Desktop can, because it has both MCPs connected. This integration brings Oura data directly into Espejo's PostgreSQL database with hourly sync, giving the Telegram agent access to biometrics during evening reviews, morning flows, and general conversation. All data lives in your own DB rather than being fetched on-demand from Oura's API.
