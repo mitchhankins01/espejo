@@ -4,7 +4,13 @@ vi.mock("../../src/config.js", () => ({
   config: { timezone: "Europe/Madrid" },
 }));
 
-import { todayInTimezone, daysAgoInTimezone } from "../../src/utils/dates.js";
+import {
+  todayInTimezone,
+  daysAgoInTimezone,
+  currentHourInTimezone,
+  todayDateInTimezone,
+  currentTimeLabel,
+} from "../../src/utils/dates.js";
 
 describe("todayInTimezone", () => {
   it("returns a YYYY-MM-DD string", () => {
@@ -29,5 +35,27 @@ describe("daysAgoInTimezone", () => {
     const today = todayInTimezone();
     const zero = daysAgoInTimezone(0);
     expect(zero).toBe(today);
+  });
+});
+
+describe("currentHourInTimezone", () => {
+  it("returns a number between 0 and 23", () => {
+    const result = currentHourInTimezone("Europe/Madrid");
+    expect(result).toBeGreaterThanOrEqual(0);
+    expect(result).toBeLessThanOrEqual(23);
+  });
+});
+
+describe("todayDateInTimezone", () => {
+  it("returns a YYYY-MM-DD string", () => {
+    const result = todayDateInTimezone("America/New_York");
+    expect(result).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe("currentTimeLabel", () => {
+  it("returns a time string with colon", () => {
+    const result = currentTimeLabel("Europe/Madrid");
+    expect(result).toMatch(/\d{1,2}:\d{2}/);
   });
 });

@@ -562,7 +562,7 @@ CREATE INDEX IF NOT EXISTS idx_oura_workouts_day ON oura_workouts(day DESC);
 
 CREATE TABLE IF NOT EXISTS knowledge_artifacts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    kind TEXT NOT NULL CHECK (kind IN ('insight', 'theory', 'model', 'reference', 'note')),
+    kind TEXT NOT NULL CHECK (kind IN ('insight', 'theory', 'model', 'reference', 'note', 'log')),
     title TEXT NOT NULL CHECK (char_length(title) BETWEEN 1 AND 300),
     body TEXT NOT NULL CHECK (char_length(body) > 0),
     tags TEXT[] NOT NULL DEFAULT '{}',
@@ -689,6 +689,41 @@ CREATE TABLE IF NOT EXISTS insights (
 
 CREATE INDEX IF NOT EXISTS idx_insights_hash ON insights(content_hash);
 CREATE INDEX IF NOT EXISTS idx_insights_type_created ON insights(type, created_at DESC);
+
+-- ============================================================================
+-- User Settings
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS user_settings (
+    chat_id BIGINT PRIMARY KEY,
+    timezone TEXT NOT NULL DEFAULT 'Europe/Madrid',
+    checkin_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    checkin_morning_hour INT NOT NULL DEFAULT 9,
+    checkin_afternoon_hour INT NOT NULL DEFAULT 14,
+    checkin_evening_hour INT NOT NULL DEFAULT 21,
+    checkin_snooze_until TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================================
+-- Check-ins (proactive outreach)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS checkins (
+    id SERIAL PRIMARY KEY,
+    chat_id BIGINT NOT NULL,
+    "window" TEXT NOT NULL CHECK ("window" IN ('morning', 'afternoon', 'evening', 'event')),
+    trigger_type TEXT NOT NULL DEFAULT 'scheduled'
+        CHECK (trigger_type IN ('scheduled', 'oura_anomaly', 'journal_pattern')),
+    prompt_text TEXT NOT NULL,
+    artifact_id UUID REFERENCES knowledge_artifacts(id) ON DELETE SET NULL,
+    responded_at TIMESTAMPTZ,
+    ignored BOOLEAN NOT NULL DEFAULT FALSE,
+    metadata JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_checkins_chat_created ON checkins(chat_id, created_at DESC);
 
 -- ============================================================================
 -- Views

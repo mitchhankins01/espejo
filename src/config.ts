@@ -85,6 +85,10 @@ const insightIntervalHours = parseIntegerEnv("INSIGHT_ENGINE_INTERVAL_HOURS", 24
 const insightMaxPerDay = parseIntegerEnv("INSIGHT_ENGINE_MAX_PER_DAY", 3, 1);
 const insightDedupWindowDays = parseIntegerEnv("INSIGHT_ENGINE_DEDUP_WINDOW_DAYS", 30, 1);
 
+const checkinEnabled = parseBooleanEnv("CHECKIN_ENABLED", true);
+const checkinIntervalMinutes = parseIntegerEnv("CHECKIN_INTERVAL_MINUTES", 15, 1);
+const checkinIgnoreThreshold = parseIntegerEnv("CHECKIN_IGNORE_THRESHOLD", 3, 1);
+
 const ouraSyncIntervalMinutes = parseIntegerEnv(
   "OURA_SYNC_INTERVAL_MINUTES",
   60,
@@ -193,6 +197,11 @@ export const config = {
     dedupWindowDays: insightDedupWindowDays,
     temporalEchoThreshold: 0.75,
     staleTodoDays: 7,
+  },
+  checkins: {
+    enabled: checkinEnabled,
+    intervalMinutes: checkinIntervalMinutes,
+    ignoreThreshold: checkinIgnoreThreshold,
   },
   oura: {
     accessToken: process.env.OURA_ACCESS_TOKEN || "",

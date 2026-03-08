@@ -112,6 +112,15 @@ import {
   markInsightNotified,
   findTemporalEchoes,
   findStaleTodos,
+  getUserSettings,
+  upsertUserSettings,
+  insertCheckin,
+  getLastCheckinForWindow,
+  markCheckinResponded,
+  markCheckinsIgnored,
+  getConsecutiveIgnoredCount,
+  findOrCreateDailyLogArtifact,
+  appendToDailyLog,
 } from "../../src/db/queries.js";
 import { fixturePatterns, fixtureArtifacts } from "../../specs/fixtures/seed.js";
 
@@ -3306,5 +3315,140 @@ describe("insight queries", () => {
     const importantIdx = stale.findIndex((t) => t.title === "Important stale");
     const normalIdx = stale.findIndex((t) => t.title === "Normal stale");
     expect(importantIdx).toBeLessThan(normalIdx);
+  });
+
+  // =========================================================================
+  // User Settings
+  // =========================================================================
+
+  it("upserts and retrieves user settings", async () => {
+    const settings = await upsertUserSettings(pool, "999", { timezone: "America/New_York" });
+    expect(settings.timezone).toBe("America/New_York");
+    expect(settings.checkin_enabled).toBe(true);
+
+    const retrieved = await getUserSettings(pool, "999");
+    expect(retrieved).not.toBeNull();
+    expect(retrieved!.timezone).toBe("America/New_York");
+  });
+
+  it("returns null for non-existent user settings", async () => {
+    const result = await getUserSettings(pool, "88888888");
+    expect(result).toBeNull();
+  });
+
+  it("updates existing user settings", async () => {
+    await upsertUserSettings(pool, "999", { timezone: "Europe/Madrid" });
+    const updated = await upsertUserSettings(pool, "999", { timezone: "Asia/Tokyo" });
+    expect(updated.timezone).toBe("Asia/Tokyo");
+  });
+
+  it("upserts user settings with empty data", async () => {
+    const settings = await upsertUserSettings(pool, "777", {});
+    expect(settings.timezone).toBe("Europe/Madrid"); // default
+    expect(settings.checkin_enabled).toBe(true);
+  });
+
+  // =========================================================================
+  // Checkins
+  // =========================================================================
+
+  it("inserts and retrieves a check-in", async () => {
+    const id = await insertCheckin(pool, {
+      chatId: "999",
+      window: "morning",
+      triggerType: "scheduled",
+      promptText: "Buenos días!",
+    });
+    expect(id).toBeGreaterThan(0);
+
+    const found = await getLastCheckinForWindow(pool, "999", "morning", 24);
+    expect(found).not.toBeNull();
+    expect(found!.prompt_text).toBe("Buenos días!");
+    expect(found!.window).toBe("morning");
+  });
+
+  it("returns null when no check-in in window", async () => {
+    const found = await getLastCheckinForWindow(pool, "999", "morning", 24);
+    expect(found).toBeNull();
+  });
+
+  it("marks check-in as responded", async () => {
+    const id = await insertCheckin(pool, {
+      chatId: "999",
+      window: "morning",
+      triggerType: "scheduled",
+      promptText: "Buenos días!",
+    });
+    await markCheckinResponded(pool, id, undefined);
+
+    const found = await getLastCheckinForWindow(pool, "999", "morning", 24);
+    expect(found!.responded_at).not.toBeNull();
+  });
+
+  it("marks old check-ins as ignored", async () => {
+    await insertCheckin(pool, {
+      chatId: "999",
+      window: "morning",
+      triggerType: "scheduled",
+      promptText: "test",
+    });
+    // Move check-in to 3 hours ago
+    await pool.query(
+      "UPDATE checkins SET created_at = NOW() - INTERVAL '3 hours' WHERE chat_id = $1",
+      ["999"]
+    );
+
+    const count = await markCheckinsIgnored(pool, 2);
+    expect(count).toBe(1);
+  });
+
+  it("counts consecutive ignored check-ins", async () => {
+    // Insert 3 ignored check-ins for morning
+    for (let i = 0; i < 3; i++) {
+      await insertCheckin(pool, {
+        chatId: "999",
+        window: "morning",
+        triggerType: "scheduled",
+        promptText: `test ${i}`,
+      });
+    }
+    await pool.query(
+      "UPDATE checkins SET ignored = TRUE WHERE chat_id = $1",
+      ["999"]
+    );
+
+    const count = await getConsecutiveIgnoredCount(pool, "999", "morning");
+    expect(count).toBe(3);
+  });
+
+  // =========================================================================
+  // Daily Log Artifact
+  // =========================================================================
+
+  it("creates and appends to daily log artifact", async () => {
+    const artifact = await findOrCreateDailyLogArtifact(pool, "2026-03-08", ["daily-log"]);
+    expect(artifact.id).toBeTruthy();
+
+    await appendToDailyLog(pool, artifact.id, "## Morning (9:15)\nFeeling good.");
+
+    const fetched = await getArtifactById(pool, artifact.id);
+    expect(fetched!.body).toContain("Morning (9:15)");
+    expect(fetched!.kind).toBe("log");
+  });
+
+  it("reuses existing daily log artifact", async () => {
+    const first = await findOrCreateDailyLogArtifact(pool, "2026-03-08", ["daily-log"]);
+    const second = await findOrCreateDailyLogArtifact(pool, "2026-03-08", ["daily-log"]);
+    expect(first.id).toBe(second.id);
+  });
+
+  it("appends multiple sections to daily log", async () => {
+    const artifact = await findOrCreateDailyLogArtifact(pool, "2026-03-08", ["daily-log"]);
+    await appendToDailyLog(pool, artifact.id, "## Morning\nGood.");
+    await appendToDailyLog(pool, artifact.id, "## Afternoon\nBusy.");
+
+    const fetched = await getArtifactById(pool, artifact.id);
+    expect(fetched!.body).toContain("Morning");
+    expect(fetched!.body).toContain("Afternoon");
   });
 });

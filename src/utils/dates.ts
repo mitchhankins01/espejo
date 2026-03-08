@@ -9,6 +9,35 @@ export function todayInTimezone(): string {
   }).format(new Date());
 }
 
+export function currentHourInTimezone(tz: string): number {
+  return parseInt(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      hour: "numeric",
+      hour12: false,
+    }).format(new Date()),
+    10
+  );
+}
+
+export function todayDateInTimezone(tz: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+export function currentTimeLabel(tz: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date());
+}
+
 export function daysAgoInTimezone(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() - days);

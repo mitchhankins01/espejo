@@ -1562,40 +1562,22 @@ describe("runAgent", () => {
     expect(call.system).toContain("Soul state version: v2");
   });
 
-  it("injects evening review mode instructions when requested", async () => {
+  it("injects check-in mode instructions when requested", async () => {
     mockAnthropicCreate.mockResolvedValueOnce({
-      content: [{ type: "text", text: "Empezamos tu revisión de la noche. ¿Cómo se siente tu cuerpo?" }],
+      content: [{ type: "text", text: "Buenos días. ¿Cómo estás?" }],
       usage: { input_tokens: 120, output_tokens: 20 },
     });
 
     await runAgent({
       chatId: "100",
-      message: "Start evening review now",
+      message: "How are you this morning?",
       messageDate: 1000,
-      mode: "evening_review",
+      mode: "checkin",
     });
 
     const call = mockAnthropicCreate.mock.calls[0][0];
-    expect(call.system).toContain("Evening Review mode is ON.");
-    expect(call.system).toContain("Spanish is the PRIMARY language");
-  });
-
-  it("injects morning flow mode instructions when requested", async () => {
-    mockAnthropicCreate.mockResolvedValueOnce({
-      content: [{ type: "text", text: "Buenos días! ¿Cómo llegaste esta mañana?" }],
-      usage: { input_tokens: 120, output_tokens: 20 },
-    });
-
-    await runAgent({
-      chatId: "100",
-      message: "Start morning flow now",
-      messageDate: 1000,
-      mode: "morning_flow",
-    });
-
-    const call = mockAnthropicCreate.mock.calls[0][0];
-    expect(call.system).toContain("Morning Flow mode is ON.");
-    expect(call.system).toContain("Spanish is the PRIMARY language");
+    expect(call.system).toContain("Check-in mode is ON.");
+    expect(call.system).toContain("Spanish is the primary language");
   });
 
   it("includes language preference anchors when semantic retrieval is skipped", async () => {
@@ -1624,7 +1606,7 @@ describe("runAgent", () => {
       chatId: "100",
       message: "/evening",
       messageDate: 1000,
-      mode: "evening_review",
+      mode: "default",
     });
 
     expect(mockGenerateEmbedding).not.toHaveBeenCalled();
@@ -1648,7 +1630,7 @@ describe("runAgent", () => {
       chatId: "100",
       message: "/evening",
       messageDate: 1000,
-      mode: "evening_review",
+      mode: "default",
     });
 
     expect(result.response).toBe("Still here.");
@@ -1759,7 +1741,7 @@ describe("runAgent", () => {
     );
   });
 
-  it("rewrites English-only drafts in morning mode when Spanish profile is active", async () => {
+  it("rewrites English-only drafts in checkin mode when Spanish profile is active", async () => {
     mockAnthropicCreate
       .mockResolvedValueOnce({
         content: [
@@ -1782,9 +1764,9 @@ describe("runAgent", () => {
 
     const result = await runAgent({
       chatId: "100",
-      message: "Start my morning flow now. Pull my last 3 days first, then ask the first question in Spanish.",
+      message: "How are you this morning?",
       messageDate: 1000,
-      mode: "morning_flow",
+      mode: "checkin",
     });
 
     expect(result.response).toContain("Eso es justo");
@@ -2447,29 +2429,28 @@ describe("runAgent", () => {
       {
         id: 1,
         chat_id: "100",
-        external_message_id: "update:evening-raw",
+        external_message_id: "update:compose-raw",
         role: "user",
-        content: "/evening",
+        content: "/compose",
         tool_call_id: null,
         compacted_at: null,
         created_at: new Date(),
       },
     ]);
     mockAnthropicCreate.mockResolvedValueOnce({
-      content: [{ type: "text", text: "Empezamos tu revisión. ¿Cómo te sientes?" }],
+      content: [{ type: "text", text: "Writing the entry now." }],
       usage: { input_tokens: 120, output_tokens: 20 },
     });
 
     await runAgent({
       chatId: "100",
-      message:
-        "Start my evening review now. Pull my last 7 days first, then ask the first question in Spanish.",
-      storedUserMessage: "/evening",
+      message: "Write the entry now.",
+      storedUserMessage: "/compose",
       messageDate: 1000,
-      mode: "evening_review",
+      mode: "default",
     });
 
-    // User message ("/evening") is now stored by handleMessage() in webhook.ts.
+    // User message ("/compose") is now stored by handleMessage() in webhook.ts.
     // runAgent() receives the transformed text and uses storedUserMessage for context replacement.
 
     const call = mockAnthropicCreate.mock.calls[0][0];
@@ -2477,14 +2458,13 @@ describe("runAgent", () => {
       expect.arrayContaining([
         expect.objectContaining({
           role: "user",
-          content:
-            "Start my evening review now. Pull my last 7 days first, then ask the first question in Spanish.",
+          content: "Write the entry now.",
         }),
       ])
     );
     expect(call.messages).not.toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ role: "user", content: "/evening" }),
+        expect.objectContaining({ role: "user", content: "/compose" }),
       ])
     );
   });

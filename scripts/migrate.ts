@@ -956,6 +956,42 @@ const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_insights_type_created ON insights(type, created_at DESC);
     `,
   },
+  {
+    name: "025-checkins",
+    getSql: () => `
+      CREATE TABLE IF NOT EXISTS user_settings (
+          chat_id BIGINT PRIMARY KEY,
+          timezone TEXT NOT NULL DEFAULT 'Europe/Madrid',
+          checkin_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+          checkin_morning_hour INT NOT NULL DEFAULT 9,
+          checkin_afternoon_hour INT NOT NULL DEFAULT 14,
+          checkin_evening_hour INT NOT NULL DEFAULT 21,
+          checkin_snooze_until TIMESTAMPTZ,
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS checkins (
+          id SERIAL PRIMARY KEY,
+          chat_id BIGINT NOT NULL,
+          "window" TEXT NOT NULL CHECK ("window" IN ('morning', 'afternoon', 'evening', 'event')),
+          trigger_type TEXT NOT NULL DEFAULT 'scheduled'
+              CHECK (trigger_type IN ('scheduled', 'oura_anomaly', 'journal_pattern')),
+          prompt_text TEXT NOT NULL,
+          artifact_id UUID REFERENCES knowledge_artifacts(id) ON DELETE SET NULL,
+          responded_at TIMESTAMPTZ,
+          ignored BOOLEAN NOT NULL DEFAULT FALSE,
+          metadata JSONB NOT NULL DEFAULT '{}',
+          created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_checkins_chat_created ON checkins(chat_id, created_at DESC);
+
+      ALTER TABLE knowledge_artifacts
+        DROP CONSTRAINT IF EXISTS knowledge_artifacts_kind_check;
+      ALTER TABLE knowledge_artifacts
+        ADD CONSTRAINT knowledge_artifacts_kind_check
+        CHECK (kind IN ('insight', 'theory', 'model', 'reference', 'note', 'log'));
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

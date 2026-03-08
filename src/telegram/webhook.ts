@@ -17,6 +17,9 @@ import {
   insertChatMessage,
   getOuraSyncRun,
   getActivityLog,
+  upsertUserSettings,
+  getUserSettings,
+  markCheckinResponded,
   type ActivityLogRow,
 } from "../db/queries.js";
 import { runAgent, forceCompact } from "./agent.js";
@@ -33,11 +36,12 @@ import {
 import { extractTextFromDocument, extractTextFromImage } from "./media.js";
 import { setMessageHandler, processUpdate } from "./updates.js";
 import type { AssembledMessage, TelegramUpdate } from "./updates.js";
+import { type AgentMode } from "./evening-review.js";
+import { pendingCheckins } from "../checkins/scheduler.js";
 import {
-  buildEveningKickoffMessage,
-  buildMorningKickoffMessage,
-  type AgentMode,
-} from "./evening-review.js";
+  processCheckinSummary,
+  createOpenAISummaryClient,
+} from "../checkins/summary.js";
 import {
   buildRetentionSummary,
   buildFunnelSummary,
@@ -62,7 +66,6 @@ const ACTIVITY_DETAIL_CALLBACK_PREFIX = "activity_detail:";
 const TELEGRAM_VOICE_CAPTION_MAX_CHARS = 1024;
 const VOICE_TRANSCRIPT_PREFIX = "Transcript: ";
 const chatModes = new Map<string, AgentMode>();
-const MODE_DISABLE_TOKENS = new Set(["off", "stop", "end", "done", "exit"]);
 const chatMessageCounters = new Map<string, number>();
 
 interface InlineKeyboardButton {
@@ -105,110 +108,12 @@ function parseSlashCommand(
   const spaceIdx = trimmed.indexOf(" ");
   const commandPart = spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx);
   const argText = spaceIdx === -1 ? "" : trimmed.slice(spaceIdx + 1).trim();
-  const rawName = commandPart.slice(1).split("@")[0].toLowerCase();
-  const name = rawName === "evenning" ? "evening" : rawName;
+  const name = commandPart.slice(1).split("@")[0].toLowerCase();
   if (!name) return null;
 
   return { name, argText };
 }
 
-type EveningIntent =
-  | { type: "enable"; seed: string | null }
-  | { type: "disable" };
-
-function parseNaturalEveningIntent(text: string): EveningIntent | null {
-  const trimmed = text.trim();
-  if (!trimmed || trimmed.startsWith("/")) return null;
-
-  const normalized = trimmed.toLowerCase();
-  const eveningPhrase =
-    /evening\s+(review|check[-\s]?in)/i;
-
-  if (
-    /\b(?:stop|end|disable|exit|turn off)\s+(?:the\s+)?evening\s+(?:review|check[-\s]?in)\b/i.test(
-      normalized
-    ) ||
-    /\bevening\s+(?:review|check[-\s]?in)\s+(?:off|stop|end|done|exit)\b/i.test(
-      normalized
-    )
-  ) {
-    return { type: "disable" };
-  }
-
-  const phraseMatch = eveningPhrase.exec(trimmed);
-  if (!phraseMatch) return null;
-
-  const isExact = /^(?:evening review|evening check[-\s]?in)$/i.test(trimmed);
-  const hasActivationHint =
-    /\b(?:let'?s|lets|start|begin|do|run|can we|time for|switch to|activate|now|ahora|por favor|please)\b/i.test(
-      normalized
-    );
-
-  if (!isExact && !hasActivationHint) return null;
-
-  let seed = trimmed
-    .slice(phraseMatch.index + phraseMatch[0].length)
-    .replace(/^[\s:,\-–—]+/, "")
-    .trim();
-
-  if (/^(now|ahora|please|pls)$/i.test(seed)) {
-    seed = "";
-  }
-
-  return {
-    type: "enable",
-    seed: seed || null,
-  };
-}
-
-type MorningIntent =
-  | { type: "enable"; seed: string | null }
-  | { type: "disable" };
-
-function parseNaturalMorningIntent(text: string): MorningIntent | null {
-  const trimmed = text.trim();
-  if (!trimmed || trimmed.startsWith("/")) return null;
-
-  const normalized = trimmed.toLowerCase();
-  const morningPhrase =
-    /morning\s+(flow|check[-\s]?in)/i;
-
-  if (
-    /\b(?:stop|end|disable|exit|turn off)\s+(?:the\s+)?morning\s+(?:flow|check[-\s]?in)\b/i.test(
-      normalized
-    ) ||
-    /\bmorning\s+(?:flow|check[-\s]?in)\s+(?:off|stop|end|done|exit)\b/i.test(
-      normalized
-    )
-  ) {
-    return { type: "disable" };
-  }
-
-  const phraseMatch = morningPhrase.exec(trimmed);
-  if (!phraseMatch) return null;
-
-  const isExact = /^(?:morning flow|morning check[-\s]?in)$/i.test(trimmed);
-  const hasActivationHint =
-    /\b(?:let'?s|lets|start|begin|do|run|can we|time for|switch to|activate|now|ahora|por favor|please)\b/i.test(
-      normalized
-    );
-
-  if (!isExact && !hasActivationHint) return null;
-
-  let seed = trimmed
-    .slice(phraseMatch.index + phraseMatch[0].length)
-    .replace(/^[\s:,\-–—]+/, "")
-    .trim();
-
-  if (/^(now|ahora|please|pls)$/i.test(seed)) {
-    seed = "";
-  }
-
-  return {
-    type: "enable",
-    seed: seed || null,
-  };
-}
 
 function getChatMode(chatId: string): AgentMode {
   return chatModes.get(chatId) ?? "default";
@@ -507,9 +412,6 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
     const originalUserText = text;
 
     const command = parseSlashCommand(text);
-    const naturalEveningIntent = parseNaturalEveningIntent(text);
-    const naturalMorningIntent = parseNaturalMorningIntent(text);
-
     // Handle soul feedback callbacks (soul:personal, soul:generic)
     if (msg.callbackData?.startsWith("soul:")) {
       const signalType = msg.callbackData === "soul:personal" ? "felt_personal" : "felt_generic";
@@ -731,6 +633,58 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
       return;
     }
 
+    // Handle /timezone command
+    if (command?.name === "timezone") {
+      const tz = command.argText.trim();
+      if (!tz) {
+        const settings = await getUserSettings(pool, chatId);
+        const currentTz = settings?.timezone ?? config.timezone;
+        await sendAndStoreResponse(chatId, `<i>Current timezone: ${currentTz}</i>`);
+        return;
+      }
+      // Validate timezone
+      try {
+        Intl.DateTimeFormat(undefined, { timeZone: tz });
+      } catch {
+        await sendAndStoreResponse(chatId, `<i>Invalid timezone: ${tz}</i>`);
+        return;
+      }
+      await upsertUserSettings(pool, chatId, { timezone: tz });
+      await sendAndStoreResponse(chatId, `<i>Timezone updated to ${tz}</i>`);
+      return;
+    }
+
+    // Handle /checkin command (on/off/snooze)
+    if (command?.name === "checkin") {
+      const arg = command.argText.trim().toLowerCase();
+      if (arg === "off" || arg === "disable") {
+        await upsertUserSettings(pool, chatId, { checkin_enabled: false });
+        await sendAndStoreResponse(chatId, "<i>Check-ins disabled.</i>");
+        return;
+      }
+      if (arg === "on" || arg === "enable") {
+        await upsertUserSettings(pool, chatId, { checkin_enabled: true });
+        await sendAndStoreResponse(chatId, "<i>Check-ins enabled.</i>");
+        return;
+      }
+      if (arg.startsWith("snooze")) {
+        const hoursMatch = /(\d+)\s*h/i.exec(arg);
+        const hours = hoursMatch ? parseInt(hoursMatch[1], 10) : 2;
+        const snoozeUntil = new Date(Date.now() + hours * 3_600_000);
+        await upsertUserSettings(pool, chatId, { checkin_snooze_until: snoozeUntil });
+        await sendAndStoreResponse(chatId, `<i>Check-ins snoozed for ${hours}h.</i>`);
+        return;
+      }
+      const settings = await getUserSettings(pool, chatId);
+      const enabled = settings?.checkin_enabled ?? true;
+      const snoozed = settings?.checkin_snooze_until && new Date() < new Date(settings.checkin_snooze_until);
+      await sendAndStoreResponse(
+        chatId,
+        `<i>Check-ins: ${enabled ? "enabled" : "disabled"}${snoozed ? " (snoozed)" : ""}</i>`
+      );
+      return;
+    }
+
     // Handle /compose command
     let prefill: string | undefined;
     if (command?.name === "compose") {
@@ -738,44 +692,13 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
       prefill = "#";
     }
 
-    // Handle /evening command
-    if (command?.name === "evening") {
-      const firstArg = command.argText.split(/\s+/)[0].toLowerCase();
-      if (MODE_DISABLE_TOKENS.has(firstArg)) {
-        chatModes.delete(chatId);
-        await sendAndStoreResponse(chatId, "<i>Evening review mode off.</i>");
-        return;
-      }
-
-      chatModes.set(chatId, "evening_review");
-      text = buildEveningKickoffMessage(command.argText || null);
-    } else if (naturalEveningIntent?.type === "disable") {
-      chatModes.delete(chatId);
-      await sendAndStoreResponse(chatId, "<i>Evening review mode off.</i>");
-      return;
-    } else if (naturalEveningIntent?.type === "enable") {
-      chatModes.set(chatId, "evening_review");
-      text = buildEveningKickoffMessage(naturalEveningIntent.seed);
-    }
-
-    // Handle /morning command
-    if (command?.name === "morning") {
-      const firstArg = command.argText.split(/\s+/)[0].toLowerCase();
-      if (MODE_DISABLE_TOKENS.has(firstArg)) {
-        chatModes.delete(chatId);
-        await sendAndStoreResponse(chatId, "<i>Morning flow mode off.</i>");
-        return;
-      }
-
-      chatModes.set(chatId, "morning_flow");
-      text = buildMorningKickoffMessage(command.argText || null);
-    } else if (naturalMorningIntent?.type === "disable") {
-      chatModes.delete(chatId);
-      await sendAndStoreResponse(chatId, "<i>Morning flow mode off.</i>");
-      return;
-    } else if (naturalMorningIntent?.type === "enable") {
-      chatModes.set(chatId, "morning_flow");
-      text = buildMorningKickoffMessage(naturalMorningIntent.seed);
+    // Detect if this is a response to a pending check-in
+    const pendingCheckinId = pendingCheckins.get(chatId);
+    if (pendingCheckinId) {
+      pendingCheckins.delete(chatId);
+      chatModes.set(chatId, "checkin");
+      // Mark as responded (artifact will be set later after summary)
+      await markCheckinResponded(pool, pendingCheckinId);
     }
 
     const stopProgress = startProgressUpdates(chatId);
@@ -792,6 +715,25 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
           await sendTelegramMessage(chatId, `<i>Memory note: ${summary}</i>`);
         },
       });
+
+      // Process check-in summary if we were in check-in mode
+      if (pendingCheckinId && response) {
+        chatModes.delete(chatId);
+        // Fire-and-forget summary processing
+        /* v8 ignore next 7 -- async summary processing */
+        void (async () => {
+          try {
+            const OpenAI = (await import("openai")).default;
+            const openai = new OpenAI({ apiKey: config.openai.apiKey });
+            const client = createOpenAISummaryClient(openai);
+            const settings = await getUserSettings(pool, chatId);
+            const tz = settings?.timezone ?? config.timezone;
+            await processCheckinSummary(pool, client, pendingCheckinId, [text, response], tz);
+          } catch (err) {
+            console.error("Failed to process check-in summary:", err);
+          }
+        })();
+      }
 
       if (response) {
         const cleanActivity = stripActivityDetailLink(activity);
