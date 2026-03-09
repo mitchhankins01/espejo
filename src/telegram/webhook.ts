@@ -709,12 +709,16 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
     }
 
     // Detect if this is a response to a pending check-in
+    // Skip check-in activation during active session modes (morning/evening)
     const pendingCheckinId = pendingCheckins.get(chatId);
     if (pendingCheckinId) {
       pendingCheckins.delete(chatId);
-      chatModes.set(chatId, { mode: "checkin", systemPrompt: null });
-      // Mark as responded (artifact will be set later after summary)
-      await markCheckinResponded(pool, pendingCheckinId);
+      const currentMode = getChatMode(chatId);
+      if (currentMode.mode === "default") {
+        chatModes.set(chatId, { mode: "checkin", systemPrompt: null });
+        // Mark as responded (artifact will be set later after summary)
+        await markCheckinResponded(pool, pendingCheckinId);
+      }
     }
 
     const stopProgress = startProgressUpdates(chatId);

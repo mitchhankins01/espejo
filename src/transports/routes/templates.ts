@@ -10,6 +10,8 @@ import {
 import { requireBearerAuth } from "../middleware/auth.js";
 import type { RouteDeps } from "./types.js";
 
+const PROTECTED_SLUGS = new Set(["morning", "evening"]);
+
 export function registerTemplateRoutes(app: Express, deps: RouteDeps): void {
   const { pool, secret } = deps;
 
@@ -88,6 +90,14 @@ export function registerTemplateRoutes(app: Express, deps: RouteDeps): void {
         sort_order: z.number().int().optional(),
       });
       const data = schema.parse(req.body);
+      // Protect load-bearing slugs from being renamed away
+      if (data.slug !== undefined) {
+        const existing = await getTemplateById(pool, req.params.id);
+        if (existing && PROTECTED_SLUGS.has(existing.slug) && data.slug !== existing.slug) {
+          res.status(400).json({ error: `Cannot rename protected template '${existing.slug}'` });
+          return;
+        }
+      }
       const template = await updateTemplate(pool, req.params.id, data);
       if (!template) {
         res.status(404).json({ error: "Template not found" });
@@ -110,6 +120,12 @@ export function registerTemplateRoutes(app: Express, deps: RouteDeps): void {
     /* v8 ignore next */
     if (!requireBearerAuth(req, res, secret)) return;
     try {
+      // Protect load-bearing templates from deletion
+      const existing = await getTemplateById(pool, req.params.id);
+      if (existing && PROTECTED_SLUGS.has(existing.slug)) {
+        res.status(400).json({ error: `Cannot delete protected template '${existing.slug}'` });
+        return;
+      }
       const deleted = await deleteTemplate(pool, req.params.id);
       if (!deleted) {
         res.status(404).json({ error: "Template not found" });
