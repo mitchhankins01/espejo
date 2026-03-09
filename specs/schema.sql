@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS entries (
 
     -- Source and versioning
     source TEXT NOT NULL DEFAULT 'dayone'
-        CHECK (source IN ('dayone', 'web', 'telegram')),
+        CHECK (source IN ('dayone', 'web', 'telegram', 'mcp')),
     version INT NOT NULL DEFAULT 1,
 
     -- Vector embedding (1536 dims for text-embedding-3-small)
@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS entry_templates (
     name TEXT NOT NULL CHECK (char_length(name) BETWEEN 1 AND 100),
     description TEXT,
     body TEXT NOT NULL DEFAULT '',
+    system_prompt TEXT CHECK (system_prompt IS NULL OR char_length(system_prompt) <= 10000),
     default_tags TEXT[] NOT NULL DEFAULT '{}',
     sort_order INT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

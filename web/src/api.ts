@@ -101,6 +101,7 @@ export interface EntryTemplate {
   name: string;
   description: string | null;
   body: string;
+  system_prompt: string | null;
   default_tags: string[];
   sort_order: number;
   created_at: string;

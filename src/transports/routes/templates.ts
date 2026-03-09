@@ -55,6 +55,7 @@ export function registerTemplateRoutes(app: Express, deps: RouteDeps): void {
         name: z.string().min(1).max(100),
         description: z.string().optional(),
         body: z.string().optional(),
+        system_prompt: z.string().max(10_000).nullable().optional(),
         default_tags: z.array(z.string()).optional(),
         sort_order: z.number().int().optional(),
       });
@@ -82,6 +83,7 @@ export function registerTemplateRoutes(app: Express, deps: RouteDeps): void {
         name: z.string().min(1).max(100).optional(),
         description: z.string().optional(),
         body: z.string().optional(),
+        system_prompt: z.string().max(10_000).nullable().optional(),
         default_tags: z.array(z.string()).optional(),
         sort_order: z.number().int().optional(),
       });

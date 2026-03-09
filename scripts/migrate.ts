@@ -1065,6 +1065,17 @@ const migrations: Migration[] = [
         CHECK (type IN ('temporal_echo', 'biometric_correlation', 'stale_todo', 'oura_notable'));
     `,
   },
+  {
+    name: "029-template-system-prompt",
+    getSql: () => `
+      ALTER TABLE entry_templates ADD COLUMN IF NOT EXISTS system_prompt TEXT
+        CHECK (system_prompt IS NULL OR char_length(system_prompt) <= 10000);
+
+      ALTER TABLE entries DROP CONSTRAINT IF EXISTS entries_source_check;
+      ALTER TABLE entries ADD CONSTRAINT entries_source_check
+        CHECK (source IN ('dayone', 'web', 'telegram', 'mcp'));
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {
