@@ -13,6 +13,10 @@ export default defineConfig({
         "src/transports/oauth.ts",
         "src/oura/types.ts",
         "src/memory/*.ts",
+        "src/db/queries.ts",
+        "src/db/queries/index.ts",
+        "src/oura/analysis.ts",
+        "src/oura/analysis/index.ts",
       ],
       reporter: ["text", "lcov"],
       thresholds: {
@@ -21,8 +25,98 @@ export default defineConfig({
         functions: 95,
         branches: 90,
         statements: 95,
-        // Keep strict 100% on core modules where regressions are costly.
-        "src/db/queries.ts": {
+        // Keep strict 100% on core query modules where regressions are costly.
+        "src/db/queries/entries.ts": {
+          lines: 100,
+          functions: 100,
+          branches: 100,
+          statements: 100,
+        },
+        "src/db/queries/artifacts.ts": {
+          lines: 100,
+          functions: 100,
+          branches: 100,
+          statements: 100,
+        },
+        "src/db/queries/todos.ts": {
+          lines: 100,
+          functions: 100,
+          branches: 100,
+          statements: 100,
+        },
+        "src/db/queries/oura.ts": {
+          lines: 100,
+          functions: 100,
+          branches: 100,
+          statements: 100,
+        },
+        "src/db/queries/spanish.ts": {
+          lines: 100,
+          functions: 100,
+          branches: 100,
+          statements: 100,
+        },
+        "src/db/queries/patterns.ts": {
+          lines: 100,
+          functions: 100,
+          branches: 100,
+          statements: 100,
+        },
+        "src/db/queries/chat.ts": {
+          lines: 100,
+          functions: 100,
+          branches: 100,
+          statements: 100,
+        },
+        "src/db/queries/soul.ts": {
+          lines: 100,
+          functions: 100,
+          branches: 100,
+          statements: 100,
+        },
+        "src/db/queries/weights.ts": {
+          lines: 100,
+          functions: 100,
+          branches: 100,
+          statements: 100,
+        },
+        "src/db/queries/observability.ts": {
+          lines: 100,
+          functions: 100,
+          branches: 100,
+          statements: 100,
+        },
+        "src/db/queries/insights.ts": {
+          lines: 100,
+          functions: 100,
+          branches: 100,
+          statements: 100,
+        },
+        "src/db/queries/content-search.ts": {
+          lines: 100,
+          functions: 100,
+          branches: 100,
+          statements: 100,
+        },
+        "src/db/queries/settings.ts": {
+          lines: 100,
+          functions: 100,
+          branches: 100,
+          statements: 100,
+        },
+        "src/db/queries/checkins.ts": {
+          lines: 100,
+          functions: 100,
+          branches: 100,
+          statements: 100,
+        },
+        "src/db/queries/media.ts": {
+          lines: 100,
+          functions: 100,
+          branches: 100,
+          statements: 100,
+        },
+        "src/db/queries/templates.ts": {
           lines: 100,
           functions: 100,
           branches: 100,
@@ -40,7 +134,37 @@ export default defineConfig({
           branches: 100,
           statements: 100,
         },
-        "src/oura/analysis.ts": {
+        "src/oura/analysis/statistics.ts": {
+          lines: 100,
+          functions: 100,
+          branches: 100,
+          statements: 100,
+        },
+        "src/oura/analysis/trends.ts": {
+          lines: 100,
+          functions: 100,
+          branches: 100,
+          statements: 100,
+        },
+        "src/oura/analysis/outliers.ts": {
+          lines: 100,
+          functions: 100,
+          branches: 100,
+          statements: 100,
+        },
+        "src/oura/analysis/correlations.ts": {
+          lines: 100,
+          functions: 100,
+          branches: 100,
+          statements: 100,
+        },
+        "src/oura/analysis/sleep.ts": {
+          lines: 100,
+          functions: 100,
+          branches: 100,
+          statements: 100,
+        },
+        "src/oura/analysis/hrv.ts": {
           lines: 100,
           functions: 100,
           branches: 100,
