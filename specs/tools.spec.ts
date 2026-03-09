@@ -13,6 +13,39 @@
  */
 
 import { z } from "zod";
+import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
+
+// ============================================================================
+// Tool annotation presets
+// ============================================================================
+
+const READ_ONLY: ToolAnnotations = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+};
+
+const READ_ONLY_OPEN: ToolAnnotations = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: true,
+};
+
+const WRITE_IDEMPOTENT: ToolAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+};
+
+const WRITE_ADDITIVE: ToolAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: false,
+};
 
 // ============================================================================
 // Shared schemas
@@ -113,6 +146,7 @@ export type SimilarResult = EntryResult & {
 export const toolSpecs = {
   search_entries: {
     name: "search_entries" as const,
+    annotations: READ_ONLY_OPEN,
     description:
       "Hybrid semantic + keyword search across journal entries using Reciprocal Rank Fusion (BM25 full-text + vector cosine similarity). " +
       "Finds entries by meaning even when exact words don't match. " +
@@ -164,6 +198,7 @@ export const toolSpecs = {
 
   get_entry: {
     name: "get_entry" as const,
+    annotations: READ_ONLY,
     description:
       "Get a single journal entry by its UUID with full text, all metadata, tags, weather, location, and media counts. " +
       "Returns structured data including nested weather and location objects.",
@@ -181,6 +216,7 @@ export const toolSpecs = {
 
   get_entries_by_date: {
     name: "get_entries_by_date" as const,
+    annotations: READ_ONLY,
     description:
       "Get all entries within a date range, ordered chronologically. Use for reviewing a specific period. " +
       "Entries include somatic reflections and self-reported health data — consider cross-referencing with biometric sources for a complete picture.",
@@ -207,6 +243,7 @@ export const toolSpecs = {
 
   on_this_day: {
     name: "on_this_day" as const,
+    annotations: READ_ONLY,
     description:
       "Find entries written on a specific calendar day (MM-DD) across all years. " +
       "Great for year-over-year reflection and seeing how your thinking has evolved. " +
@@ -232,6 +269,7 @@ export const toolSpecs = {
 
   find_similar: {
     name: "find_similar" as const,
+    annotations: READ_ONLY_OPEN,
     description:
       "Find entries semantically similar to a given entry using cosine similarity on embeddings. " +
       "Useful for discovering recurring themes or finding related reflections you may have forgotten about.",
@@ -258,6 +296,7 @@ export const toolSpecs = {
 
   list_tags: {
     name: "list_tags" as const,
+    annotations: READ_ONLY,
     description:
       "List all unique tags used across journal entries, with usage counts, ordered by frequency (most used first).",
     params: z.object({}),
@@ -272,6 +311,7 @@ export const toolSpecs = {
 
   entry_stats: {
     name: "entry_stats" as const,
+    annotations: READ_ONLY,
     description:
       "Get writing statistics: total entries, word count trends, writing frequency by day of week and month, " +
       "average entry length, longest writing streak, and current streak. " +
@@ -298,6 +338,7 @@ export const toolSpecs = {
   },
   conjugate_verb: {
     name: "conjugate_verb" as const,
+    annotations: READ_ONLY,
     description:
       "Look up Spanish verb conjugations by infinitive, optionally filtered by mood and tense. " +
       "Useful for correcting conjugation mistakes in natural conversation.",
@@ -333,6 +374,7 @@ export const toolSpecs = {
   },
   log_vocabulary: {
     name: "log_vocabulary" as const,
+    annotations: WRITE_IDEMPOTENT,
     description:
       "Track a Spanish vocabulary word for a specific chat/user, including optional region and usage notes. " +
       "Upserts by chat + word + region so repeated logging reinforces the same card.",
@@ -392,6 +434,7 @@ export const toolSpecs = {
   },
   spanish_quiz: {
     name: "spanish_quiz" as const,
+    annotations: WRITE_ADDITIVE,
     description:
       "Manage lightweight Spanish spaced-repetition flow: fetch due cards, record a review grade, or get progress stats.",
     params: z.object({
@@ -447,6 +490,7 @@ export const toolSpecs = {
 
   get_oura_summary: {
     name: "get_oura_summary" as const,
+    annotations: READ_ONLY,
     description: "Get a single-day Oura biometric snapshot including sleep, readiness, activity, HRV, steps, stress, and workouts.",
     params: z.object({
       date: dateString.optional().describe("Optional date in YYYY-MM-DD; defaults to today"),
@@ -455,6 +499,7 @@ export const toolSpecs = {
   },
   get_oura_weekly: {
     name: "get_oura_weekly" as const,
+    annotations: READ_ONLY,
     description: "Get a 7-day Oura overview with daily scores, stress, efficiency, and aggregate stats.",
     params: z.object({
       end_date: dateString.optional().describe("Week end date (inclusive); defaults to today"),
@@ -463,6 +508,7 @@ export const toolSpecs = {
   },
   get_oura_trends: {
     name: "get_oura_trends" as const,
+    annotations: READ_ONLY,
     description: "Get trend direction and rolling averages for a selected Oura metric. Supports: sleep_score, hrv, readiness, activity, steps, sleep_duration, stress, resting_heart_rate, temperature, active_calories, heart_rate, efficiency.",
     params: z.object({
       metric: ouraMetricParam.default("sleep_score"),
@@ -472,6 +518,7 @@ export const toolSpecs = {
   },
   get_oura_analysis: {
     name: "get_oura_analysis" as const,
+    annotations: READ_ONLY,
     description: "Run an Oura analysis mode: sleep_quality, anomalies, hrv_trend, temperature, or best_sleep.",
     params: z.object({
       type: ouraAnalysisTypeParam,
@@ -481,6 +528,7 @@ export const toolSpecs = {
   },
   oura_compare_periods: {
     name: "oura_compare_periods" as const,
+    annotations: READ_ONLY,
     description: "Compare biometrics between two date ranges and return percentage deltas. Covers all trendable metrics including stress, resting HR, temperature, calories, heart rate, and efficiency.",
     params: z.object({
       from_a: dateString,
@@ -492,6 +540,7 @@ export const toolSpecs = {
   },
   oura_correlate: {
     name: "oura_correlate" as const,
+    annotations: READ_ONLY,
     description: "Compute correlation between two Oura metrics over N days. Supports all trendable metrics including stress, resting HR, temperature, calories, heart rate, and efficiency.",
     params: z.object({
       metric_a: ouraMetricParam,
@@ -503,6 +552,7 @@ export const toolSpecs = {
 
   get_artifact: {
     name: "get_artifact" as const,
+    annotations: READ_ONLY,
     description:
       "Get a single knowledge artifact by ID with full content, tags, source entry UUIDs, version, and embedding status.",
     params: z.object({
@@ -518,6 +568,7 @@ export const toolSpecs = {
 
   list_artifacts: {
     name: "list_artifacts" as const,
+    annotations: READ_ONLY,
     description:
       "List knowledge artifacts with optional filtering by kind and tags. Ordered by most recently updated.",
     params: z.object({
@@ -541,6 +592,7 @@ export const toolSpecs = {
 
   search_artifacts: {
     name: "search_artifacts" as const,
+    annotations: READ_ONLY_OPEN,
     description:
       "Hybrid semantic + keyword search across knowledge artifacts using Reciprocal Rank Fusion. " +
       "Same RRF approach as search_entries but scoped to artifacts only.",
@@ -561,6 +613,7 @@ export const toolSpecs = {
 
   search_content: {
     name: "search_content" as const,
+    annotations: READ_ONLY_OPEN,
     description:
       "Unified search across both journal entries and knowledge artifacts using Reciprocal Rank Fusion. " +
       "Returns results with a content_type discriminator. Use this when you want to search across all content types.",
@@ -591,6 +644,7 @@ export const toolSpecs = {
 
   remember: {
     name: "remember" as const,
+    annotations: WRITE_IDEMPOTENT,
     description:
       "Store a single durable memory pattern. Use for explicit identity facts, recurring preferences, and active goals.",
     params: z.object({
@@ -618,6 +672,7 @@ export const toolSpecs = {
 
   save_chat: {
     name: "save_chat" as const,
+    annotations: WRITE_ADDITIVE,
     description:
       "Extract and store up to 5 memory patterns from a conversation transcript using memory-v2 quality gates.",
     params: z.object({
@@ -637,6 +692,7 @@ export const toolSpecs = {
 
   recall: {
     name: "recall" as const,
+    annotations: READ_ONLY,
     description:
       "Search memory patterns using hybrid semantic + text retrieval with memory-aware ranking.",
     params: z.object({
@@ -654,6 +710,7 @@ export const toolSpecs = {
 
   reflect: {
     name: "reflect" as const,
+    annotations: WRITE_IDEMPOTENT,
     description:
       "Memory maintenance utility: review stats, stale memories, or run consolidation on overlapping patterns.",
     params: z.object({
@@ -674,6 +731,7 @@ export const toolSpecs = {
 
   list_todos: {
     name: "list_todos" as const,
+    annotations: READ_ONLY,
     description:
       "List todos with filtering by status, Eisenhower quadrant (urgent/important), parent, or focus. " +
       "Supports include_children to load subtasks inline.",
@@ -705,6 +763,7 @@ export const toolSpecs = {
 
   create_todo: {
     name: "create_todo" as const,
+    annotations: WRITE_ADDITIVE,
     description:
       "Create a new todo with optional Eisenhower urgency/importance flags and parent for subtasks. " +
       "Max 2 levels deep (parent must be root-level).",
@@ -732,6 +791,7 @@ export const toolSpecs = {
 
   update_todo: {
     name: "update_todo" as const,
+    annotations: WRITE_IDEMPOTENT,
     description:
       "Update a todo's fields. Auto-sets completed_at when status → done, clears it otherwise.",
     params: z.object({
@@ -754,6 +814,7 @@ export const toolSpecs = {
 
   complete_todo: {
     name: "complete_todo" as const,
+    annotations: WRITE_IDEMPOTENT,
     description:
       "Mark a todo as done, set completed_at, and clear focus if it was the focus item. " +
       "Convenience shortcut for the common case.",
@@ -770,6 +831,7 @@ export const toolSpecs = {
 
   set_todo_focus: {
     name: "set_todo_focus" as const,
+    annotations: WRITE_IDEMPOTENT,
     description:
       "Set or clear 'The One Thing' focus. Only one todo can be focus at a time. " +
       "Call with id to set, or with clear=true to unset.",
@@ -785,6 +847,57 @@ export const toolSpecs = {
       {
         input: { clear: true },
         behavior: "Clears the current focus without setting a new one",
+      },
+    ],
+  },
+
+  start_journal_session: {
+    name: "start_journal_session" as const,
+    annotations: READ_ONLY,
+    description:
+      "Start a guided morning or evening journaling session. Returns the session template (prompt scaffold + agent instructions) " +
+      "and relevant context (Oura biometrics for morning, 7-day entry summaries + weekly Oura for evening). " +
+      "The LLM drives the conversation using the template's system_prompt instructions.",
+    params: z.object({
+      type: z.enum(["morning", "evening"]).describe("Session type: morning (warm, minimal prompts with Oura prefill) or evening (structured interview with 7-day context)"),
+      date: dateString.optional().describe("Target date (default: today). Use for 'do yesterday's evening review'"),
+    }),
+    examples: [
+      {
+        input: { type: "morning" },
+        behavior: "Returns morning template + today's Oura summary. LLM walks through prompts one at a time.",
+      },
+      {
+        input: { type: "evening", date: "2026-03-08" },
+        behavior: "Returns evening template + 7-day entry summaries + weekly Oura for a specific date.",
+      },
+    ],
+  },
+
+  create_entry: {
+    name: "create_entry" as const,
+    annotations: WRITE_ADDITIVE,
+    description:
+      "Create a new journal entry. Used at the end of journaling sessions or for standalone entry creation. " +
+      "Fires embedding generation so the entry is immediately searchable. " +
+      "Tags default to empty. Source defaults to 'mcp' — Telegram agent should pass 'telegram'.",
+    params: z.object({
+      text: z.string().min(1).max(50_000).describe("Journal entry text (markdown supported)"),
+      tags: z.array(z.string().min(1).max(100)).max(20).optional().describe("Tags for the entry"),
+      date: dateString.optional().describe("Entry date in YYYY-MM-DD (default: today)"),
+      timezone: z.string().min(1).max(50).optional().describe("IANA timezone, e.g. 'Europe/Madrid'"),
+      source: z.enum(["mcp", "telegram", "web"]).default("mcp")
+        .describe("Entry source for attribution (default: mcp)"),
+      city: z.string().max(200).optional().describe("City name"),
+    }),
+    examples: [
+      {
+        input: { text: "Morning reflection...", tags: ["morning-journal"] },
+        behavior: "Creates entry with source='mcp', fires embedding, returns uuid and created_at",
+      },
+      {
+        input: { text: "Evening review...", tags: ["evening-review"], source: "telegram" },
+        behavior: "Creates entry attributed to Telegram with specified tags",
       },
     ],
   },
@@ -819,6 +932,24 @@ export interface ArtifactSearchResult {
   match_sources: ("semantic" | "fulltext")[];
   created_at: string;
   updated_at: string;
+}
+
+export interface SessionResult {
+  template: {
+    body: string;
+    system_prompt: string | null;
+  };
+  context: {
+    oura?: string;
+    entries_summary?: string;
+    oura_week?: string;
+  };
+  date: string;
+}
+
+export interface CreateEntryResult {
+  uuid: string;
+  created_at: string;
 }
 
 export interface UnifiedSearchResult {

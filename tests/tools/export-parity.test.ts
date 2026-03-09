@@ -171,6 +171,7 @@ describe("queries.ts export parity", () => {
       "updateTemplate",
       "deleteTemplate",
       "getEntryIdByUuid",
+      "getTemplateBySlug",
     ].sort();
 
     for (const name of expected) {
@@ -187,7 +188,7 @@ describe("queries.ts export parity", () => {
 // Keep this in sync — update when intentionally adding/removing exports
 function expected_count(): number {
   // Current runtime export count (functions + constants, not types/interfaces)
-  return 155;
+  return 156;
 }
 
 describe("oura/analysis.ts export parity", () => {

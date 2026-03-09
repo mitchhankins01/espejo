@@ -14,7 +14,7 @@ import {
   buildSoulPromptSection,
   type SoulStateSnapshot,
 } from "../soul.js";
-import { getModePrompt, type AgentMode } from "../evening-review.js";
+import { getModePrompt, type ChatModeState } from "../evening-review.js";
 import { SPANISH_DEFAULT_KNOWN_TENSES } from "./constants.js";
 
 // ---------------------------------------------------------------------------
@@ -25,7 +25,7 @@ export function buildSystemPrompt(
   patterns: PatternSearchRow[],
   memoryDegraded: boolean,
   soulState: SoulStateSnapshot | null,
-  mode: AgentMode
+  mode: ChatModeState
 ): string {
   const today = new Intl.DateTimeFormat("en-US", {
     timeZone: config.timezone,

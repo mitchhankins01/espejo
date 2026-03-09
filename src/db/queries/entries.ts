@@ -29,7 +29,7 @@ export interface EntryRow {
   temperature: number | null;
   weather_conditions: string | null;
   humidity: number | null;
-  source: "dayone" | "web" | "telegram";
+  source: "dayone" | "web" | "telegram" | "mcp";
   version: number;
   tags: string[];
   photo_count: number;
@@ -579,6 +579,8 @@ const ENTRY_SELECT = `
   dm.weight_kg
 `;
 
+export type EntrySource = "dayone" | "web" | "telegram" | "mcp";
+
 export interface CreateEntryData {
   text: string;
   tags?: string[];
@@ -589,6 +591,7 @@ export interface CreateEntryData {
   place_name?: string;
   latitude?: number;
   longitude?: number;
+  source?: EntrySource;
 }
 
 export async function createEntry(
@@ -604,7 +607,7 @@ export async function createEntry(
 
     const result = await client.query(
       `INSERT INTO entries (uuid, text, timezone, created_at, city, country, place_name, latitude, longitude, source, version)
-       VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5, $6, $7, $8, $9, 'web', 1)
+       VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5, $6, $7, $8, $9, $10, 1)
        RETURNING id, uuid`,
       [
         uuid,
@@ -616,6 +619,7 @@ export async function createEntry(
         data.place_name ?? null,
         data.latitude ?? null,
         data.longitude ?? null,
+        data.source ?? "web",
       ]
     );
 

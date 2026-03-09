@@ -3362,7 +3362,36 @@ describe("startHttpServer", () => {
     expect(mockRes.status).toHaveBeenCalledWith(404);
   });
 
+  it("PUT /api/templates/:id rejects renaming protected slug", async () => {
+    mockGetTemplateById.mockResolvedValue({ id: "t1", slug: "morning" });
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/templates/:id");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { id: "t1" }, body: { slug: "renamed" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+    expect(mockRes.json).toHaveBeenCalledWith({ error: "Cannot rename protected template 'morning'" });
+  });
+
+  it("DELETE /api/templates/:id rejects deleting protected template", async () => {
+    mockGetTemplateById.mockResolvedValue({ id: "t1", slug: "evening" });
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+
+    const call = mockApp.delete.mock.calls.find((c: any[]) => c[0] === "/api/templates/:id");
+    const handler = call![1];
+    const mockReq = { headers: {}, params: { id: "t1" } };
+    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handler(mockReq, mockRes);
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+    expect(mockRes.json).toHaveBeenCalledWith({ error: "Cannot delete protected template 'evening'" });
+  });
+
   it("DELETE /api/templates/:id deletes template", async () => {
+    mockGetTemplateById.mockResolvedValue({ id: "t1", slug: "custom" });
     mockDeleteTemplate.mockResolvedValue(true);
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
 
@@ -3376,6 +3405,7 @@ describe("startHttpServer", () => {
   });
 
   it("DELETE /api/templates/:id returns 404 when not found", async () => {
+    mockGetTemplateById.mockResolvedValue(null);
     mockDeleteTemplate.mockResolvedValue(false);
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
 

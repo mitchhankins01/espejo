@@ -1,5 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type pg from "pg";
+import { z } from "zod";
 import { toolSpecs } from "../specs/tools.spec.js";
 import { handleSearchEntries } from "./tools/search.js";
 import { handleGetEntry } from "./tools/get-entry.js";
@@ -30,8 +32,13 @@ import { handleCreateTodo } from "./tools/create-todo.js";
 import { handleUpdateTodo } from "./tools/update-todo.js";
 import { handleCompleteTodo } from "./tools/complete-todo.js";
 import { handleSetTodoFocus } from "./tools/set-todo-focus.js";
+import { handleStartJournalSession } from "./tools/start-journal-session.js";
+import { handleCreateEntry } from "./tools/create-entry.js";
+import { buildMorningContext, buildEveningContext } from "./sessions/context.js";
 
-export type ToolHandler = (pool: pg.Pool, input: unknown) => Promise<string>;
+/** Tool handlers can return a plain string or a rich CallToolResult with audience annotations. */
+export type ToolResult = string | CallToolResult;
+export type ToolHandler = (pool: pg.Pool, input: unknown) => Promise<ToolResult>;
 
 export const toolHandlers: Record<string, ToolHandler> = {
   search_entries: handleSearchEntries,
@@ -63,6 +70,8 @@ export const toolHandlers: Record<string, ToolHandler> = {
   update_todo: handleUpdateTodo,
   complete_todo: handleCompleteTodo,
   set_todo_focus: handleSetTodoFocus,
+  start_journal_session: handleStartJournalSession,
+  create_entry: handleCreateEntry,
 };
 
 export function createServer(pool: pg.Pool, version: string): McpServer {
@@ -82,12 +91,15 @@ export function createServer(pool: pg.Pool, version: string): McpServer {
       {
         description: spec.description,
         inputSchema: spec.params,
+        annotations: spec.annotations,
       },
       async (args: Record<string, unknown>) => {
         try {
-          const text = await handler(pool, args);
+          const result = await handler(pool, args);
+          // Rich result: handler already built content with audience annotations
+          if (typeof result !== "string") return result;
           return {
-            content: [{ type: "text" as const, text }],
+            content: [{ type: "text" as const, text: result }],
           };
         } catch (err) {
           const message =
@@ -100,6 +112,87 @@ export function createServer(pool: pg.Pool, version: string): McpServer {
       }
     );
   }
+
+  // ============================================================================
+  // MCP Prompts — user-initiated session starts (show in Claude Desktop / menu)
+  // ============================================================================
+
+  server.registerPrompt(
+    "morning-journal",
+    {
+      title: "Morning Journal",
+      description:
+        "Start a guided morning journaling session with Oura biometrics and warm-up prompts.",
+      argsSchema: {
+        date: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/)
+          .optional()
+          .describe("Target date in YYYY-MM-DD (default: today)"),
+      },
+    },
+    async ({ date }) => {
+      const ctx = await buildMorningContext(pool, date);
+      return {
+        messages: [
+          {
+            role: "user" as const,
+            content: {
+              type: "text" as const,
+              text:
+                `Start my morning journal session for ${ctx.date}.\n\n` +
+                `Template:\n${ctx.template.body}\n\n` +
+                (ctx.context.oura ? `Oura data:\n${ctx.context.oura}` : "No Oura data available."),
+            },
+          },
+        ],
+        ...(ctx.template.system_prompt
+          ? { description: ctx.template.system_prompt }
+          : {}),
+      };
+    }
+  );
+
+  server.registerPrompt(
+    "evening-journal",
+    {
+      title: "Evening Journal",
+      description:
+        "Start a guided evening review session with recent entries and weekly biometrics.",
+      argsSchema: {
+        date: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/)
+          .optional()
+          .describe("Target date in YYYY-MM-DD (default: today)"),
+      },
+    },
+    async ({ date }) => {
+      const ctx = await buildEveningContext(pool, date);
+      return {
+        messages: [
+          {
+            role: "user" as const,
+            content: {
+              type: "text" as const,
+              text:
+                `Start my evening journal session for ${ctx.date}.\n\n` +
+                `Template:\n${ctx.template.body}\n\n` +
+                (ctx.context.entries_summary
+                  ? `Recent entries:\n${ctx.context.entries_summary}\n\n`
+                  : "") +
+                (ctx.context.oura_week
+                  ? `Weekly Oura:\n${ctx.context.oura_week}`
+                  : "No Oura data available."),
+            },
+          },
+        ],
+        ...(ctx.template.system_prompt
+          ? { description: ctx.template.system_prompt }
+          : {}),
+      };
+    }
+  );
 
   return server;
 }

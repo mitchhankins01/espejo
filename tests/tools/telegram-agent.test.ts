@@ -1572,7 +1572,7 @@ describe("runAgent", () => {
       chatId: "100",
       message: "How are you this morning?",
       messageDate: 1000,
-      mode: "checkin",
+      mode: { mode: "checkin", systemPrompt: null },
     });
 
     const call = mockAnthropicCreate.mock.calls[0][0];
@@ -1606,7 +1606,7 @@ describe("runAgent", () => {
       chatId: "100",
       message: "/evening",
       messageDate: 1000,
-      mode: "default",
+      mode: { mode: "default", systemPrompt: null },
     });
 
     expect(mockGenerateEmbedding).not.toHaveBeenCalled();
@@ -1630,7 +1630,7 @@ describe("runAgent", () => {
       chatId: "100",
       message: "/evening",
       messageDate: 1000,
-      mode: "default",
+      mode: { mode: "default", systemPrompt: null },
     });
 
     expect(result.response).toBe("Still here.");
@@ -1766,7 +1766,7 @@ describe("runAgent", () => {
       chatId: "100",
       message: "How are you this morning?",
       messageDate: 1000,
-      mode: "checkin",
+      mode: { mode: "checkin", systemPrompt: null },
     });
 
     expect(result.response).toContain("Eso es justo");
@@ -2447,7 +2447,7 @@ describe("runAgent", () => {
       message: "Write the entry now.",
       storedUserMessage: "/compose",
       messageDate: 1000,
-      mode: "default",
+      mode: { mode: "default", systemPrompt: null },
     });
 
     // User message ("/compose") is now stored by handleMessage() in webhook.ts.

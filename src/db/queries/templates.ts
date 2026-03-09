@@ -10,13 +10,14 @@ export interface TemplateRow {
   name: string;
   description: string | null;
   body: string;
+  system_prompt: string | null;
   default_tags: string[];
   sort_order: number;
   created_at: Date;
   updated_at: Date;
 }
 
-const TEMPLATE_COLUMNS = `id, slug, name, description, body, default_tags, sort_order, created_at, updated_at`;
+const TEMPLATE_COLUMNS = `id, slug, name, description, body, system_prompt, default_tags, sort_order, created_at, updated_at`;
 
 function toTemplateRow(row: Record<string, unknown>): TemplateRow {
   return {
@@ -25,6 +26,7 @@ function toTemplateRow(row: Record<string, unknown>): TemplateRow {
     name: row.name as string,
     description: (row.description as string | null) ?? null,
     body: row.body as string,
+    system_prompt: (row.system_prompt as string | null) ?? null,
     /* v8 ignore next 2 */
     default_tags: (row.default_tags as string[]) ?? [],
     sort_order: (row.sort_order as number) ?? 0,
@@ -55,6 +57,18 @@ export async function getTemplateById(
   return toTemplateRow(result.rows[0] as Record<string, unknown>);
 }
 
+export async function getTemplateBySlug(
+  pool: pg.Pool,
+  slug: string
+): Promise<TemplateRow | null> {
+  const result = await pool.query(
+    `SELECT ${TEMPLATE_COLUMNS} FROM entry_templates WHERE slug = $1`,
+    [slug]
+  );
+  if (result.rows.length === 0) return null;
+  return toTemplateRow(result.rows[0] as Record<string, unknown>);
+}
+
 export async function createTemplate(
   pool: pg.Pool,
   data: {
@@ -62,19 +76,21 @@ export async function createTemplate(
     name: string;
     description?: string;
     body?: string;
+    system_prompt?: string | null;
     default_tags?: string[];
     sort_order?: number;
   }
 ): Promise<TemplateRow> {
   const result = await pool.query(
-    `INSERT INTO entry_templates (slug, name, description, body, default_tags, sort_order)
-     VALUES ($1, $2, $3, $4, $5::text[], $6)
+    `INSERT INTO entry_templates (slug, name, description, body, system_prompt, default_tags, sort_order)
+     VALUES ($1, $2, $3, $4, $5, $6::text[], $7)
      RETURNING ${TEMPLATE_COLUMNS}`,
     [
       data.slug,
       data.name,
       data.description ?? null,
       data.body ?? "",
+      data.system_prompt ?? null,
       data.default_tags ?? [],
       data.sort_order ?? 0,
     ]
@@ -90,6 +106,7 @@ export async function updateTemplate(
     name?: string;
     description?: string;
     body?: string;
+    system_prompt?: string | null;
     default_tags?: string[];
     sort_order?: number;
   }
@@ -117,6 +134,11 @@ export async function updateTemplate(
     paramIdx++;
     setClauses.push(`body = $${paramIdx}`);
     params.push(data.body);
+  }
+  if (data.system_prompt !== undefined) {
+    paramIdx++;
+    setClauses.push(`system_prompt = $${paramIdx}`);
+    params.push(data.system_prompt);
   }
   if (data.default_tags !== undefined) {
     paramIdx++;

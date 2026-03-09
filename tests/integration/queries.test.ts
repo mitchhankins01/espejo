@@ -129,6 +129,7 @@ import {
   getMediaForEntry,
   deleteMedia,
   listTemplates,
+  getTemplateBySlug,
   createTemplate,
   updateTemplate,
   deleteTemplate,
@@ -3496,6 +3497,14 @@ describe("Entry CRUD", () => {
     expect(entry.created_at.toISOString()).toContain("2025-06-15");
   });
 
+  it("creates entry with custom source", async () => {
+    const entry = await createEntry(pool, {
+      text: "MCP-created entry",
+      source: "mcp",
+    });
+    expect(entry.source).toBe("mcp");
+  });
+
   it("updates entry with optimistic locking", async () => {
     const entry = await createEntry(pool, { text: "Original" });
 
@@ -3818,5 +3827,71 @@ describe("Entry templates", () => {
   it("returns false for deleting non-existent template", async () => {
     const result = await deleteTemplate(pool, "00000000-0000-0000-0000-000000000000");
     expect(result).toBe(false);
+  });
+
+  it("gets template by slug", async () => {
+    await createTemplate(pool, {
+      slug: "by-slug-test",
+      name: "By Slug",
+      body: "slug body",
+    });
+
+    const found = await getTemplateBySlug(pool, "by-slug-test");
+    expect(found).not.toBeNull();
+    expect(found!.slug).toBe("by-slug-test");
+    expect(found!.name).toBe("By Slug");
+  });
+
+  it("returns null for non-existent slug", async () => {
+    const result = await getTemplateBySlug(pool, "no-such-slug");
+    expect(result).toBeNull();
+  });
+
+  it("creates template with system_prompt", async () => {
+    const template = await createTemplate(pool, {
+      slug: "with-system-prompt",
+      name: "With Prompt",
+      system_prompt: "You are a morning journal guide.",
+    });
+
+    expect(template.system_prompt).toBe("You are a morning journal guide.");
+  });
+
+  it("creates template with null system_prompt by default", async () => {
+    const template = await createTemplate(pool, {
+      slug: "no-system-prompt",
+      name: "No Prompt",
+    });
+
+    expect(template.system_prompt).toBeNull();
+  });
+
+  it("updates template system_prompt", async () => {
+    const template = await createTemplate(pool, {
+      slug: "update-prompt",
+      name: "Update Prompt",
+    });
+
+    const updated = await updateTemplate(pool, template.id, {
+      system_prompt: "New prompt",
+    });
+
+    expect(updated).not.toBeNull();
+    expect(updated!.system_prompt).toBe("New prompt");
+  });
+
+  it("clears template system_prompt by setting null", async () => {
+    const template = await createTemplate(pool, {
+      slug: "clear-prompt",
+      name: "Clear Prompt",
+      system_prompt: "Old prompt",
+    });
+
+    const updated = await updateTemplate(pool, template.id, {
+      system_prompt: null,
+    });
+
+    expect(updated).not.toBeNull();
+    expect(updated!.system_prompt).toBeNull();
   });
 });
