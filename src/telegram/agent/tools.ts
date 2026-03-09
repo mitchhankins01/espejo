@@ -7,7 +7,7 @@ import {
   type ChatMessageRow,
   type ActivityLogToolCall,
 } from "../../db/queries.js";
-import { toolHandlers } from "../../server.js";
+import { toolHandlers, type ToolResult } from "../../server.js";
 import {
   allToolNames,
   toAnthropicToolDefinition,
@@ -51,6 +51,18 @@ function getOpenAITools(): OpenAIChatTool[] {
       parameters: def.input_schema,
     },
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Tool result → plain text (Telegram agent only needs strings)
+// ---------------------------------------------------------------------------
+
+function resolveToolResultText(result: ToolResult): string {
+  if (typeof result === "string") return result;
+  return result.content
+    .filter((c): c is { type: "text"; text: string } => c.type === "text")
+    .map((c) => c.text)
+    .join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -237,7 +249,7 @@ async function runAnthropicToolLoop(
       const handler = toolHandlers[toolUse.name];
       if (handler) {
         try {
-          result = await handler(pool, toolUse.input);
+          result = resolveToolResultText(await handler(pool, toolUse.input));
         } catch (err) {
           /* v8 ignore next -- errors are always Error instances in practice */
           result = `Error: ${err instanceof Error ? err.message : String(err)}`;
@@ -426,7 +438,7 @@ async function runOpenAIToolLoop(
       const handler = toolHandlers[toolName];
       if (handler) {
         try {
-          result = await handler(pool, parsedArgs);
+          result = resolveToolResultText(await handler(pool, parsedArgs));
         } catch (err) {
           /* v8 ignore next -- errors are always Error instances in practice */
           result = `Error: ${err instanceof Error ? err.message : String(err)}`;

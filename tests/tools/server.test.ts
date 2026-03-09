@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockRegisterTool, mockHandlers } = vi.hoisted(() => ({
+const { mockRegisterTool, mockRegisterPrompt, mockHandlers } = vi.hoisted(() => ({
   mockRegisterTool: vi.fn(),
+  mockRegisterPrompt: vi.fn(),
   mockHandlers: {
     handleSearchEntries: vi.fn(),
     handleGetEntry: vi.fn(),
@@ -23,7 +24,13 @@ const { mockRegisterTool, mockHandlers } = vi.hoisted(() => ({
 vi.mock("@modelcontextprotocol/sdk/server/mcp.js", () => ({
   McpServer: vi.fn().mockImplementation(() => ({
     registerTool: mockRegisterTool,
+    registerPrompt: mockRegisterPrompt,
   })),
+}));
+
+vi.mock("../../src/sessions/context.js", () => ({
+  buildMorningContext: vi.fn(),
+  buildEveningContext: vi.fn(),
 }));
 
 vi.mock("../../src/tools/search.js", () => ({
@@ -82,6 +89,7 @@ import { toolSpecs } from "../../specs/tools.spec.js";
 describe("createServer", () => {
   beforeEach(() => {
     mockRegisterTool.mockClear();
+    mockRegisterPrompt.mockClear();
     Object.values(mockHandlers).forEach((fn) => fn.mockReset());
   });
 
@@ -154,5 +162,45 @@ describe("createServer", () => {
   it("exports ToolHandler type (compile-time check)", () => {
     const handler: ToolHandler = toolHandlers.search_entries;
     expect(typeof handler).toBe("function");
+  });
+
+  it("passes tool annotations from spec to registerTool", () => {
+    createServer({} as any, "1.0.0");
+    const searchCall = mockRegisterTool.mock.calls.find(
+      (call) => call[0] === "search_entries"
+    );
+    expect(searchCall![1].annotations).toEqual({
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    });
+  });
+
+  it("passes through rich CallToolResult from handler", async () => {
+    const richResult = {
+      content: [
+        { type: "text" as const, text: "visible", annotations: { audience: ["user" as const] } },
+        { type: "text" as const, text: "instructions", annotations: { audience: ["assistant" as const] } },
+      ],
+    };
+    mockHandlers.handleSearchEntries.mockResolvedValue(richResult);
+    createServer({} as any, "1.0.0");
+
+    const searchCall = mockRegisterTool.mock.calls.find(
+      (call) => call[0] === "search_entries"
+    );
+    const handler = searchCall![2];
+    const result = await handler({ query: "test" });
+
+    expect(result).toBe(richResult);
+  });
+
+  it("registers morning-journal and evening-journal prompts", () => {
+    createServer({} as any, "1.0.0");
+    expect(mockRegisterPrompt).toHaveBeenCalledTimes(2);
+    const names = mockRegisterPrompt.mock.calls.map((call) => call[0]);
+    expect(names).toContain("morning-journal");
+    expect(names).toContain("evening-journal");
   });
 });

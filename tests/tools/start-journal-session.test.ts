@@ -14,6 +14,7 @@ vi.mock("../../src/config.js", () => ({
 
 import { handleStartJournalSession } from "../../src/tools/start-journal-session.js";
 import { validateToolInput, toolSpecs } from "../../specs/tools.spec.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 const mockPool = {} as any;
 
@@ -51,8 +52,27 @@ describe("start_journal_session spec", () => {
   });
 });
 
+/** Extract text from the first content block targeted at both audiences. */
+function getUserText(result: CallToolResult): string {
+  const block = result.content.find(
+    (c) => c.type === "text" && c.annotations?.audience?.includes("user")
+  );
+  return block && "text" in block ? block.text : "";
+}
+
+/** Extract assistant-only content block (system prompt). */
+function getAssistantOnlyText(result: CallToolResult): string | undefined {
+  const block = result.content.find(
+    (c) =>
+      c.type === "text" &&
+      c.annotations?.audience?.includes("assistant") &&
+      !c.annotations?.audience?.includes("user")
+  );
+  return block && "text" in block ? block.text : undefined;
+}
+
 describe("handleStartJournalSession", () => {
-  it("returns morning context with Oura data", async () => {
+  it("returns morning context with Oura data and audience annotations", async () => {
     mockQueries.getTemplateBySlug.mockResolvedValue({
       id: "t1",
       slug: "morning",
@@ -84,15 +104,26 @@ describe("handleStartJournalSession", () => {
       type: "morning",
       date: "2026-03-09",
     });
-    const parsed = JSON.parse(result);
 
+    // User+assistant content block has template body and context
+    const userText = getUserText(result);
+    const parsed = JSON.parse(userText);
     expect(parsed.template.body).toBe("How did you sleep?");
-    expect(parsed.template.system_prompt).toBe("Guide the user warmly...");
     expect(parsed.context.oura).toContain("Sleep 85");
     expect(parsed.date).toBe("2026-03-09");
+
+    // System prompt is assistant-only
+    expect(getAssistantOnlyText(result)).toBe("Guide the user warmly...");
+
+    // Verify audience annotations
+    expect(result.content).toHaveLength(2);
+    const first = result.content[0];
+    expect("annotations" in first && first.annotations?.audience).toEqual(["user", "assistant"]);
+    const second = result.content[1];
+    expect("annotations" in second && second.annotations?.audience).toEqual(["assistant"]);
   });
 
-  it("returns morning context without Oura when unavailable", async () => {
+  it("returns morning context without Oura and omits system_prompt block when null", async () => {
     mockQueries.getTemplateBySlug.mockResolvedValue({
       id: "t1",
       slug: "morning",
@@ -110,9 +141,12 @@ describe("handleStartJournalSession", () => {
       type: "morning",
       date: "2026-03-09",
     });
-    const parsed = JSON.parse(result);
 
+    const parsed = JSON.parse(getUserText(result));
     expect(parsed.context.oura).toBeUndefined();
+    // No system_prompt → only one content block
+    expect(result.content).toHaveLength(1);
+    expect(getAssistantOnlyText(result)).toBeUndefined();
   });
 
   it("throws when morning template not found", async () => {
@@ -158,13 +192,15 @@ describe("handleStartJournalSession", () => {
       type: "evening",
       date: "2026-03-09",
     });
-    const parsed = JSON.parse(result);
 
+    const parsed = JSON.parse(getUserText(result));
     expect(parsed.template.body).toBe("How was your week?");
     expect(parsed.context.entries_summary).toContain("work");
     expect(parsed.context.entries_summary).toContain("Had a good day");
     expect(parsed.context.oura_week).toContain("Sleep 85");
     expect(parsed.date).toBe("2026-03-09");
+
+    expect(getAssistantOnlyText(result)).toBe("Conduct structured interview...");
   });
 
   it("throws when evening template not found", async () => {
