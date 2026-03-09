@@ -712,7 +712,7 @@ CREATE TRIGGER trg_todo_updated_at_bump
 
 CREATE TABLE IF NOT EXISTS insights (
     id SERIAL PRIMARY KEY,
-    type TEXT NOT NULL CHECK (type IN ('temporal_echo', 'biometric_correlation', 'stale_todo')),
+    type TEXT NOT NULL CHECK (type IN ('temporal_echo', 'biometric_correlation', 'stale_todo', 'oura_notable')),
     content_hash TEXT NOT NULL,
     title TEXT NOT NULL,
     body TEXT NOT NULL,

@@ -1057,6 +1057,14 @@ const migrations: Migration[] = [
         ON artifact_links (created_at DESC);
     `,
   },
+  {
+    name: "028-insights-oura-notable",
+    getSql: () => `
+      ALTER TABLE insights DROP CONSTRAINT IF EXISTS insights_type_check;
+      ALTER TABLE insights ADD CONSTRAINT insights_type_check
+        CHECK (type IN ('temporal_echo', 'biometric_correlation', 'stale_todo', 'oura_notable'));
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

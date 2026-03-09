@@ -72,6 +72,20 @@ function formatStaleTodo(insight: InsightCandidate): string {
   return lines.join("\n");
 }
 
+function formatOuraNotable(insight: InsightCandidate): string {
+  const meta = insight.metadata;
+  const positive = meta.positive === true;
+  const icon = positive ? "📈" : "📉";
+
+  const lines: string[] = [
+    `${icon} <b>${escapeHtml(insight.title)}</b>`,
+    "",
+    escapeHtml(insight.body),
+  ];
+
+  return lines.join("\n");
+}
+
 export function formatInsightNotification(insight: InsightCandidate): string {
   switch (insight.type) {
     case "temporal_echo":
@@ -80,5 +94,7 @@ export function formatInsightNotification(insight: InsightCandidate): string {
       return formatBiometricCorrelation(insight);
     case "stale_todo":
       return formatStaleTodo(insight);
+    case "oura_notable":
+      return formatOuraNotable(insight);
   }
 }

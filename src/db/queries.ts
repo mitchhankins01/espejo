@@ -5729,7 +5729,7 @@ export async function deleteTodo(
 // Insights
 // ============================================================================
 
-export type InsightType = "temporal_echo" | "biometric_correlation" | "stale_todo";
+export type InsightType = "temporal_echo" | "biometric_correlation" | "stale_todo" | "oura_notable";
 
 export interface InsightRow {
   id: number;

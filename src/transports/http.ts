@@ -84,6 +84,7 @@ import {
 } from "../storage/r2.js";
 import { registerOAuthRoutes, isValidOAuthToken } from "./oauth.js";
 import { startInsightTimer } from "../insights/engine.js";
+import { runOuraNotableCheck } from "../insights/oura-notable.js";
 import { startOuraSyncTimer } from "../oura/sync.js";
 import { startCheckinTimer } from "../checkins/scheduler.js";
 
@@ -112,8 +113,12 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
       notifyError("Memory consolidation", err);
     }
   };
+  const runAfterSync = async (): Promise<void> => {
+    await runMemoryMaintenance();
+    await runOuraNotableCheck(pool);
+  };
   /* v8 ignore stop */
-  startOuraSyncTimer(pool, runMemoryMaintenance);
+  startOuraSyncTimer(pool, runAfterSync);
   startInsightTimer(pool);
   startCheckinTimer(pool);
   app.use(express.json());

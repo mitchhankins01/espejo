@@ -119,4 +119,35 @@ describe("formatInsightNotification", () => {
     expect(text.length).toBeLessThan(longBody.length + 200);
     expect(text).toContain("…");
   });
+
+  it("formats oura_notable negative insight", () => {
+    const insight: InsightCandidate = {
+      type: "oura_notable",
+      contentHash: "oura1",
+      title: "Sleep score drop: 42",
+      body: "Baseline: 78 ± 5",
+      relevance: 0.9,
+      metadata: { pattern: "outlier", metric: "sleep_score", positive: false },
+    };
+
+    const text = formatInsightNotification(insight);
+    expect(text).toContain("📉");
+    expect(text).toContain("<b>Sleep score drop: 42</b>");
+    expect(text).toContain("Baseline: 78 ± 5");
+  });
+
+  it("formats oura_notable positive insight", () => {
+    const insight: InsightCandidate = {
+      type: "oura_notable",
+      contentHash: "oura2",
+      title: "HRV spike: 120 ms",
+      body: "Baseline: 67 ± 26 ms",
+      relevance: 0.8,
+      metadata: { pattern: "outlier", metric: "hrv", positive: true },
+    };
+
+    const text = formatInsightNotification(insight);
+    expect(text).toContain("📈");
+    expect(text).toContain("<b>HRV spike: 120 ms</b>");
+  });
 });
