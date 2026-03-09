@@ -1100,7 +1100,13 @@ async function migrate(): Promise<void> {
         const statements = splitSqlStatements(sql);
         for (const stmt of statements) {
           const trimmed = stmt.trim();
-          if (trimmed && !trimmed.startsWith("--")) {
+          // Strip leading comment lines before checking if the statement is empty/comment-only
+          const withoutLeadingComments = trimmed
+            .split("\n")
+            .filter((line) => !line.trim().startsWith("--") && line.trim() !== "")
+            .join("\n")
+            .trim();
+          if (withoutLeadingComments) {
             await pool.query(trimmed);
           }
         }
