@@ -32,6 +32,7 @@ const {
   mockGetOuraSyncRun,
   mockGetActivityLog,
   mockInsertChatMessage,
+  mockGetTemplateBySlug,
   mockConfig,
 } = vi.hoisted(() => ({
   mockRunAgent: vi.fn().mockResolvedValue({ response: "agent response", activity: "", activityLogId: null, soulVersion: 1, patternCount: 0 }),
@@ -66,6 +67,7 @@ const {
   mockGetOuraSyncRun: vi.fn().mockResolvedValue(null),
   mockGetActivityLog: vi.fn().mockResolvedValue(null),
   mockInsertChatMessage: vi.fn().mockResolvedValue({ inserted: true, id: 1 }),
+  mockGetTemplateBySlug: vi.fn().mockResolvedValue(null),
   mockConfig: {
     config: {
       telegram: {
@@ -141,6 +143,7 @@ vi.mock("../../src/db/queries.js", () => ({
   getOuraSyncRun: mockGetOuraSyncRun,
   getActivityLog: mockGetActivityLog,
   insertChatMessage: mockInsertChatMessage,
+  getTemplateBySlug: mockGetTemplateBySlug,
 }));
 
 vi.mock("../../src/spanish/assessment.js", () => ({
@@ -1080,7 +1083,7 @@ describe("error handling", () => {
     expect(mockRunAgent).toHaveBeenCalledWith(
       expect.objectContaining({
         message: "/",
-        mode: "default",
+        mode: { mode: "default", systemPrompt: null },
       })
     );
   });

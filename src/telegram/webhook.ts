@@ -36,7 +36,8 @@ import {
 import { extractTextFromDocument, extractTextFromImage } from "./media.js";
 import { setMessageHandler, processUpdate } from "./updates.js";
 import type { AssembledMessage, TelegramUpdate } from "./updates.js";
-import { type AgentMode } from "./evening-review.js";
+import { type ChatModeState } from "./evening-review.js";
+import { getTemplateBySlug } from "../db/queries.js";
 import { pendingCheckins } from "../checkins/scheduler.js";
 import {
   processCheckinSummary,
@@ -65,7 +66,8 @@ const SLOW_PROGRESS_NOTICE_TEXT = "<i>On it. Pulling data now...</i>";
 const ACTIVITY_DETAIL_CALLBACK_PREFIX = "activity_detail:";
 const TELEGRAM_VOICE_CAPTION_MAX_CHARS = 1024;
 const VOICE_TRANSCRIPT_PREFIX = "Transcript: ";
-const chatModes = new Map<string, AgentMode>();
+const DEFAULT_MODE_STATE: ChatModeState = { mode: "default", systemPrompt: null };
+const chatModes = new Map<string, ChatModeState>();
 const chatMessageCounters = new Map<string, number>();
 
 interface InlineKeyboardButton {
@@ -115,8 +117,8 @@ function parseSlashCommand(
 }
 
 
-function getChatMode(chatId: string): AgentMode {
-  return chatModes.get(chatId) ?? "default";
+function getChatMode(chatId: string): ChatModeState {
+  return chatModes.get(chatId) ?? DEFAULT_MODE_STATE;
 }
 
 /** Visible for testing only. */
@@ -685,6 +687,20 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
       return;
     }
 
+    // Handle /morning and /evening commands
+    if (command?.name === "morning" || command?.name === "evening") {
+      const slug = command.name;
+      const template = await getTemplateBySlug(pool, slug);
+      if (!template) {
+        await sendAndStoreResponse(chatId, `<i>No ${slug} template found. Create one in the web UI.</i>`);
+        return;
+      }
+      chatModes.set(chatId, { mode: slug, systemPrompt: template.system_prompt });
+      await sendAndStoreResponse(chatId, `<i>${slug === "morning" ? "☀️ Morning" : "🌙 Evening"} session started.</i>`);
+      // Let the agent drive from here — next user message will use the mode
+      return;
+    }
+
     // Handle /compose command
     let prefill: string | undefined;
     if (command?.name === "compose") {
@@ -696,7 +712,7 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
     const pendingCheckinId = pendingCheckins.get(chatId);
     if (pendingCheckinId) {
       pendingCheckins.delete(chatId);
-      chatModes.set(chatId, "checkin");
+      chatModes.set(chatId, { mode: "checkin", systemPrompt: null });
       // Mark as responded (artifact will be set later after summary)
       await markCheckinResponded(pool, pendingCheckinId);
     }

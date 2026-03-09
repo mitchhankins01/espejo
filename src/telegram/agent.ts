@@ -15,7 +15,7 @@ import {
 import { buildOuraContextPrompt } from "../oura/context.js";
 import { buildTodoContextPrompt } from "../todos/context.js";
 import { evolveSoulState } from "./soul.js";
-import type { AgentMode } from "./evening-review.js";
+import type { ChatModeState } from "./evening-review.js";
 
 import { RECENT_MESSAGES_LIMIT, normalizeContent } from "./agent/constants.js";
 import { buildSystemPrompt, toSoulSnapshot, buildSpanishContextPrompt } from "./agent/context.js";
@@ -53,7 +53,7 @@ export async function runAgent(params: {
   message: string;
   storedUserMessage?: string;
   messageDate: number;
-  mode?: AgentMode;
+  mode?: ChatModeState;
   prefill?: string;
   onCompacted?: (summary: string) => Promise<void>;
 }): Promise<AgentResult> {
@@ -61,7 +61,7 @@ export async function runAgent(params: {
     chatId,
     message,
     storedUserMessage,
-    mode = "default",
+    mode = { mode: "default", systemPrompt: null },
     prefill,
     onCompacted,
   } = params;

@@ -10,7 +10,7 @@ import {
   upsertSpanishProgressSnapshot,
   type PatternSearchRow,
 } from "../../db/queries.js";
-import type { AgentMode } from "../evening-review.js";
+import type { ChatModeState } from "../evening-review.js";
 import {
   CHARS_PER_TOKEN,
   LANGUAGE_ANCHOR_LIMIT,
@@ -231,7 +231,7 @@ function extractRequestedSentenceCount(message: string): number | null {
 }
 
 export function shouldRewriteForLanguagePreference(
-  _mode: AgentMode,
+  _mode: ChatModeState,
   message: string,
   responseText: string,
   patterns: PatternSearchRow[],
