@@ -114,7 +114,7 @@ export function MarkdownEditor({
   }, [pickerIndex, filteredTitles.length]);
 
   return (
-    <div className="mdx-editor-wrapper border border-border rounded-lg overflow-hidden min-h-[300px] relative">
+    <div className="mdx-editor-wrapper sm:border sm:border-border sm:rounded-lg overflow-hidden min-h-[300px] relative">
       <MDXEditor
         ref={editorRef}
         markdown={value}

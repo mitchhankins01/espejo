@@ -121,8 +121,8 @@ export function EntryCreate() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-2 sm:px-4 py-8">
-      <div className="flex items-center justify-between mb-6">
+    <div className="max-w-3xl mx-auto sm:px-4 py-8">
+      <div className="flex items-center justify-between mb-6 px-3 sm:px-0">
         <h1 className="text-xl font-semibold text-text-primary">New Journal Entry</h1>
         <Link
           to="/journal"
@@ -133,13 +133,13 @@ export function EntryCreate() {
       </div>
 
       {error && (
-        <div className="text-red-600 dark:text-red-400 text-sm bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg px-4 py-3 mb-4">
+        <div className="text-red-600 dark:text-red-400 text-sm bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg px-4 py-3 mb-4 mx-3 sm:mx-0">
           {error}
         </div>
       )}
 
       <div className="space-y-5">
-        <div>
+        <div className="px-3 sm:px-0">
           <label className="block text-sm text-text-muted mb-1.5 font-medium">Template</label>
           <TemplatePicker selectedId={selectedTemplateId} onSelect={applyTemplate} />
         </div>
@@ -150,7 +150,7 @@ export function EntryCreate() {
           placeholder="Write what happened, what you felt, what you noticed..."
         />
 
-        <div className="flex items-center gap-2 text-sm text-text-muted">
+        <div className="flex items-center gap-2 text-sm text-text-muted px-3 sm:px-0">
           {editingDate ? (
             <input
               id="entry-create-date"
@@ -191,7 +191,7 @@ export function EntryCreate() {
           )}
         </div>
 
-        <div>
+        <div className="px-3 sm:px-0">
           <label
             htmlFor="entry-create-tags"
             className="block text-sm text-text-muted mb-1.5 font-medium"
@@ -201,7 +201,7 @@ export function EntryCreate() {
           <TagInput id="entry-create-tags" tags={tags} onChange={setTags} suggestions={tagSuggestions} />
         </div>
 
-        <div>
+        <div className="px-3 sm:px-0">
           <label className="block text-sm text-text-muted mb-1.5 font-medium">Photos</label>
           <MediaUpload
             files={files}
@@ -211,7 +211,7 @@ export function EntryCreate() {
           />
         </div>
 
-        <div className="flex justify-end">
+        <div className="flex justify-end px-3 sm:px-0">
           <button
             type="button"
             onClick={() => void handleSave()}

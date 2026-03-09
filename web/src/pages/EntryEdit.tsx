@@ -181,7 +181,7 @@ export function EntryEdit() {
 
   if (loading) {
     return (
-      <div className="max-w-3xl mx-auto px-2 sm:px-4 py-8">
+      <div className="max-w-3xl mx-auto px-3 sm:px-4 py-8">
         <div className="text-center py-16 text-text-muted">Loading...</div>
       </div>
     );
@@ -189,7 +189,7 @@ export function EntryEdit() {
 
   if (!entry) {
     return (
-      <div className="max-w-3xl mx-auto px-2 sm:px-4 py-8">
+      <div className="max-w-3xl mx-auto px-3 sm:px-4 py-8">
         <div className="text-red-600 dark:text-red-400 text-sm bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg px-4 py-3 mb-4">
           {error || "Entry not found."}
         </div>
@@ -201,8 +201,8 @@ export function EntryEdit() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-2 sm:px-4 py-8">
-      <div className="flex items-center justify-between mb-6">
+    <div className="max-w-3xl mx-auto sm:px-4 py-8">
+      <div className="flex items-center justify-between mb-6 px-3 sm:px-0">
         <div className="flex items-center gap-3">
           <Link
             to="/journal"
@@ -233,7 +233,7 @@ export function EntryEdit() {
       </div>
 
       {error && (
-        <div className="text-red-600 dark:text-red-400 text-sm bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg px-4 py-3 mb-4">
+        <div className="text-red-600 dark:text-red-400 text-sm bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg px-4 py-3 mb-4 mx-3 sm:mx-0">
           {error}
           {conflict && (
             <button
@@ -250,7 +250,7 @@ export function EntryEdit() {
       <div className="space-y-5">
         <MarkdownEditor value={text} onChange={setText} />
 
-        <div className="flex items-center gap-2 text-sm text-text-muted">
+        <div className="flex items-center gap-2 text-sm text-text-muted px-3 sm:px-0">
           {editingDate ? (
             <input
               id="entry-edit-date"
@@ -291,7 +291,7 @@ export function EntryEdit() {
           )}
         </div>
 
-        <div>
+        <div className="px-3 sm:px-0">
           <label htmlFor="entry-edit-tags" className="block text-sm text-text-muted mb-1.5 font-medium">
             Tags
           </label>
@@ -299,7 +299,7 @@ export function EntryEdit() {
         </div>
 
         {dayOneMetadata && (
-          <div className="rounded-lg border border-border bg-surface p-4">
+          <div className="rounded-lg border border-border bg-surface p-4 mx-3 sm:mx-0">
             <h2 className="text-sm font-semibold text-text-primary mb-2">
               Day One Metadata (read-only)
             </h2>
@@ -312,7 +312,7 @@ export function EntryEdit() {
           </div>
         )}
 
-        <div>
+        <div className="px-3 sm:px-0">
           <h2 className="block text-sm text-text-muted mb-1.5 font-medium">Current Photos</h2>
           <MediaGallery
             media={entry.media}
@@ -321,7 +321,7 @@ export function EntryEdit() {
           />
         </div>
 
-        <div>
+        <div className="px-3 sm:px-0">
           <h2 className="block text-sm text-text-muted mb-1.5 font-medium">Upload More Photos</h2>
           <MediaUpload
             files={newFiles}
