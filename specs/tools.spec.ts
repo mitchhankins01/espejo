@@ -789,6 +789,55 @@ export const toolSpecs = {
     ],
   },
 
+  start_journal_session: {
+    name: "start_journal_session" as const,
+    description:
+      "Start a guided morning or evening journaling session. Returns the session template (prompt scaffold + agent instructions) " +
+      "and relevant context (Oura biometrics for morning, 7-day entry summaries + weekly Oura for evening). " +
+      "The LLM drives the conversation using the template's system_prompt instructions.",
+    params: z.object({
+      type: z.enum(["morning", "evening"]).describe("Session type: morning (warm, minimal prompts with Oura prefill) or evening (structured interview with 7-day context)"),
+      date: dateString.optional().describe("Target date (default: today). Use for 'do yesterday's evening review'"),
+    }),
+    examples: [
+      {
+        input: { type: "morning" },
+        behavior: "Returns morning template + today's Oura summary. LLM walks through prompts one at a time.",
+      },
+      {
+        input: { type: "evening", date: "2026-03-08" },
+        behavior: "Returns evening template + 7-day entry summaries + weekly Oura for a specific date.",
+      },
+    ],
+  },
+
+  create_entry: {
+    name: "create_entry" as const,
+    description:
+      "Create a new journal entry. Used at the end of journaling sessions or for standalone entry creation. " +
+      "Fires embedding generation so the entry is immediately searchable. " +
+      "Tags default to empty. Source defaults to 'mcp' — Telegram agent should pass 'telegram'.",
+    params: z.object({
+      text: z.string().min(1).max(50_000).describe("Journal entry text (markdown supported)"),
+      tags: z.array(z.string().min(1).max(100)).max(20).optional().describe("Tags for the entry"),
+      date: dateString.optional().describe("Entry date in YYYY-MM-DD (default: today)"),
+      timezone: z.string().min(1).max(50).optional().describe("IANA timezone, e.g. 'Europe/Madrid'"),
+      source: z.enum(["mcp", "telegram", "web"]).default("mcp")
+        .describe("Entry source for attribution (default: mcp)"),
+      city: z.string().max(200).optional().describe("City name"),
+    }),
+    examples: [
+      {
+        input: { text: "Morning reflection...", tags: ["morning-journal"] },
+        behavior: "Creates entry with source='mcp', fires embedding, returns uuid and created_at",
+      },
+      {
+        input: { text: "Evening review...", tags: ["evening-review"], source: "telegram" },
+        behavior: "Creates entry attributed to Telegram with specified tags",
+      },
+    ],
+  },
+
 } as const;
 
 // ============================================================================
@@ -819,6 +868,24 @@ export interface ArtifactSearchResult {
   match_sources: ("semantic" | "fulltext")[];
   created_at: string;
   updated_at: string;
+}
+
+export interface SessionResult {
+  template: {
+    body: string;
+    system_prompt: string | null;
+  };
+  context: {
+    oura?: string;
+    entries_summary?: string;
+    oura_week?: string;
+  };
+  date: string;
+}
+
+export interface CreateEntryResult {
+  uuid: string;
+  created_at: string;
 }
 
 export interface UnifiedSearchResult {

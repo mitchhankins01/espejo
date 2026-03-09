@@ -68,6 +68,12 @@ vi.mock("../../src/tools/search-artifacts.js", () => ({
 vi.mock("../../src/tools/search-content.js", () => ({
   handleSearchContent: mockHandlers.handleSearchContent,
 }));
+vi.mock("../../src/tools/start-journal-session.js", () => ({
+  handleStartJournalSession: vi.fn(),
+}));
+vi.mock("../../src/tools/create-entry.js", () => ({
+  handleCreateEntry: vi.fn(),
+}));
 
 import { createServer, toolHandlers } from "../../src/server.js";
 import type { ToolHandler } from "../../src/server.js";

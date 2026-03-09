@@ -30,6 +30,8 @@ import { handleCreateTodo } from "./tools/create-todo.js";
 import { handleUpdateTodo } from "./tools/update-todo.js";
 import { handleCompleteTodo } from "./tools/complete-todo.js";
 import { handleSetTodoFocus } from "./tools/set-todo-focus.js";
+import { handleStartJournalSession } from "./tools/start-journal-session.js";
+import { handleCreateEntry } from "./tools/create-entry.js";
 
 export type ToolHandler = (pool: pg.Pool, input: unknown) => Promise<string>;
 
@@ -63,6 +65,8 @@ export const toolHandlers: Record<string, ToolHandler> = {
   update_todo: handleUpdateTodo,
   complete_todo: handleCompleteTodo,
   set_todo_focus: handleSetTodoFocus,
+  start_journal_session: handleStartJournalSession,
+  create_entry: handleCreateEntry,
 };
 
 export function createServer(pool: pg.Pool, version: string): McpServer {

@@ -29,7 +29,7 @@ export interface EntryRow {
   temperature: number | null;
   weather_conditions: string | null;
   humidity: number | null;
-  source: "dayone" | "web" | "telegram";
+  source: "dayone" | "web" | "telegram" | "mcp";
   version: number;
   tags: string[];
   photo_count: number;
