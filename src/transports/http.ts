@@ -9,21 +9,16 @@ import { notifyError } from "../telegram/notify.js";
 import { sendTelegramMessage } from "../telegram/client.js";
 import { runMemoryConsolidation } from "../memory/consolidation.js";
 import { registerOAuthRoutes, isValidOAuthToken } from "./oauth.js";
-import { startInsightTimer } from "../insights/engine.js";
-import { runOuraNotableCheck } from "../insights/oura-notable.js";
 import { startOuraSyncTimer } from "../oura/sync.js";
-import { startCheckinTimer } from "../checkins/scheduler.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerMetricsRoutes } from "./routes/metrics.js";
 import { registerActivityRoutes } from "./routes/activity.js";
-import { registerSpanishRoutes } from "./routes/spanish.js";
 import { registerObservabilityRoutes } from "./routes/observability.js";
 import { registerWeightRoutes } from "./routes/weights.js";
 import { registerArtifactRoutes } from "./routes/artifacts.js";
 import { registerTodoRoutes } from "./routes/todos.js";
 import { registerEntryRoutes } from "./routes/entries.js";
 import { registerTemplateRoutes } from "./routes/templates.js";
-import { registerSettingsRoutes } from "./routes/settings.js";
 import type { RouteDeps } from "./routes/types.js";
 
 type ServerFactory = () => McpServer;
@@ -53,12 +48,9 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
   };
   const runAfterSync = async (): Promise<void> => {
     await runMemoryMaintenance();
-    await runOuraNotableCheck(pool);
   };
   /* v8 ignore stop */
   startOuraSyncTimer(pool, runAfterSync);
-  startInsightTimer(pool);
-  startCheckinTimer(pool);
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
 
@@ -108,14 +100,12 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
   registerHealthRoutes(app);
   registerMetricsRoutes(app, deps);
   registerActivityRoutes(app, deps);
-  registerSpanishRoutes(app, deps);
   registerObservabilityRoutes(app, deps);
   registerWeightRoutes(app, deps);
   registerArtifactRoutes(app, deps);
   registerTodoRoutes(app, deps);
   registerEntryRoutes(app, deps);
   registerTemplateRoutes(app, deps);
-  registerSettingsRoutes(app, deps);
 
   // Telegram webhook (conditional — only when bot token is configured)
   /* v8 ignore next 4 -- dynamic import tested in telegram-webhook.test.ts */

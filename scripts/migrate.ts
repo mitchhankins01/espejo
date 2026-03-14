@@ -1120,6 +1120,33 @@ const migrations: Migration[] = [
 9. SESSION END. After saving, confirm briefly and stop.' WHERE slug = 'evening';
     `,
   },
+  {
+    name: "031-drop-removed-features",
+    getSql: () => `
+      -- Drop Spanish learning tables (reviews references vocabulary, drop first)
+      DROP TABLE IF EXISTS spanish_reviews CASCADE;
+      DROP TABLE IF EXISTS spanish_vocabulary CASCADE;
+      DROP TABLE IF EXISTS spanish_progress CASCADE;
+      DROP TABLE IF EXISTS spanish_profiles CASCADE;
+      DROP TABLE IF EXISTS spanish_verbs CASCADE;
+      DROP TABLE IF EXISTS spanish_assessments CASCADE;
+
+      -- Drop soul system tables
+      DROP TABLE IF EXISTS soul_quality_signals CASCADE;
+      DROP TABLE IF EXISTS pulse_checks CASCADE;
+      DROP TABLE IF EXISTS soul_state_history CASCADE;
+      DROP TABLE IF EXISTS soul_state CASCADE;
+
+      -- Drop insight engine table
+      DROP TABLE IF EXISTS insights CASCADE;
+
+      -- Drop check-in tables
+      DROP TABLE IF EXISTS checkins CASCADE;
+
+      -- Drop user settings (only used for timezone + check-in config)
+      DROP TABLE IF EXISTS user_settings CASCADE;
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

@@ -8,80 +8,37 @@ const {
   mockRunAgent,
   mockForceCompact,
   mockSendTelegramMessage,
-  mockSendTelegramVoice,
   mockSendChatAction,
   mockTranscribeVoiceMessage,
-  mockSynthesizeVoiceReply,
   mockExtractTextFromImage,
   mockExtractTextFromDocument,
   mockSetMessageHandler,
   mockProcessUpdate,
-  mockGetSoulState,
-  mockGetSoulQualityStats,
-  mockGetLastAssistantMessageId,
-  mockInsertSoulQualitySignal,
-  mockGetLastPulseCheck,
-  mockGetRetentionByInterval,
-  mockGetVocabularyFunnel,
-  mockGetGradeTrend,
-  mockGetLapseRateTrend,
-  mockGetSpanishQuizStats,
-  mockGetSpanishAdaptiveContext,
-  mockGetLatestSpanishAssessment,
-  mockAssessSpanishQuality,
   mockGetOuraSyncRun,
   mockGetActivityLog,
   mockInsertChatMessage,
-  mockGetTemplateBySlug,
   mockConfig,
 } = vi.hoisted(() => ({
-  mockRunAgent: vi.fn().mockResolvedValue({ response: "agent response", activity: "", activityLogId: null, soulVersion: 1, patternCount: 0 }),
+  mockRunAgent: vi.fn().mockResolvedValue({ response: "agent response", activity: "", activityLogId: null, patternCount: 0 }),
   mockForceCompact: vi.fn().mockResolvedValue(undefined),
   mockSendTelegramMessage: vi.fn().mockResolvedValue(undefined),
-  mockSendTelegramVoice: vi.fn().mockResolvedValue(true),
   mockSendChatAction: vi.fn().mockResolvedValue(undefined),
   mockTranscribeVoiceMessage: vi.fn().mockResolvedValue("transcribed text"),
-  mockSynthesizeVoiceReply: vi.fn().mockResolvedValue(Buffer.from("voice")),
   mockExtractTextFromImage: vi.fn().mockResolvedValue("image text"),
   mockExtractTextFromDocument: vi.fn().mockResolvedValue("document text"),
   mockSetMessageHandler: vi.fn(),
   mockProcessUpdate: vi.fn(),
-  mockGetSoulState: vi.fn().mockResolvedValue(null),
-  mockGetSoulQualityStats: vi.fn().mockResolvedValue({
-    felt_personal: 0, felt_generic: 0, correction: 0, positive_reaction: 0, total: 0, personal_ratio: 0,
-  }),
-  mockGetLastAssistantMessageId: vi.fn().mockResolvedValue(42),
-  mockInsertSoulQualitySignal: vi.fn().mockResolvedValue({ id: 1 }),
-  mockGetLastPulseCheck: vi.fn().mockResolvedValue(null),
-  mockGetRetentionByInterval: vi.fn().mockResolvedValue([]),
-  mockGetVocabularyFunnel: vi.fn().mockResolvedValue([]),
-  mockGetGradeTrend: vi.fn().mockResolvedValue([]),
-  mockGetLapseRateTrend: vi.fn().mockResolvedValue([]),
-  mockGetSpanishQuizStats: vi.fn().mockResolvedValue({ total_words: 10, due_now: 2, new_words: 3, learning_words: 4, review_words: 2, relearning_words: 1, reviews_today: 5, average_grade: 3.0 }),
-  mockGetSpanishAdaptiveContext: vi.fn().mockResolvedValue({ recent_avg_grade: 3.0, recent_lapse_rate: 0.1, avg_difficulty: 4.0, total_reviews: 50, mastered_count: 5, struggling_count: 1 }),
-  mockGetLatestSpanishAssessment: vi.fn().mockResolvedValue(null),
-  mockAssessSpanishQuality: vi.fn().mockResolvedValue({
-    assessment: { id: 1, overall_score: 3.6, assessed_at: new Date() },
-    summary: "<b>Spanish Assessment</b>\nOverall: <b>3.6/5</b>",
-  }),
   mockGetOuraSyncRun: vi.fn().mockResolvedValue(null),
   mockGetActivityLog: vi.fn().mockResolvedValue(null),
   mockInsertChatMessage: vi.fn().mockResolvedValue({ inserted: true, id: 1 }),
-  mockGetTemplateBySlug: vi.fn().mockResolvedValue(null),
   mockConfig: {
     config: {
       telegram: {
         botToken: "test-bot-token",
         secretToken: "test-secret",
         allowedChatId: "100",
-        voiceReplyMode: "off",
-        voiceReplyEvery: 3,
-        voiceReplyMinChars: 1,
-        voiceReplyMaxChars: 450,
         voiceModel: "gpt-4o-mini-tts",
         voiceName: "alloy",
-        soulEnabled: true,
-        soulFeedbackEvery: 8,
       },
       openai: { apiKey: "test-openai-key", chatModel: "gpt-4o-mini" },
     },
@@ -95,22 +52,11 @@ vi.mock("../../src/telegram/agent.js", () => ({
 
 vi.mock("../../src/telegram/client.js", () => ({
   sendTelegramMessage: mockSendTelegramMessage,
-  sendTelegramVoice: mockSendTelegramVoice,
   sendChatAction: mockSendChatAction,
 }));
 
 vi.mock("../../src/telegram/voice.js", () => ({
   transcribeVoiceMessage: mockTranscribeVoiceMessage,
-  synthesizeVoiceReply: mockSynthesizeVoiceReply,
-  normalizeVoiceText: (text: string) =>
-    text
-      .replace(/<[^>]+>/g, " ")
-      .replace(/&nbsp;/gi, " ")
-      .replace(/&amp;/gi, "&")
-      .replace(/&lt;/gi, "<")
-      .replace(/&gt;/gi, ">")
-      .replace(/\s+/g, " ")
-      .trim(),
 }));
 
 vi.mock("../../src/telegram/media.js", () => ({
@@ -128,35 +74,15 @@ vi.mock("../../src/db/client.js", () => ({
 }));
 
 vi.mock("../../src/db/queries.js", () => ({
-  getSoulState: mockGetSoulState,
-  getSoulQualityStats: mockGetSoulQualityStats,
-  getLastAssistantMessageId: mockGetLastAssistantMessageId,
-  insertSoulQualitySignal: mockInsertSoulQualitySignal,
-  getLastPulseCheck: mockGetLastPulseCheck,
-  getRetentionByInterval: mockGetRetentionByInterval,
-  getVocabularyFunnel: mockGetVocabularyFunnel,
-  getGradeTrend: mockGetGradeTrend,
-  getLapseRateTrend: mockGetLapseRateTrend,
-  getSpanishQuizStats: mockGetSpanishQuizStats,
-  getSpanishAdaptiveContext: mockGetSpanishAdaptiveContext,
-  getLatestSpanishAssessment: mockGetLatestSpanishAssessment,
   getOuraSyncRun: mockGetOuraSyncRun,
   getActivityLog: mockGetActivityLog,
   insertChatMessage: mockInsertChatMessage,
-  getTemplateBySlug: mockGetTemplateBySlug,
-}));
-
-vi.mock("../../src/spanish/assessment.js", () => ({
-  assessSpanishQuality: mockAssessSpanishQuality,
-  createOpenAIAssessmentClient: vi.fn(),
 }));
 
 vi.mock("../../src/config.js", () => mockConfig);
 
 import {
   registerTelegramRoutes,
-  clearWebhookChatModes,
-  clearFeedbackCounters,
 } from "../../src/telegram/webhook.js";
 
 // ---------------------------------------------------------------------------
@@ -224,33 +150,16 @@ function getHandler(): (msg: Record<string, unknown>) => Promise<void> {
 let errorSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
-  mockRunAgent.mockReset().mockResolvedValue({ response: "agent response", activity: "", activityLogId: null, soulVersion: 1, patternCount: 0 });
+  mockRunAgent.mockReset().mockResolvedValue({ response: "agent response", activity: "", activityLogId: null, patternCount: 0 });
   mockSendTelegramMessage.mockReset().mockResolvedValue(undefined);
-  mockSendTelegramVoice.mockReset().mockResolvedValue(true);
   mockSendChatAction.mockReset().mockResolvedValue(undefined);
   mockTranscribeVoiceMessage.mockReset().mockResolvedValue("transcribed text");
-  mockSynthesizeVoiceReply.mockReset().mockResolvedValue(Buffer.from("voice"));
   mockExtractTextFromImage.mockReset().mockResolvedValue("image text");
   mockExtractTextFromDocument.mockReset().mockResolvedValue("document text");
   mockSetMessageHandler.mockReset();
   mockProcessUpdate.mockReset();
-  mockGetSoulState.mockReset().mockResolvedValue(null);
-  mockGetSoulQualityStats.mockReset().mockResolvedValue({
-    felt_personal: 0, felt_generic: 0, correction: 0, positive_reaction: 0, total: 0, personal_ratio: 0,
-  });
-  mockGetLastAssistantMessageId.mockReset().mockResolvedValue(42);
-  mockInsertSoulQualitySignal.mockReset().mockResolvedValue({ id: 1 });
-  mockGetLastPulseCheck.mockReset().mockResolvedValue(null);
   mockGetOuraSyncRun.mockReset().mockResolvedValue(null);
   mockGetActivityLog.mockReset().mockResolvedValue(null);
-  mockConfig.config.telegram.voiceReplyMode = "off";
-  mockConfig.config.telegram.voiceReplyEvery = 3;
-  mockConfig.config.telegram.voiceReplyMinChars = 1;
-  mockConfig.config.telegram.voiceReplyMaxChars = 450;
-  mockConfig.config.telegram.soulEnabled = true;
-  mockConfig.config.telegram.soulFeedbackEvery = 8;
-  clearWebhookChatModes();
-  clearFeedbackCounters();
   errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -434,44 +343,6 @@ describe("message handler", () => {
     expect(mockSendChatAction).toHaveBeenCalledWith("100", "typing");
   });
 
-  it("sends a progress notice when agent work is slow", async () => {
-    vi.useFakeTimers();
-    try {
-      let resolveAgent:
-        | ((value: { response: string; activity: string; soulVersion: number; patternCount: number }) => void)
-        | undefined;
-      mockRunAgent.mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            resolveAgent = resolve;
-          })
-      );
-
-      const handler = getHandler();
-      const pending = handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
-
-      await vi.advanceTimersByTimeAsync(4700);
-      expect(mockSendTelegramMessage).toHaveBeenCalledWith(
-        "100",
-        "<i>On it. Pulling data now...</i>"
-      );
-
-      expect(resolveAgent).toBeDefined();
-      if (!resolveAgent) {
-        throw new Error("resolveAgent was not initialized");
-      }
-      resolveAgent({
-        response: "agent response",
-        activity: "",
-        soulVersion: 1,
-        patternCount: 0,
-      });
-      await pending;
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   it("wires text messages through agent to client", async () => {
     const handler = getHandler();
     await handler({ chatId: 100, text: "hello world", messageId: 1, date: 1000 });
@@ -516,7 +387,7 @@ describe("message handler", () => {
     mockRunAgent.mockResolvedValueOnce({
       response: "Done.",
       activity:
-        "used 3 memories (behavior, fact) | logged 2 spanish terms | <a href=\"https://example.com/api/activity/9\">details</a>",
+        "used 3 memories (behavior, fact) | <a href=\"https://example.com/api/activity/9\">details</a>",
       activityLogId: 9,
     });
 
@@ -525,13 +396,13 @@ describe("message handler", () => {
 
     expect(mockSendTelegramMessage).toHaveBeenCalledWith(
       "100",
-      "Done.\n\n<i>used 3 memories (behavior, fact) | logged 2 spanish terms</i>",
+      "Done.\n\n<i>used 3 memories (behavior, fact)</i>",
       expect.objectContaining({
         inline_keyboard: expect.arrayContaining([
           expect.arrayContaining([
             expect.objectContaining({
               text: "Details",
-              callback_data: "activity_detail:9:3:2",
+              callback_data: "activity_detail:9:3:0",
             }),
           ]),
         ]),
@@ -539,7 +410,7 @@ describe("message handler", () => {
     );
   });
 
-  it("removes inline details link without adding button when no memory/term summary exists", async () => {
+  it("removes inline details link without adding button when no memory summary exists", async () => {
     mockRunAgent.mockResolvedValueOnce({
       response: "Done.",
       activity:
@@ -579,312 +450,6 @@ describe("message handler", () => {
     expect(mockRunAgent).toHaveBeenCalledWith(
       expect.objectContaining({ message: "transcribed text" })
     );
-  });
-
-  it("replies with a voice note for voice-origin messages when adaptive mode is enabled", async () => {
-    mockConfig.config.telegram.voiceReplyMode = "adaptive";
-
-    const handler = getHandler();
-    await handler({
-      chatId: 100,
-      text: "",
-      messageId: 1,
-      date: 1000,
-      voice: { fileId: "voice-123", durationSeconds: 5 },
-    });
-
-    expect(mockSynthesizeVoiceReply).toHaveBeenCalledWith("agent response");
-    expect(mockSendTelegramVoice).toHaveBeenCalledWith(
-      "100",
-      expect.any(Buffer),
-      "Transcript: agent response"
-    );
-    expect(mockSendTelegramMessage).not.toHaveBeenCalledWith("100", "agent response");
-  });
-
-  it("sends voice activity text with details button when memory and term summary exists", async () => {
-    mockConfig.config.telegram.voiceReplyMode = "adaptive";
-    mockRunAgent.mockResolvedValueOnce({
-      response: "Found it.",
-      activity:
-        "used 2 memories (behavior) | logged 1 spanish terms | <a href=\"https://example.com/api/activity/7\">details</a>",
-      activityLogId: 7,
-    });
-
-    const handler = getHandler();
-    await handler({
-      chatId: 100,
-      text: "",
-      messageId: 1,
-      date: 1000,
-      voice: { fileId: "voice-123", durationSeconds: 5 },
-    });
-
-    expect(mockSendTelegramVoice).toHaveBeenCalled();
-    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
-      "100",
-      "<i>used 2 memories (behavior) | logged 1 spanish terms</i>",
-      expect.objectContaining({
-        inline_keyboard: expect.arrayContaining([
-          expect.arrayContaining([
-            expect.objectContaining({
-              text: "Details",
-              callback_data: "activity_detail:7:2:1",
-            }),
-          ]),
-        ]),
-      })
-    );
-  });
-
-  it("falls back to text when voice send fails", async () => {
-    mockConfig.config.telegram.voiceReplyMode = "adaptive";
-    mockSendTelegramVoice.mockResolvedValueOnce(false);
-
-    const handler = getHandler();
-    await handler({
-      chatId: 100,
-      text: "",
-      messageId: 1,
-      date: 1000,
-      voice: { fileId: "voice-123", durationSeconds: 5 },
-    });
-
-    expect(mockSendTelegramVoice).toHaveBeenCalled();
-    expect(mockSendTelegramMessage).toHaveBeenCalledWith("100", "agent response");
-  });
-
-  it("falls back to text when voice synthesis throws", async () => {
-    mockConfig.config.telegram.voiceReplyMode = "adaptive";
-    mockSynthesizeVoiceReply.mockRejectedValueOnce(new Error("tts down"));
-
-    const handler = getHandler();
-    await handler({
-      chatId: 100,
-      text: "",
-      messageId: 1,
-      date: 1000,
-      voice: { fileId: "voice-123", durationSeconds: 5 },
-    });
-
-    expect(errorSpy).toHaveBeenCalledWith(
-      "Telegram voice reply failed [chat:100]:",
-      expect.any(Error)
-    );
-    expect(mockSendTelegramMessage).toHaveBeenCalledWith("100", "agent response");
-  });
-
-  it("uses voice for short conversational text replies in adaptive mode", async () => {
-    mockConfig.config.telegram.voiceReplyMode = "adaptive";
-    mockConfig.config.telegram.voiceReplyEvery = 1;
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
-
-    expect(mockSynthesizeVoiceReply).toHaveBeenCalledWith("agent response");
-    expect(mockSendTelegramVoice).toHaveBeenCalledWith(
-      "100",
-      expect.any(Buffer),
-      "Transcript: agent response"
-    );
-  });
-
-  it("uses voice for friendly responses in always mode", async () => {
-    mockConfig.config.telegram.voiceReplyMode = "always";
-    mockRunAgent.mockResolvedValueOnce({ response: "Short natural response", activity: "" });
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
-
-    expect(mockSynthesizeVoiceReply).toHaveBeenCalledWith("Short natural response");
-    expect(mockSendTelegramVoice).toHaveBeenCalledWith(
-      "100",
-      expect.any(Buffer),
-      "Transcript: Short natural response"
-    );
-  });
-
-  it("keeps text when normalized response is empty", async () => {
-    mockConfig.config.telegram.voiceReplyMode = "adaptive";
-    mockConfig.config.telegram.voiceReplyEvery = 1;
-    mockRunAgent.mockResolvedValueOnce({ response: "<b> </b>", activity: "" });
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
-
-    expect(mockSynthesizeVoiceReply).not.toHaveBeenCalled();
-    expect(mockSendTelegramMessage).toHaveBeenCalledWith("100", "<b> </b>");
-  });
-
-  it("keeps text when response is below voice min chars", async () => {
-    mockConfig.config.telegram.voiceReplyMode = "adaptive";
-    mockConfig.config.telegram.voiceReplyEvery = 1;
-    mockConfig.config.telegram.voiceReplyMinChars = 30;
-    mockRunAgent.mockResolvedValueOnce({ response: "too short", activity: "" });
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
-
-    expect(mockSynthesizeVoiceReply).not.toHaveBeenCalled();
-  });
-
-  it("keeps text when response is above voice max chars", async () => {
-    mockConfig.config.telegram.voiceReplyMode = "adaptive";
-    mockConfig.config.telegram.voiceReplyEvery = 1;
-    mockConfig.config.telegram.voiceReplyMaxChars = 20;
-    mockRunAgent.mockResolvedValueOnce({
-      response: "this response is definitely too long for voice",
-      activity: "",
-    });
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
-
-    expect(mockSynthesizeVoiceReply).not.toHaveBeenCalled();
-  });
-
-  it("keeps text for markdown/code style responses", async () => {
-    mockConfig.config.telegram.voiceReplyMode = "adaptive";
-    mockConfig.config.telegram.voiceReplyEvery = 1;
-    mockRunAgent.mockResolvedValueOnce({
-      response: "Use `pnpm check` before deploy.",
-      activity: "",
-    });
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
-
-    expect(mockSynthesizeVoiceReply).not.toHaveBeenCalled();
-  });
-
-  it("keeps text for bulleted list responses", async () => {
-    mockConfig.config.telegram.voiceReplyMode = "adaptive";
-    mockConfig.config.telegram.voiceReplyEvery = 1;
-    mockRunAgent.mockResolvedValueOnce({
-      response: "- first\n- second",
-      activity: "",
-    });
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
-
-    expect(mockSynthesizeVoiceReply).not.toHaveBeenCalled();
-  });
-
-  it("keeps text for numbered list responses", async () => {
-    mockConfig.config.telegram.voiceReplyMode = "adaptive";
-    mockConfig.config.telegram.voiceReplyEvery = 1;
-    mockRunAgent.mockResolvedValueOnce({
-      response: "1. first\n2. second",
-      activity: "",
-    });
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
-
-    expect(mockSynthesizeVoiceReply).not.toHaveBeenCalled();
-  });
-
-  it("keeps text for long structured lists", async () => {
-    mockConfig.config.telegram.voiceReplyMode = "adaptive";
-    mockConfig.config.telegram.voiceReplyEvery = 1;
-    mockRunAgent.mockResolvedValueOnce({
-      response: "1. one\n2. two\n3. three\n4. four\n5. five\n6. six",
-      activity: "",
-    });
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
-
-    expect(mockSynthesizeVoiceReply).not.toHaveBeenCalled();
-  });
-
-  it("uses voice when adaptive text reply is long but still voice-friendly", async () => {
-    mockConfig.config.telegram.voiceReplyMode = "adaptive";
-    mockConfig.config.telegram.voiceReplyEvery = 1;
-    mockConfig.config.telegram.voiceReplyMaxChars = 500;
-    mockRunAgent.mockResolvedValueOnce({
-      response: "x".repeat(300),
-      activity: "",
-    });
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
-
-    expect(mockSynthesizeVoiceReply).toHaveBeenCalledWith("x".repeat(300));
-    expect(mockSendTelegramVoice).toHaveBeenCalledWith(
-      "100",
-      expect.any(Buffer),
-      `Transcript: ${"x".repeat(300)}`
-    );
-    expect(mockSendTelegramMessage).not.toHaveBeenCalledWith("100", "x".repeat(300));
-  });
-
-  it("keeps text output when response is not voice-friendly", async () => {
-    mockConfig.config.telegram.voiceReplyMode = "adaptive";
-    mockRunAgent.mockResolvedValueOnce({
-      response: "Use this link: https://example.com for the full answer",
-      activity: "",
-    });
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
-
-    expect(mockSynthesizeVoiceReply).not.toHaveBeenCalled();
-    expect(mockSendTelegramVoice).not.toHaveBeenCalled();
-    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
-      "100",
-      "Use this link: https://example.com for the full answer"
-    );
-  });
-
-  it("sends activity as text when the main response is sent as voice", async () => {
-    mockConfig.config.telegram.voiceReplyMode = "adaptive";
-    mockConfig.config.telegram.voiceReplyEvery = 1;
-    mockRunAgent.mockResolvedValueOnce({
-      response: "Found it!",
-      activity: "3 patterns | 2 tools (search_entries, get_entry)",
-    });
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
-
-    expect(mockSendTelegramVoice).toHaveBeenCalled();
-    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
-      "100",
-      "<i>3 patterns | 2 tools (search_entries, get_entry)</i>"
-    );
-  });
-
-  it("uses voice in adaptive mode regardless of cadence interval setting", async () => {
-    mockConfig.config.telegram.voiceReplyMode = "adaptive";
-    mockConfig.config.telegram.voiceReplyEvery = 3;
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
-
-    expect(mockSendTelegramVoice).toHaveBeenCalledWith(
-      "100",
-      expect.any(Buffer),
-      "Transcript: agent response"
-    );
-    expect(mockSendTelegramMessage).not.toHaveBeenCalledWith("100", "agent response");
-  });
-
-  it("truncates transcript caption to Telegram voice caption max length", async () => {
-    mockConfig.config.telegram.voiceReplyMode = "adaptive";
-    mockConfig.config.telegram.voiceReplyMaxChars = 2000;
-    const longResponse = "a".repeat(1100);
-    mockRunAgent.mockResolvedValueOnce({ response: longResponse, activity: "" });
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
-
-    const caption = mockSendTelegramVoice.mock.calls[0]?.[2];
-    expect(typeof caption).toBe("string");
-    expect(caption).toHaveLength(1024);
-    expect(caption).toContain("Transcript: ");
-    expect(caption?.endsWith("...")).toBe(true);
   });
 
   it("extracts text from photo messages before sending to agent", async () => {
@@ -990,6 +555,52 @@ describe("message handler", () => {
     expect(mockRunAgent).not.toHaveBeenCalled();
     expect(mockSendTelegramMessage).not.toHaveBeenCalled();
   });
+
+  it("ignores reaction messages entirely", async () => {
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "", messageId: 5, date: 1000, reactionEmoji: "👍" });
+
+    expect(mockRunAgent).not.toHaveBeenCalled();
+    expect(mockSendChatAction).not.toHaveBeenCalled();
+    expect(mockSendTelegramMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("typing heartbeat", () => {
+  it("sends repeated typing indicators while agent is working", async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveAgent:
+        | ((value: { response: string; activity: string; patternCount: number }) => void)
+        | undefined;
+      mockRunAgent.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveAgent = resolve;
+          })
+      );
+
+      const handler = getHandler();
+      const pending = handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
+
+      // Advance past the typing heartbeat interval (4500ms)
+      await vi.advanceTimersByTimeAsync(4700);
+      expect(mockSendChatAction).toHaveBeenCalledWith("100", "typing");
+
+      expect(resolveAgent).toBeDefined();
+      if (!resolveAgent) {
+        throw new Error("resolveAgent was not initialized");
+      }
+      resolveAgent({
+        response: "agent response",
+        activity: "",
+        patternCount: 0,
+      });
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("error handling", () => {
@@ -1083,7 +694,6 @@ describe("error handling", () => {
     expect(mockRunAgent).toHaveBeenCalledWith(
       expect.objectContaining({
         message: "/",
-        mode: { mode: "default", systemPrompt: null },
       })
     );
   });
@@ -1093,450 +703,6 @@ describe("error handling", () => {
     await handler({ chatId: 100, text: "/compact@test_bot", messageId: 1, date: 1000 });
 
     expect(mockForceCompact).toHaveBeenCalledWith("100", expect.any(Function));
-    expect(mockRunAgent).not.toHaveBeenCalled();
-  });
-
-  it("handles /compose command by injecting compose instruction and prefill into runAgent", async () => {
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "/compose", messageId: 1, date: 1000 });
-
-    expect(mockRunAgent).toHaveBeenCalledTimes(1);
-    const call = mockRunAgent.mock.calls[0][0];
-    expect(call.message).toBe("Write the entry now.");
-    expect(call.prefill).toBe("#");
-  });
-
-});
-
-describe("soul feedback buttons", () => {
-  it("attaches inline buttons on every Nth message based on soulFeedbackEvery", async () => {
-    mockConfig.config.telegram.soulFeedbackEvery = 2;
-
-    const handler = getHandler();
-    // Message 1: counter=1, not divisible by 2
-    await handler({ chatId: 100, text: "first", messageId: 1, date: 1000 });
-    expect(mockSendTelegramMessage).toHaveBeenCalledWith("100", "agent response");
-
-    mockSendTelegramMessage.mockClear();
-
-    // Message 2: counter=2, divisible by 2 — should get buttons
-    await handler({ chatId: 100, text: "second", messageId: 2, date: 1001 });
-    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
-      "100",
-      "agent response",
-      expect.objectContaining({
-        inline_keyboard: expect.arrayContaining([
-          expect.arrayContaining([
-            expect.objectContaining({ callback_data: "soul:personal" }),
-            expect.objectContaining({ callback_data: "soul:generic" }),
-          ]),
-        ]),
-      })
-    );
-  });
-
-  it("does not attach buttons when soulEnabled is false", async () => {
-    mockConfig.config.telegram.soulEnabled = false;
-    mockConfig.config.telegram.soulFeedbackEvery = 1;
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
-
-    expect(mockSendTelegramMessage).toHaveBeenCalledWith("100", "agent response");
-  });
-});
-
-describe("soul feedback callbacks", () => {
-  it("handles soul:personal callback and inserts felt_personal signal", async () => {
-    mockGetSoulState.mockResolvedValueOnce({ version: 5 });
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "soul:personal", messageId: 10, date: 1000, callbackData: "soul:personal" });
-
-    expect(mockInsertSoulQualitySignal).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        chatId: "100",
-        signalType: "felt_personal",
-        soulVersion: 5,
-        metadata: { source: "inline_button" },
-      })
-    );
-    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
-      "100",
-      expect.stringContaining("Noted")
-    );
-    expect(mockRunAgent).not.toHaveBeenCalled();
-  });
-
-  it("handles soul:generic callback and inserts felt_generic signal", async () => {
-    mockGetSoulState.mockResolvedValueOnce({ version: 3 });
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "soul:generic", messageId: 11, date: 1000, callbackData: "soul:generic" });
-
-    expect(mockInsertSoulQualitySignal).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        chatId: "100",
-        signalType: "felt_generic",
-        soulVersion: 3,
-        metadata: { source: "inline_button" },
-      })
-    );
-    expect(mockRunAgent).not.toHaveBeenCalled();
-  });
-
-  it("defaults callback soulVersion to 0 when no soul state exists", async () => {
-    mockGetSoulState.mockResolvedValueOnce(null);
-
-    const handler = getHandler();
-    await handler({
-      chatId: 100,
-      text: "soul:personal",
-      messageId: 12,
-      date: 1000,
-      callbackData: "soul:personal",
-    });
-
-    expect(mockInsertSoulQualitySignal).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        soulVersion: 0,
-      })
-    );
-  });
-
-  it("handles soul feedback callback error gracefully", async () => {
-    mockGetSoulState.mockRejectedValueOnce(new Error("db down"));
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "soul:personal", messageId: 10, date: 1000, callbackData: "soul:personal" });
-
-    expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining("soul feedback error"),
-      expect.any(Error)
-    );
-    expect(mockRunAgent).not.toHaveBeenCalled();
-  });
-});
-
-describe("message reactions", () => {
-  it("logs positive reaction as positive_reaction signal", async () => {
-    mockGetSoulState.mockResolvedValueOnce({ version: 4 });
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "", messageId: 5, date: 1000, reactionEmoji: "👍" });
-
-    expect(mockInsertSoulQualitySignal).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        signalType: "positive_reaction",
-        metadata: { source: "reaction", emoji: "👍" },
-      })
-    );
-    expect(mockRunAgent).not.toHaveBeenCalled();
-    expect(mockSendChatAction).not.toHaveBeenCalled();
-  });
-
-  it("logs negative reaction as felt_generic signal", async () => {
-    mockGetSoulState.mockResolvedValueOnce({ version: 2 });
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "", messageId: 5, date: 1000, reactionEmoji: "👎" });
-
-    expect(mockInsertSoulQualitySignal).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        signalType: "felt_generic",
-        metadata: { source: "reaction", emoji: "👎" },
-      })
-    );
-    expect(mockRunAgent).not.toHaveBeenCalled();
-  });
-
-  it("defaults reaction soulVersion to 0 when no soul state exists", async () => {
-    mockGetSoulState.mockResolvedValueOnce(null);
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "", messageId: 6, date: 1000, reactionEmoji: "👍" });
-
-    expect(mockInsertSoulQualitySignal).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        signalType: "positive_reaction",
-        soulVersion: 0,
-      })
-    );
-  });
-
-  it("ignores unknown reaction emojis", async () => {
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "", messageId: 5, date: 1000, reactionEmoji: "🤷" });
-
-    expect(mockInsertSoulQualitySignal).not.toHaveBeenCalled();
-    expect(mockRunAgent).not.toHaveBeenCalled();
-  });
-
-  it("skips reaction logging when soulEnabled is false", async () => {
-    mockConfig.config.telegram.soulEnabled = false;
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "", messageId: 5, date: 1000, reactionEmoji: "👍" });
-
-    expect(mockInsertSoulQualitySignal).not.toHaveBeenCalled();
-  });
-
-  it("handles reaction signal error gracefully", async () => {
-    mockGetSoulState.mockRejectedValueOnce(new Error("db fail"));
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "", messageId: 5, date: 1000, reactionEmoji: "❤️" });
-
-    expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining("reaction signal error"),
-      expect.any(Error)
-    );
-  });
-});
-
-describe("/soul command", () => {
-  it("displays soul state and quality stats", async () => {
-    mockGetSoulState.mockResolvedValueOnce({
-      version: 7,
-      identity_summary: "A steady companion.",
-      relational_commitments: ["stay direct", "be concise"],
-      tone_signature: ["warm", "grounded"],
-      growth_notes: ["user prefers specifics"],
-    });
-    mockGetSoulQualityStats.mockResolvedValueOnce({
-      felt_personal: 10,
-      felt_generic: 2,
-      correction: 5,
-      positive_reaction: 8,
-      total: 25,
-      personal_ratio: 0.9,
-    });
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "/soul", messageId: 1, date: 1000 });
-
-    expect(mockRunAgent).not.toHaveBeenCalled();
-    const sentMessage = mockSendTelegramMessage.mock.calls.find(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (c: any[]) => typeof c[1] === "string" && c[1].includes("Soul State")
-    );
-    expect(sentMessage).toBeDefined();
-    const text = sentMessage![1] as string;
-    expect(text).toContain("v7");
-    expect(text).toContain("A steady companion.");
-    expect(text).toContain("stay direct, be concise");
-    expect(text).toContain("warm, grounded");
-    expect(text).toContain("Felt personal: 10");
-    expect(text).toContain("Felt generic: 2");
-    expect(text).toContain("90%");
-  });
-
-  it("shows fallback when no soul state exists", async () => {
-    mockGetSoulState.mockResolvedValueOnce(null);
-    mockGetSoulQualityStats.mockResolvedValueOnce({
-      felt_personal: 0, felt_generic: 0, correction: 0, positive_reaction: 0, total: 0, personal_ratio: 0,
-    });
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "/soul", messageId: 1, date: 1000 });
-
-    expect(mockRunAgent).not.toHaveBeenCalled();
-    const sentMessage = mockSendTelegramMessage.mock.calls.find(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (c: any[]) => typeof c[1] === "string" && c[1].includes("Soul State")
-    );
-    expect(sentMessage).toBeDefined();
-    expect(sentMessage![1] as string).toContain("No soul state yet");
-  });
-
-  it("includes pulse status and applied repair count when available", async () => {
-    mockGetSoulState.mockResolvedValueOnce({
-      version: 4,
-      identity_summary: "Grounded and specific.",
-      relational_commitments: ["be concrete"],
-      tone_signature: ["warm"],
-      growth_notes: [],
-    });
-    mockGetSoulQualityStats.mockResolvedValueOnce({
-      felt_personal: 6,
-      felt_generic: 3,
-      correction: 1,
-      positive_reaction: 2,
-      total: 12,
-      personal_ratio: 0.73,
-    });
-    mockGetLastPulseCheck.mockResolvedValueOnce({
-      id: 11,
-      chat_id: "100",
-      status: "drifting",
-      personal_ratio: 0.31,
-      correction_rate: 0.1,
-      signal_counts: {
-        felt_personal: 1,
-        felt_generic: 6,
-        correction: 1,
-        positive_reaction: 1,
-        total: 9,
-      },
-      repairs_applied: [{ type: "add_growth_note" }, { type: "add_commitment" }],
-      soul_version_before: 3,
-      soul_version_after: 4,
-      created_at: new Date(Date.now() - 2 * 60 * 60 * 1000),
-    });
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "/soul", messageId: 1, date: 1000 });
-
-    const sentMessage = mockSendTelegramMessage.mock.calls.find(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (c: any[]) => typeof c[1] === "string" && c[1].includes("<b>Pulse:</b>")
-    );
-    expect(sentMessage).toBeDefined();
-    const text = sentMessage![1] as string;
-    expect(text).toContain("<b>Pulse:</b>");
-    expect(text).toContain("drifting");
-    expect(text).toContain("Repairs: 2 applied");
-  });
-
-  it("uses fallback pulse emoji for unknown pulse status", async () => {
-    mockGetSoulState.mockResolvedValueOnce({
-      version: 2,
-      identity_summary: "Calm and direct.",
-      relational_commitments: [],
-      tone_signature: [],
-      growth_notes: [],
-    });
-    mockGetSoulQualityStats.mockResolvedValueOnce({
-      felt_personal: 0,
-      felt_generic: 0,
-      correction: 0,
-      positive_reaction: 0,
-      total: 0,
-      personal_ratio: 0,
-    });
-    mockGetLastPulseCheck.mockResolvedValueOnce({
-      id: 12,
-      chat_id: "100",
-      status: "mystery",
-      personal_ratio: 0,
-      correction_rate: 0,
-      signal_counts: {},
-      repairs_applied: [],
-      soul_version_before: 2,
-      soul_version_after: 2,
-      created_at: new Date(Date.now() - 60 * 60 * 1000),
-    });
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "/soul", messageId: 1, date: 1000 });
-
-    const sentMessage = mockSendTelegramMessage.mock.calls.find(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (c: any[]) => typeof c[1] === "string" && c[1].includes("<b>Pulse:</b>")
-    );
-    expect(sentMessage).toBeDefined();
-    expect(sentMessage![1] as string).toContain("<b>Pulse:</b> ❓ mystery");
-  });
-
-  it("handles /soul error gracefully", async () => {
-    mockGetSoulState.mockRejectedValueOnce(new Error("db error"));
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "/soul", messageId: 1, date: 1000 });
-
-    expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining("/soul error"),
-      expect.any(Error)
-    );
-    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
-      "100",
-      "Error loading soul state."
-    );
-  });
-
-  // =========================================================================
-  // /digest command
-  // =========================================================================
-
-  it("/digest sends Spanish learning summary", async () => {
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "/digest", messageId: 1, date: 1000 });
-
-    expect(mockGetSpanishQuizStats).toHaveBeenCalled();
-    expect(mockGetSpanishAdaptiveContext).toHaveBeenCalled();
-    expect(mockGetRetentionByInterval).toHaveBeenCalled();
-    expect(mockGetVocabularyFunnel).toHaveBeenCalled();
-    expect(mockGetGradeTrend).toHaveBeenCalled();
-    expect(mockGetLapseRateTrend).toHaveBeenCalled();
-    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
-      "100",
-      expect.stringContaining("Spanish Learning Digest")
-    );
-    // Should not dispatch to agent
-    expect(mockRunAgent).not.toHaveBeenCalled();
-  });
-
-  it("/digest handles errors gracefully", async () => {
-    mockGetSpanishQuizStats.mockRejectedValueOnce(new Error("db error"));
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "/digest", messageId: 1, date: 1000 });
-
-    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
-      "100",
-      "Error generating digest."
-    );
-    expect(mockRunAgent).not.toHaveBeenCalled();
-  });
-
-  // =========================================================================
-  // /assess command
-  // =========================================================================
-
-  it("/assess triggers LLM assessment and sends summary", async () => {
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "/assess", messageId: 1, date: 1000 });
-
-    expect(mockSendChatAction).toHaveBeenCalledWith("100", "typing");
-    expect(mockAssessSpanishQuality).toHaveBeenCalled();
-    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
-      "100",
-      expect.stringContaining("3.6/5")
-    );
-    expect(mockRunAgent).not.toHaveBeenCalled();
-  });
-
-  it("/assess handles errors gracefully", async () => {
-    mockAssessSpanishQuality.mockRejectedValueOnce(
-      new Error("Not enough user messages")
-    );
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "/assess", messageId: 1, date: 1000 });
-
-    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
-      "100",
-      expect.stringContaining("Not enough user messages")
-    );
-    expect(mockRunAgent).not.toHaveBeenCalled();
-  });
-
-  it("/assess handles non-Error exceptions", async () => {
-    mockAssessSpanishQuality.mockRejectedValueOnce("string error");
-
-    const handler = getHandler();
-    await handler({ chatId: 100, text: "/assess", messageId: 1, date: 1000 });
-
-    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
-      "100",
-      expect.stringContaining("string error")
-    );
     expect(mockRunAgent).not.toHaveBeenCalled();
   });
 });
@@ -1578,10 +744,10 @@ describe("activity_detail callback", () => {
     const handler = getHandler();
     await handler({
       chatId: 100,
-      text: "activity_detail:9:3:2",
+      text: "activity_detail:9:3:0",
       messageId: 10,
       date: 1000,
-      callbackData: "activity_detail:9:3:2",
+      callbackData: "activity_detail:9:3:0",
     });
 
     expect(mockGetActivityLog).toHaveBeenCalledWith(expect.anything(), 9);
@@ -1593,10 +759,6 @@ describe("activity_detail callback", () => {
       "100",
       expect.stringContaining("memories used: 3")
     );
-    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
-      "100",
-      expect.stringContaining("spanish terms logged: 2")
-    );
     expect(mockRunAgent).not.toHaveBeenCalled();
   });
 
@@ -1606,10 +768,10 @@ describe("activity_detail callback", () => {
     const handler = getHandler();
     await handler({
       chatId: 100,
-      text: "activity_detail:99:1:1",
+      text: "activity_detail:99:1:0",
       messageId: 10,
       date: 1000,
-      callbackData: "activity_detail:99:1:1",
+      callbackData: "activity_detail:99:1:0",
     });
 
     expect(mockSendTelegramMessage).toHaveBeenCalledWith(
@@ -1648,10 +810,10 @@ describe("activity_detail callback", () => {
     const handler = getHandler();
     await handler({
       chatId: 100,
-      text: "activity_detail:abc:1:1",
+      text: "activity_detail:abc:1:0",
       messageId: 10,
       date: 1000,
-      callbackData: "activity_detail:abc:1:1",
+      callbackData: "activity_detail:abc:1:0",
     });
 
     expect(mockSendTelegramMessage).toHaveBeenCalledWith(
@@ -1687,7 +849,6 @@ describe("activity_detail callback", () => {
     expect(sentMessage).toBeDefined();
     const detail = sentMessage![1] as string;
     expect(detail).toContain("memories used: 0");
-    expect(detail).toContain("spanish terms logged: 0");
     expect(detail).not.toContain("Top memories:");
     expect(detail).not.toContain("Tools:");
   });
@@ -1698,10 +859,10 @@ describe("activity_detail callback", () => {
     const handler = getHandler();
     await handler({
       chatId: 100,
-      text: "activity_detail:9:1:1",
+      text: "activity_detail:9:1:0",
       messageId: 10,
       date: 1000,
-      callbackData: "activity_detail:9:1:1",
+      callbackData: "activity_detail:9:1:0",
     });
 
     expect(errorSpy).toHaveBeenCalledWith(

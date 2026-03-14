@@ -50,34 +50,6 @@ export const RETRIEVAL_BASE_MIN_SIMILARITY = 0.35;
 export const RETRIEVAL_SHORT_QUERY_MIN_SIMILARITY = 0.42;
 export const RETRIEVAL_SCORE_FLOOR_DEFAULT = 0.2;
 export const RETRIEVAL_SCORE_FLOOR_SHORT_QUERY = 0.35;
-export const LANGUAGE_ANCHOR_LIMIT = 3;
-export const SPANISH_AUTO_LOG_LIMIT = 4;
-export const SPANISH_DEFAULT_KNOWN_TENSES = [
-  "presente",
-  "presente progresivo",
-  "futuro próximo",
-  "pretérito perfecto",
-  "pretérito indefinido",
-];
-export const SPANISH_STOP_WORDS = new Set([
-  "hola",
-  "gracias",
-  "pero",
-  "porque",
-  "como",
-  "cuando",
-  "donde",
-  "para",
-  "con",
-  "una",
-  "uno",
-  "este",
-  "esta",
-  "that",
-  "with",
-  "from",
-  "just",
-]);
 
 // ---------------------------------------------------------------------------
 // Shared utilities

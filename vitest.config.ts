@@ -50,12 +50,6 @@ export default defineConfig({
           branches: 100,
           statements: 100,
         },
-        "src/db/queries/spanish.ts": {
-          lines: 100,
-          functions: 100,
-          branches: 100,
-          statements: 100,
-        },
         "src/db/queries/patterns.ts": {
           lines: 100,
           functions: 100,
@@ -63,12 +57,6 @@ export default defineConfig({
           statements: 100,
         },
         "src/db/queries/chat.ts": {
-          lines: 100,
-          functions: 100,
-          branches: 100,
-          statements: 100,
-        },
-        "src/db/queries/soul.ts": {
           lines: 100,
           functions: 100,
           branches: 100,
@@ -86,25 +74,7 @@ export default defineConfig({
           branches: 100,
           statements: 100,
         },
-        "src/db/queries/insights.ts": {
-          lines: 100,
-          functions: 100,
-          branches: 100,
-          statements: 100,
-        },
         "src/db/queries/content-search.ts": {
-          lines: 100,
-          functions: 100,
-          branches: 100,
-          statements: 100,
-        },
-        "src/db/queries/settings.ts": {
-          lines: 100,
-          functions: 100,
-          branches: 100,
-          statements: 100,
-        },
-        "src/db/queries/checkins.ts": {
           lines: 100,
           functions: 100,
           branches: 100,

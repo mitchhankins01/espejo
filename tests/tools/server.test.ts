@@ -11,9 +11,6 @@ const { mockRegisterTool, mockRegisterPrompt, mockHandlers } = vi.hoisted(() => 
     handleFindSimilar: vi.fn(),
     handleListTags: vi.fn(),
     handleEntryStats: vi.fn(),
-    handleConjugateVerb: vi.fn(),
-    handleLogVocabulary: vi.fn(),
-    handleSpanishQuiz: vi.fn(),
     handleGetArtifact: vi.fn(),
     handleListArtifacts: vi.fn(),
     handleSearchArtifacts: vi.fn(),
@@ -54,15 +51,6 @@ vi.mock("../../src/tools/list-tags.js", () => ({
 vi.mock("../../src/tools/entry-stats.js", () => ({
   handleEntryStats: mockHandlers.handleEntryStats,
 }));
-vi.mock("../../src/tools/conjugate-verb.js", () => ({
-  handleConjugateVerb: mockHandlers.handleConjugateVerb,
-}));
-vi.mock("../../src/tools/log-vocabulary.js", () => ({
-  handleLogVocabulary: mockHandlers.handleLogVocabulary,
-}));
-vi.mock("../../src/tools/spanish-quiz.js", () => ({
-  handleSpanishQuiz: mockHandlers.handleSpanishQuiz,
-}));
 vi.mock("../../src/tools/get-artifact.js", () => ({
   handleGetArtifact: mockHandlers.handleGetArtifact,
 }));
@@ -75,13 +63,6 @@ vi.mock("../../src/tools/search-artifacts.js", () => ({
 vi.mock("../../src/tools/search-content.js", () => ({
   handleSearchContent: mockHandlers.handleSearchContent,
 }));
-vi.mock("../../src/tools/start-journal-session.js", () => ({
-  handleStartJournalSession: vi.fn(),
-}));
-vi.mock("../../src/tools/create-entry.js", () => ({
-  handleCreateEntry: vi.fn(),
-}));
-
 import { createServer, toolHandlers } from "../../src/server.js";
 import type { ToolHandler } from "../../src/server.js";
 import { toolSpecs } from "../../specs/tools.spec.js";
@@ -196,11 +177,4 @@ describe("createServer", () => {
     expect(result).toBe(richResult);
   });
 
-  it("registers morning-journal and evening-journal prompts", () => {
-    createServer({} as any, "1.0.0");
-    expect(mockRegisterPrompt).toHaveBeenCalledTimes(2);
-    const names = mockRegisterPrompt.mock.calls.map((call) => call[0]);
-    expect(names).toContain("morning-journal");
-    expect(names).toContain("evening-journal");
-  });
 });

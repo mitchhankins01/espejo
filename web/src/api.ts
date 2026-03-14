@@ -154,11 +154,7 @@ export type ObservableDbTableName =
   | "activity_logs"
   | "chat_messages"
   | "patterns"
-  | "spanish_vocabulary"
-  | "spanish_reviews"
-  | "daily_metrics"
-  | "insights"
-  | "checkins";
+  | "daily_metrics";
 
 export interface DbTableMeta {
   name: ObservableDbTableName;

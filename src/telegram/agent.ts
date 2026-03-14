@@ -1,36 +1,26 @@
 import crypto from "crypto";
-import { config } from "../config.js";
 import { pool } from "../db/client.js";
 import {
   getRecentMessages,
-  getSoulState,
-  upsertSoulState,
   insertChatMessage,
   logMemoryRetrieval,
   insertActivityLog,
-  insertSoulQualitySignal,
-  getSoulQualityStats,
   type PatternSearchRow,
 } from "../db/queries.js";
 import { buildOuraContextPrompt } from "../oura/context.js";
 import { buildTodoContextPrompt } from "../todos/context.js";
-import { evolveSoulState } from "./soul.js";
-import type { ChatModeState } from "./evening-review.js";
 
 import { RECENT_MESSAGES_LIMIT, normalizeContent } from "./agent/constants.js";
-import { buildSystemPrompt, toSoulSnapshot, buildSpanishContextPrompt } from "./agent/context.js";
+import { buildSystemPrompt } from "./agent/context.js";
 import { maybeBuildCostActivityNote } from "./agent/costs.js";
 import {
   shouldRetrievePatterns,
   retrievePatterns,
-  retrieveLanguagePreferenceAnchors,
-  mergePromptPatterns,
-  shouldRewriteForLanguagePreference,
-  rewriteWithLanguagePreference,
-  autoLogSpanishVocabulary,
+  budgetCapPatterns,
 } from "./agent/language.js";
 import { reconstructMessages, runToolLoop } from "./agent/tools.js";
 import { compactIfNeeded } from "./agent/compaction.js";
+import { PATTERN_TOKEN_BUDGET } from "./agent/constants.js";
 
 // Re-export public API from submodules
 export { truncateToolResult } from "./agent/truncation.js";
@@ -44,7 +34,6 @@ export interface AgentResult {
   response: string | null;
   activity: string;
   activityLogId: number | null;
-  soulVersion: number;
   patternCount: number;
 }
 
@@ -53,7 +42,6 @@ export async function runAgent(params: {
   message: string;
   storedUserMessage?: string;
   messageDate: number;
-  mode?: ChatModeState;
   prefill?: string;
   onCompacted?: (summary: string) => Promise<void>;
 }): Promise<AgentResult> {
@@ -61,19 +49,11 @@ export async function runAgent(params: {
     chatId,
     message,
     storedUserMessage,
-    mode = { mode: "default", systemPrompt: null },
     prefill,
     onCompacted,
   } = params;
 
   // User message is now stored by handleMessage() in webhook.ts before calling runAgent().
-
-  let autoLoggedVocabulary = 0;
-  try {
-    autoLoggedVocabulary = await autoLogSpanishVocabulary(chatId, message);
-  } catch (err) {
-    console.error(`Telegram spanish auto-log error [chat:${chatId}]:`, err);
-  }
 
   // 2. Retrieve patterns (skip for trivial messages)
   let retrievedPatterns: PatternSearchRow[] = [];
@@ -81,8 +61,7 @@ export async function runAgent(params: {
   if (shouldRetrievePatterns(message)) {
     ({ patterns: retrievedPatterns, degraded } = await retrievePatterns(message));
   }
-  const languageAnchors = await retrieveLanguagePreferenceAnchors();
-  const patterns = mergePromptPatterns(retrievedPatterns, languageAnchors);
+  const patterns = budgetCapPatterns(retrievedPatterns, PATTERN_TOKEN_BUDGET);
 
   if (shouldRetrievePatterns(message)) {
     await logMemoryRetrieval(pool, {
@@ -97,19 +76,10 @@ export async function runAgent(params: {
   }
 
   // 3. Build context
-  const persistedSoulState = config.telegram.soulEnabled
-    ? await getSoulState(pool, chatId)
-    : null;
-  const baseSystemPrompt = buildSystemPrompt(
-    patterns,
-    degraded,
-    toSoulSnapshot(persistedSoulState),
-    mode
-  );
-  const spanishContextPrompt = await buildSpanishContextPrompt(chatId);
+  const baseSystemPrompt = buildSystemPrompt(patterns, degraded);
   const ouraContextPrompt = await buildOuraContextPrompt(pool);
   const todoContextPrompt = await buildTodoContextPrompt(pool);
-  const contextSections = [spanishContextPrompt, ouraContextPrompt, todoContextPrompt].filter((v) => v.length > 0);
+  const contextSections = [ouraContextPrompt, todoContextPrompt].filter((v) => v.length > 0);
   const systemPrompt = contextSections.length > 0
     ? `${baseSystemPrompt}\n\n${contextSections.join("\n\n")}`
     : baseSystemPrompt;
@@ -128,13 +98,8 @@ export async function runAgent(params: {
 
   // 4. Run tool loop
   const { text, toolCallCount, toolNames, toolCalls } = await runToolLoop(systemPrompt, messages, chatId, prefill);
-  const finalText =
-    text && shouldRewriteForLanguagePreference(mode, message, text, patterns, !!spanishContextPrompt)
-      ? await rewriteWithLanguagePreference(message, text)
-      : text;
 
   // 5. Build activity summary
-  const soulVersion = persistedSoulState?.version ?? 0;
   const activityParts: string[] = [];
   if (patterns.length > 0) {
     const topKinds = [...new Set(patterns.map((p) => p.kind))].slice(0, 3).join(", ");
@@ -144,22 +109,6 @@ export async function runAgent(params: {
   if (costNote) activityParts.push(costNote);
   if (degraded) activityParts.push("memory degraded");
   if (toolCallCount > 0) activityParts.push(`${toolCallCount} tools (${toolNames.join(", ")})`);
-  if (autoLoggedVocabulary > 0) {
-    activityParts.push(`logged ${autoLoggedVocabulary} spanish terms`);
-  }
-
-  // Include soul quality ratio when enough signals exist
-  if (config.telegram.soulEnabled) {
-    try {
-      const stats = await getSoulQualityStats(pool, chatId);
-      if (stats.total >= 5) {
-        const pct = Math.round(stats.personal_ratio * 100);
-        activityParts.push(`soul v${soulVersion} (${pct}% personal)`);
-      }
-    } catch {
-      /* v8 ignore next -- non-critical: quality stats are best-effort */
-    }
-  }
 
   // 5b. Store activity log
   let activityLogId: number | null = null;
@@ -194,51 +143,24 @@ export async function runAgent(params: {
 
   const activity = activityParts.join(" | ");
 
-  if (!finalText) return { response: null, activity, activityLogId, soulVersion, patternCount: patterns.length };
+  if (!text) return { response: null, activity, activityLogId, patternCount: patterns.length };
 
   // 6. Store assistant response
   await insertChatMessage(pool, {
     chatId,
     externalMessageId: null,
     role: "assistant",
-    content: finalText,
+    content: text,
   });
 
-  // 7. Persist evolving soul state + log correction signal
-  if (config.telegram.soulEnabled) {
-    try {
-      const nextSoulState = evolveSoulState(
-        toSoulSnapshot(persistedSoulState),
-        message
-      );
-      if (nextSoulState) {
-        const updatedSoul = await upsertSoulState(pool, {
-          chatId,
-          identitySummary: nextSoulState.identitySummary,
-          relationalCommitments: nextSoulState.relationalCommitments,
-          toneSignature: nextSoulState.toneSignature,
-          growthNotes: nextSoulState.growthNotes,
-        });
-        // Log implicit correction signal — user message triggered soul evolution
-        await insertSoulQualitySignal(pool, {
-          chatId,
-          assistantMessageId: null,
-          signalType: "correction",
-          soulVersion: updatedSoul.version,
-          patternCount: patterns.length,
-          metadata: { source: "implicit_correction" },
-        });
-      }
-    } catch (err) {
-      console.error(`Telegram soul persistence error [chat:${chatId}]:`, err);
-    }
-  }
-
-  // 8. Trigger compaction asynchronously
+  // 7. Trigger compaction asynchronously
   /* v8 ignore next 3 -- async compaction error: tested via compactIfNeeded unit tests */
   void compactIfNeeded(chatId, onCompacted).catch((err) => {
     console.error(`Telegram compaction error [chat:${chatId}]:`, err);
   });
 
-  return { response: finalText, activity, activityLogId, soulVersion, patternCount: patterns.length };
+  return { response: text, activity, activityLogId, patternCount: patterns.length };
 }
+
+// Need config for activity detail URL building
+import { config } from "../config.js";

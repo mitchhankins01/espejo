@@ -75,11 +75,6 @@ const ouraMetricParam = z.enum(["sleep_score", "hrv", "readiness", "activity", "
 
 const ouraAnalysisTypeParam = z.enum(["sleep_quality", "anomalies", "hrv_trend", "temperature", "best_sleep"]);
 
-const spanishActionParam = z
-  .string()
-  .regex(/^(get_due|record_review|stats)$/, "Must be get_due, record_review, or stats")
-  .describe("Quiz action: get_due, record_review, or stats");
-
 const memoryKindParam = z
   .enum(["identity", "preference", "goal"])
   .describe("Memory kind: identity, preference, or goal");
@@ -336,158 +331,6 @@ export const toolSpecs = {
       },
     ],
   },
-  conjugate_verb: {
-    name: "conjugate_verb" as const,
-    annotations: READ_ONLY,
-    description:
-      "Look up Spanish verb conjugations by infinitive, optionally filtered by mood and tense. " +
-      "Useful for correcting conjugation mistakes in natural conversation.",
-    params: z.object({
-      verb: z
-        .string()
-        .min(1)
-        .describe("Spanish infinitive, e.g. 'tener', 'estar', 'hablar'"),
-      mood: z
-        .string()
-        .min(1)
-        .optional()
-        .describe("Optional mood filter, e.g. 'Indicativo'"),
-      tense: z
-        .string()
-        .min(1)
-        .optional()
-        .describe("Optional tense filter, e.g. 'Presente'"),
-      limit: limitParam(20, 60),
-    }),
-    examples: [
-      {
-        input: { verb: "tener", mood: "Indicativo", tense: "Presente" },
-        behavior:
-          "Returns present indicative forms for tener (yo tengo, tú tienes, etc.)",
-      },
-      {
-        input: { verb: "hablar", limit: 6 },
-        behavior:
-          "Returns up to 6 conjugation rows across common moods/tenses for hablar",
-      },
-    ],
-  },
-  log_vocabulary: {
-    name: "log_vocabulary" as const,
-    annotations: WRITE_IDEMPOTENT,
-    description:
-      "Track a Spanish vocabulary word for a specific chat/user, including optional region and usage notes. " +
-      "Upserts by chat + word + region so repeated logging reinforces the same card.",
-    params: z.object({
-      chat_id: z
-        .string()
-        .min(1)
-        .describe("Chat/user identifier for multi-chat isolation"),
-      word: z
-        .string()
-        .min(1)
-        .describe("Vocabulary word or short phrase in Spanish"),
-      translation: z
-        .string()
-        .min(1)
-        .optional()
-        .describe("Optional translation or gloss"),
-      part_of_speech: z
-        .string()
-        .min(1)
-        .optional()
-        .describe("Optional part of speech, e.g. noun, verb, adjective"),
-      region: z
-        .string()
-        .min(1)
-        .optional()
-        .describe("Optional regional context, e.g. Honduras, Venezuela, Spain"),
-      example_sentence: z
-        .string()
-        .min(1)
-        .optional()
-        .describe("Optional example sentence"),
-      notes: z
-        .string()
-        .min(1)
-        .optional()
-        .describe("Optional notes"),
-      source: z
-        .string()
-        .min(1)
-        .optional()
-        .describe("Optional source tag, defaults to 'chat'"),
-    }),
-    examples: [
-      {
-        input: {
-          chat_id: "123",
-          word: "maje",
-          translation: "dude / bro",
-          part_of_speech: "noun",
-          region: "Honduras",
-        },
-        behavior:
-          "Creates or updates a Honduras-specific vocabulary card for maje",
-      },
-    ],
-  },
-  spanish_quiz: {
-    name: "spanish_quiz" as const,
-    annotations: WRITE_ADDITIVE,
-    description:
-      "Manage lightweight Spanish spaced-repetition flow: fetch due cards, record a review grade, or get progress stats.",
-    params: z.object({
-      action: spanishActionParam,
-      chat_id: z
-        .string()
-        .min(1)
-        .describe("Chat/user identifier for multi-chat isolation"),
-      vocabulary_id: z
-        .number()
-        .int()
-        .positive()
-        .optional()
-        .describe("Required for action=record_review"),
-      grade: z
-        .number()
-        .int()
-        .min(1)
-        .max(4)
-        .optional()
-        .describe("Review grade 1-4, required for action=record_review"),
-      review_context: z
-        .string()
-        .min(1)
-        .optional()
-        .describe("Optional context tag, e.g. conversation or correction"),
-      limit: limitParam(5, 30),
-    }),
-    examples: [
-      {
-        input: { action: "get_due", chat_id: "123", limit: 5 },
-        behavior:
-          "Returns up to 5 due/new vocabulary cards for this chat",
-      },
-      {
-        input: {
-          action: "record_review",
-          chat_id: "123",
-          vocabulary_id: 42,
-          grade: 3,
-          review_context: "conversation",
-        },
-        behavior:
-          "Stores a review event and schedules the next review date",
-      },
-      {
-        input: { action: "stats", chat_id: "123" },
-        behavior:
-          "Returns vocabulary and review progress statistics",
-      },
-    ],
-  },
-
   get_oura_summary: {
     name: "get_oura_summary" as const,
     annotations: READ_ONLY,
@@ -851,57 +694,6 @@ export const toolSpecs = {
     ],
   },
 
-  start_journal_session: {
-    name: "start_journal_session" as const,
-    annotations: READ_ONLY,
-    description:
-      "Start a guided morning or evening journaling session. Returns the session template (prompt scaffold + agent instructions) " +
-      "and relevant context (Oura biometrics for morning, 7-day entry summaries + weekly Oura for evening). " +
-      "The LLM drives the conversation using the template's system_prompt instructions.",
-    params: z.object({
-      type: z.enum(["morning", "evening"]).describe("Session type: morning (warm, minimal prompts with Oura prefill) or evening (structured interview with 7-day context)"),
-      date: dateString.optional().describe("Target date (default: today). Use for 'do yesterday's evening review'"),
-    }),
-    examples: [
-      {
-        input: { type: "morning" },
-        behavior: "Returns morning template + today's Oura summary. LLM walks through prompts one at a time.",
-      },
-      {
-        input: { type: "evening", date: "2026-03-08" },
-        behavior: "Returns evening template + 7-day entry summaries + weekly Oura for a specific date.",
-      },
-    ],
-  },
-
-  create_entry: {
-    name: "create_entry" as const,
-    annotations: WRITE_ADDITIVE,
-    description:
-      "Create a new journal entry. Used at the end of journaling sessions or for standalone entry creation. " +
-      "Fires embedding generation so the entry is immediately searchable. " +
-      "Tags default to empty. Source defaults to 'mcp' — Telegram agent should pass 'telegram'.",
-    params: z.object({
-      text: z.string().min(1).max(50_000).describe("Journal entry text (markdown supported)"),
-      tags: z.array(z.string().min(1).max(100)).max(20).optional().describe("Tags for the entry"),
-      date: dateString.optional().describe("Entry date in YYYY-MM-DD (default: today)"),
-      timezone: z.string().min(1).max(50).optional().describe("IANA timezone, e.g. 'Europe/Madrid'"),
-      source: z.enum(["mcp", "telegram", "web"]).default("mcp")
-        .describe("Entry source for attribution (default: mcp)"),
-      city: z.string().max(200).optional().describe("City name"),
-    }),
-    examples: [
-      {
-        input: { text: "Morning reflection...", tags: ["morning-journal"] },
-        behavior: "Creates entry with source='mcp', fires embedding, returns uuid and created_at",
-      },
-      {
-        input: { text: "Evening review...", tags: ["evening-review"], source: "telegram" },
-        behavior: "Creates entry attributed to Telegram with specified tags",
-      },
-    ],
-  },
-
 } as const;
 
 // ============================================================================
@@ -932,24 +724,6 @@ export interface ArtifactSearchResult {
   match_sources: ("semantic" | "fulltext")[];
   created_at: string;
   updated_at: string;
-}
-
-export interface SessionResult {
-  template: {
-    body: string;
-    system_prompt: string | null;
-  };
-  context: {
-    oura?: string;
-    entries_summary?: string;
-    oura_week?: string;
-  };
-  date: string;
-}
-
-export interface CreateEntryResult {
-  uuid: string;
-  created_at: string;
 }
 
 export interface UnifiedSearchResult {

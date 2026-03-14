@@ -11,25 +11,12 @@ if (process.env.NODE_ENV === "production") {
 const env = process.env.NODE_ENV || "development";
 const telegramLlmProvider =
   process.env.TELEGRAM_LLM_PROVIDER?.toLowerCase() || "anthropic";
-const telegramVoiceReplyMode =
-  process.env.TELEGRAM_VOICE_REPLY_MODE?.toLowerCase() || "adaptive";
-
 if (
   telegramLlmProvider !== "anthropic" &&
   telegramLlmProvider !== "openai"
 ) {
   throw new Error(
     `Invalid TELEGRAM_LLM_PROVIDER "${telegramLlmProvider}". Use "anthropic" or "openai".`
-  );
-}
-
-if (
-  telegramVoiceReplyMode !== "off" &&
-  telegramVoiceReplyMode !== "adaptive" &&
-  telegramVoiceReplyMode !== "always"
-) {
-  throw new Error(
-    `Invalid TELEGRAM_VOICE_REPLY_MODE "${telegramVoiceReplyMode}". Use "off", "adaptive", or "always".`
   );
 }
 
@@ -43,64 +30,12 @@ function parseIntegerEnv(name: string, fallback: number, min: number): number {
   return value;
 }
 
-function parseBooleanEnv(name: string, fallback: boolean): boolean {
-  const raw = process.env[name];
-  if (!raw) return fallback;
-  const normalized = raw.trim().toLowerCase();
-  if (["1", "true", "yes", "on"].includes(normalized)) return true;
-  if (["0", "false", "no", "off"].includes(normalized)) return false;
-  throw new Error(
-    `${name} must be a boolean (true/false). Received "${raw}".`
-  );
-}
-
-const telegramVoiceReplyEvery = parseIntegerEnv(
-  "TELEGRAM_VOICE_REPLY_EVERY",
-  3,
-  1
-);
-const telegramVoiceReplyMinChars = parseIntegerEnv(
-  "TELEGRAM_VOICE_REPLY_MIN_CHARS",
-  16,
-  1
-);
-const telegramVoiceReplyMaxChars = parseIntegerEnv(
-  "TELEGRAM_VOICE_REPLY_MAX_CHARS",
-  450,
-  16
-);
-const telegramSoulEnabled = parseBooleanEnv("TELEGRAM_SOUL_ENABLED", true);
-const telegramSoulFeedbackEvery = parseIntegerEnv(
-  "TELEGRAM_SOUL_FEEDBACK_EVERY",
-  8,
-  1
-);
-const telegramPulseEnabled = parseBooleanEnv("TELEGRAM_PULSE_ENABLED", true);
-const telegramPulseIntervalHours = parseIntegerEnv(
-  "TELEGRAM_PULSE_INTERVAL_HOURS",
-  24,
-  1
-);
-const insightIntervalHours = parseIntegerEnv("INSIGHT_ENGINE_INTERVAL_HOURS", 24, 1);
-const insightMaxPerDay = parseIntegerEnv("INSIGHT_ENGINE_MAX_PER_DAY", 3, 1);
-const insightDedupWindowDays = parseIntegerEnv("INSIGHT_ENGINE_DEDUP_WINDOW_DAYS", 30, 1);
-
-const checkinEnabled = parseBooleanEnv("CHECKIN_ENABLED", true);
-const checkinIntervalMinutes = parseIntegerEnv("CHECKIN_INTERVAL_MINUTES", 15, 1);
-const checkinIgnoreThreshold = parseIntegerEnv("CHECKIN_IGNORE_THRESHOLD", 3, 1);
-
 const ouraSyncIntervalMinutes = parseIntegerEnv(
   "OURA_SYNC_INTERVAL_MINUTES",
   60,
   1
 );
 const ouraSyncLookbackDays = parseIntegerEnv("OURA_SYNC_LOOKBACK_DAYS", 3, 1);
-
-if (telegramVoiceReplyMinChars > telegramVoiceReplyMaxChars) {
-  throw new Error(
-    "TELEGRAM_VOICE_REPLY_MIN_CHARS must be less than or equal to TELEGRAM_VOICE_REPLY_MAX_CHARS."
-  );
-}
 
 const databaseUrl =
   process.env.DATABASE_URL ||
@@ -176,32 +111,12 @@ export const config = {
     secretToken: process.env.TELEGRAM_SECRET_TOKEN || "",
     allowedChatId: process.env.TELEGRAM_ALLOWED_CHAT_ID || "",
     llmProvider: telegramLlmProvider,
-    voiceReplyMode: telegramVoiceReplyMode,
-    voiceReplyEvery: telegramVoiceReplyEvery,
-    voiceReplyMinChars: telegramVoiceReplyMinChars,
-    voiceReplyMaxChars: telegramVoiceReplyMaxChars,
-    soulEnabled: telegramSoulEnabled,
-    soulFeedbackEvery: telegramSoulFeedbackEvery,
-    pulseEnabled: telegramPulseEnabled,
-    pulseIntervalHours: telegramPulseIntervalHours,
     voiceModel: process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts",
     voiceName: process.env.OPENAI_TTS_VOICE || "alloy",
   },
   anthropic: {
     apiKey: process.env.ANTHROPIC_API_KEY || "",
     model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6",
-  },
-  insights: {
-    intervalHours: insightIntervalHours,
-    maxPerDay: insightMaxPerDay,
-    dedupWindowDays: insightDedupWindowDays,
-    temporalEchoThreshold: 0.75,
-    staleTodoDays: 7,
-  },
-  checkins: {
-    enabled: checkinEnabled,
-    intervalMinutes: checkinIntervalMinutes,
-    ignoreThreshold: checkinIgnoreThreshold,
   },
   oura: {
     accessToken: process.env.OURA_ACCESS_TOKEN || "",
