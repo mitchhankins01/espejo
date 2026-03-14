@@ -27,11 +27,7 @@ const OBSERVABLE_TABLE_NAMES: ObservableDbTableName[] = [
   "activity_logs",
   "chat_messages",
   "patterns",
-  "spanish_vocabulary",
-  "spanish_reviews",
   "daily_metrics",
-  "insights",
-  "checkins",
 ];
 
 type DbTab = "explorer" | "changes";
@@ -85,10 +81,6 @@ function rowDetailLinks(
   if (table === "todos" && typeof row.id === "string") {
     links.push({ to: `/todos/${row.id}`, label: "Open todo" });
   }
-  if (table === "checkins" && typeof row.artifact_id === "string") {
-    links.push({ to: `/${row.artifact_id}`, label: "Open linked artifact" });
-  }
-
   return links;
 }
 
