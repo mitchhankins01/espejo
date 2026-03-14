@@ -1147,6 +1147,16 @@ const migrations: Migration[] = [
       DROP TABLE IF EXISTS user_settings CASCADE;
     `,
   },
+  {
+    name: "032-drop-removed-features-fix",
+    getSql: () => `
+      DROP TABLE IF EXISTS spanish_reviews CASCADE;
+      DROP TABLE IF EXISTS soul_quality_signals CASCADE;
+      DROP TABLE IF EXISTS insights CASCADE;
+      DROP TABLE IF EXISTS checkins CASCADE;
+      DROP TABLE IF EXISTS user_settings CASCADE;
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {
