@@ -18,10 +18,13 @@ describe("get_entries_by_date spec", () => {
     ).toThrow();
   });
 
-  it("rejects missing date_to", () => {
-    expect(() =>
-      validateToolInput("get_entries_by_date", { date_from: "2024-01-01" })
-    ).toThrow();
+  it("defaults date_to to undefined when omitted", () => {
+    const result = validateToolInput("get_entries_by_date", {
+      date_from: "2024-01-01",
+    });
+    expect(result.date_from).toBe("2024-01-01");
+    expect(result.date_to).toBeUndefined();
+    expect(result.limit).toBe(20);
   });
 
   it("rejects invalid date format", () => {

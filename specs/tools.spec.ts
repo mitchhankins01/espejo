@@ -217,7 +217,9 @@ export const toolSpecs = {
       "Entries include somatic reflections and self-reported health data — consider cross-referencing with biometric sources for a complete picture.",
     params: z.object({
       date_from: dateString.describe("Start of date range, inclusive"),
-      date_to: dateString.describe("End of date range, inclusive"),
+      date_to: dateString
+        .optional()
+        .describe("End of date range, inclusive; defaults to today"),
       limit: limitParam(20, 50),
     }),
     examples: [
