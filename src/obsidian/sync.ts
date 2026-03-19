@@ -14,6 +14,7 @@ import {
 } from "../db/queries/artifacts.js";
 import { createClient, listAllObjects, getObjectContent } from "../storage/r2.js";
 import { notifyError } from "../telegram/notify.js";
+import { assessAndNotifyAtomicity } from "./atomicity.js";
 import { parseObsidianNote } from "./parser.js";
 
 // ============================================================================
@@ -97,7 +98,7 @@ export async function runObsidianSync(
     });
 
     // 5. Download and parse in batches
-    const upsertedArtifacts: Array<{ id: string; key: string; wikiLinks: string[] }> = [];
+    const upsertedArtifacts: Array<{ id: string; key: string; wikiLinks: string[]; title: string; body: string }> = [];
 
     for (let i = 0; i < toSync.length; i += DOWNLOAD_CONCURRENCY) {
       const batch = toSync.slice(i, i + DOWNLOAD_CONCURRENCY);
@@ -133,7 +134,7 @@ export async function runObsidianSync(
           );
           await upsertArtifactTags(pool, id, parsed.tags);
 
-          upsertedArtifacts.push({ id, key: item.key, wikiLinks: parsed.wikiLinks });
+          upsertedArtifacts.push({ id, key: item.key, wikiLinks: parsed.wikiLinks, title: parsed.title, body: parsed.body });
           filesSynced++;
         } catch (err) {
           errors.push({ file: item.key, error: err instanceof Error ? err.message : "unknown" });
@@ -172,6 +173,13 @@ export async function runObsidianSync(
         await syncExplicitLinks(pool, artifact.id, targetIds);
         linksResolved += targetIds.length;
       }
+    }
+
+    // 9. Post-sync: atomicity assessment (fire-and-forget)
+    if (upsertedArtifacts.length > 0) {
+      void assessAndNotifyAtomicity(
+        upsertedArtifacts.map((a) => ({ title: a.title, body: a.body }))
+      ).catch((err) => notifyError("Obsidian atomicity", err));
     }
 
     await completeObsidianSyncRun(pool, runId, "success", filesSynced, filesDeleted, linksResolved, errors);
