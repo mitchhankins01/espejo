@@ -12,3 +12,4 @@ export * from "./todos.js";
 export * from "./media.js";
 export * from "./templates.js";
 export * from "./content-search.js";
+export * from "./obsidian.js";

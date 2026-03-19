@@ -104,7 +104,7 @@ export function normalizeTags(tags: string[]): string[] {
 // Private helpers
 // ============================================================================
 
-async function upsertArtifactTags(
+export async function upsertArtifactTags(
   pool: pg.Pool,
   artifactId: string,
   tags: string[]

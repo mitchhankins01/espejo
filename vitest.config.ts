@@ -17,6 +17,10 @@ export default defineConfig({
         "src/db/queries/index.ts",
         "src/oura/analysis.ts",
         "src/oura/analysis/index.ts",
+        "src/storage/r2.ts",
+        "src/obsidian/sync.ts",
+        "src/obsidian/atomicity.ts",
+        "src/db/queries/obsidian.ts",
       ],
       reporter: ["text", "lcov"],
       thresholds: {
