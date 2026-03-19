@@ -1845,7 +1845,7 @@ describe("startHttpServer", () => {
         {
           id: "art-002",
           title: "Two",
-          kind: "theory",
+          kind: "reference",
           tags: ["health", "sleep"],
           has_embedding: true,
         },
@@ -1889,10 +1889,10 @@ describe("startHttpServer", () => {
 
   it("GET /api/artifacts/:id/related returns semantic and explicit links", async () => {
     mockFindSimilarArtifacts.mockResolvedValue([
-      { id: "art-002", title: "Two", kind: "theory", similarity: 0.65 },
+      { id: "art-002", title: "Two", kind: "reference", similarity: 0.65 },
     ]);
     mockGetExplicitLinks.mockResolvedValue([
-      { id: "art-003", title: "Three", kind: "model" },
+      { id: "art-003", title: "Three", kind: "project" },
     ]);
     mockGetExplicitBacklinks.mockResolvedValue([
       { id: "art-004", title: "Four", kind: "note" },
@@ -1914,12 +1914,12 @@ describe("startHttpServer", () => {
       0.3
     );
     expect(mockRes.json).toHaveBeenCalledWith({
-      semantic: [{ id: "art-002", title: "Two", kind: "theory", similarity: 0.65 }],
+      semantic: [{ id: "art-002", title: "Two", kind: "reference", similarity: 0.65 }],
       explicit: [
         {
           id: "art-003",
           title: "Three",
-          kind: "model",
+          kind: "project",
           direction: "outgoing",
         },
         {

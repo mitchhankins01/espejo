@@ -6,13 +6,9 @@ import type { TagCountRow } from "./entries.js";
 // Knowledge artifact types
 // ============================================================================
 
-export type ArtifactKind =
-  | "insight"
-  | "theory"
-  | "model"
-  | "reference"
-  | "note"
-  | "log";
+export type ArtifactKind = "insight" | "reference" | "note" | "project";
+
+export type ArtifactSource = "web" | "obsidian" | "mcp" | "telegram";
 
 export interface ArtifactRow {
   id: string;
@@ -21,6 +17,9 @@ export interface ArtifactRow {
   body: string;
   tags: string[];
   has_embedding: boolean;
+  source: ArtifactSource;
+  source_path: string | null;
+  deleted_at: Date | null;
   created_at: Date;
   updated_at: Date;
   version: number;
@@ -346,7 +345,7 @@ export async function createArtifact(
     `INSERT INTO knowledge_artifacts (kind, title, body)
      VALUES ($1, $2, $3)
      RETURNING id, kind, title, body, (embedding IS NOT NULL) AS has_embedding,
-               created_at, updated_at, version`,
+               source, source_path, deleted_at, created_at, updated_at, version`,
     [data.kind, data.title, data.body]
   );
 
@@ -372,6 +371,9 @@ export async function createArtifact(
     body: row.body as string,
     tags,
     has_embedding: row.has_embedding as boolean,
+    source: row.source as ArtifactSource,
+    source_path: row.source_path as string | null,
+    deleted_at: row.deleted_at as Date | null,
     created_at: row.created_at as Date,
     updated_at: row.updated_at as Date,
     version: row.version as number,
@@ -437,7 +439,7 @@ export async function updateArtifact(
      SET ${setClauses.join(", ")}
      WHERE id = $1
      RETURNING id, kind, title, body, (embedding IS NOT NULL) AS has_embedding,
-               created_at, updated_at, version`,
+               source, source_path, deleted_at, created_at, updated_at, version`,
     setParams
   );
 
@@ -482,6 +484,9 @@ export async function updateArtifact(
     /* v8 ignore next */
     tags: tagsMap.get(id) ?? [],
     has_embedding: row.has_embedding as boolean,
+    source: row.source as ArtifactSource,
+    source_path: row.source_path as string | null,
+    deleted_at: row.deleted_at as Date | null,
     created_at: row.created_at as Date,
     updated_at: row.updated_at as Date,
     version: row.version as number,
@@ -507,7 +512,7 @@ export async function getArtifactById(
 ): Promise<ArtifactRow | null> {
   const result = await pool.query(
     `SELECT id, kind, title, body, (embedding IS NOT NULL) AS has_embedding,
-            created_at, updated_at, version
+            source, source_path, deleted_at, created_at, updated_at, version
      FROM knowledge_artifacts WHERE id = $1`,
     [id]
   );
@@ -529,6 +534,9 @@ export async function getArtifactById(
     /* v8 ignore next */
     tags: tagsMap.get(id) ?? [],
     has_embedding: row.has_embedding as boolean,
+    source: row.source as ArtifactSource,
+    source_path: row.source_path as string | null,
+    deleted_at: row.deleted_at as Date | null,
     created_at: row.created_at as Date,
     updated_at: row.updated_at as Date,
     version: row.version as number,
@@ -579,7 +587,7 @@ export async function listArtifacts(
 
   const result = await pool.query(
     `SELECT id, kind, title, body, (embedding IS NOT NULL) AS has_embedding,
-            created_at, updated_at, version
+            source, source_path, deleted_at, created_at, updated_at, version
      FROM knowledge_artifacts ka
      ${whereClause}
      ORDER BY updated_at DESC
@@ -602,6 +610,9 @@ export async function listArtifacts(
     /* v8 ignore next */
     tags: tagsMap.get(row.id as string) ?? [],
     has_embedding: row.has_embedding as boolean,
+    source: row.source as ArtifactSource,
+    source_path: row.source_path as string | null,
+    deleted_at: row.deleted_at as Date | null,
     created_at: row.created_at as Date,
     updated_at: row.updated_at as Date,
     version: row.version as number,

@@ -125,7 +125,7 @@ describe("handleListArtifacts", () => {
     mockQueries.listArtifacts.mockResolvedValue([makeArtifact()]);
 
     await handleListArtifacts(mockPool, {
-      kind: "theory",
+      kind: "reference",
       tags: ["sleep"],
       tags_mode: "all",
       limit: 5,
@@ -133,7 +133,7 @@ describe("handleListArtifacts", () => {
     });
 
     expect(mockQueries.listArtifacts).toHaveBeenCalledWith(mockPool, {
-      kind: "theory",
+      kind: "reference",
       tags: ["sleep"],
       tags_mode: "all",
       limit: 5,

@@ -331,7 +331,7 @@ export const fixtureArtifacts: FixtureArtifact[] = [
     source_entry_uuids: ["ENTRY-006-HEALTH-NICOTINE"],
   },
   {
-    kind: "theory",
+    kind: "reference",
     title: "Sleep quality is primarily determined by pre-sleep habits",
     body: "Theory: sleep quality correlates more strongly with evening behavior (screen time, caffeine timing, stress) than with sleep environment factors. Evidence from journal entries and HRV data suggests a 2pm caffeine cutoff and 9pm screen cutoff are the two highest-leverage interventions.",
     tags: ["sleep", "health", "habits"],

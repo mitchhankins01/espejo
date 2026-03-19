@@ -29,10 +29,9 @@ export function registerArtifactRoutes(app: Express, deps: RouteDeps): void {
 
   const artifactKindSchema = z.enum([
     "insight",
-    "theory",
-    "model",
     "reference",
     "note",
+    "project",
   ]);
 
   const wikiLinkPattern = /\[\[([^\]]+)\]\]/g;
