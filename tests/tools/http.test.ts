@@ -1630,6 +1630,9 @@ describe("startHttpServer", () => {
     body: "Body",
     tags: ["test"],
     has_embedding: true,
+    source: "web",
+    source_path: null,
+    deleted_at: null,
     created_at: new Date("2025-01-15"),
     updated_at: new Date("2025-01-15"),
     version: 1,
@@ -2072,6 +2075,7 @@ describe("startHttpServer", () => {
   });
 
   it("PUT /api/artifacts/:id updates artifact", async () => {
+    mockGetArtifactById.mockResolvedValue(mockArtifact);
     mockUpdateArtifact.mockResolvedValue(mockArtifact);
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
 
@@ -2091,6 +2095,7 @@ describe("startHttpServer", () => {
   });
 
   it("PUT /api/artifacts/:id returns 409 on version conflict", async () => {
+    mockGetArtifactById.mockResolvedValue(mockArtifact);
     mockUpdateArtifact.mockResolvedValue("version_conflict");
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
 
@@ -2109,7 +2114,7 @@ describe("startHttpServer", () => {
   });
 
   it("PUT /api/artifacts/:id returns 404 when not found", async () => {
-    mockUpdateArtifact.mockResolvedValue(null);
+    mockGetArtifactById.mockResolvedValue(null);
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
 
     const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/artifacts/:id");
@@ -2144,6 +2149,7 @@ describe("startHttpServer", () => {
   });
 
   it("PUT /api/artifacts/:id returns 500 on error", async () => {
+    mockGetArtifactById.mockResolvedValue(mockArtifact);
     mockUpdateArtifact.mockRejectedValue(new Error("db error"));
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
 
@@ -2162,6 +2168,7 @@ describe("startHttpServer", () => {
   });
 
   it("DELETE /api/artifacts/:id deletes artifact", async () => {
+    mockGetArtifactById.mockResolvedValue(mockArtifact);
     mockDeleteArtifact.mockResolvedValue(true);
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
 
@@ -2176,7 +2183,7 @@ describe("startHttpServer", () => {
   });
 
   it("DELETE /api/artifacts/:id returns 404 when not found", async () => {
-    mockDeleteArtifact.mockResolvedValue(false);
+    mockGetArtifactById.mockResolvedValue(null);
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
 
     const call = mockApp.delete.mock.calls.find((c: any[]) => c[0] === "/api/artifacts/:id");
@@ -2190,6 +2197,7 @@ describe("startHttpServer", () => {
   });
 
   it("DELETE /api/artifacts/:id returns 500 on error", async () => {
+    mockGetArtifactById.mockResolvedValue(mockArtifact);
     mockDeleteArtifact.mockRejectedValue(new Error("db error"));
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
 

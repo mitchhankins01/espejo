@@ -74,6 +74,7 @@ export interface ArtifactGraphData {
 
 export interface ListArtifactsFilters {
   kind?: ArtifactKind;
+  source?: ArtifactSource;
   tags?: string[];
   tags_mode?: "any" | "all";
   limit?: number;
@@ -399,15 +400,16 @@ export async function updateArtifact(
     tags?: string[];
     source_entry_uuids?: string[];
   }
-): Promise<ArtifactRow | "version_conflict" | null> {
+): Promise<ArtifactRow | "version_conflict" | "source_protected" | null> {
   // Fetch current state to detect what changed
   const current = await pool.query(
-    `SELECT title, body, kind, version FROM knowledge_artifacts WHERE id = $1`,
+    `SELECT title, body, kind, version, source FROM knowledge_artifacts WHERE id = $1`,
     [id]
   );
   if (current.rows.length === 0) return null;
 
   const currentRow = current.rows[0];
+  if (currentRow.source === "obsidian") return "source_protected";
   if ((currentRow.version as number) !== expectedVersion) return "version_conflict";
 
   const newTitle = data.title ?? (currentRow.title as string);
@@ -565,6 +567,12 @@ export async function listArtifacts(
     params.push(filters.kind);
   }
 
+  if (filters.source) {
+    paramIdx++;
+    whereClauses.push(`ka.source = $${paramIdx}`);
+    params.push(filters.source);
+  }
+
   if (filters.tags && filters.tags.length > 0) {
     paramIdx++;
     const mode = filters.tags_mode ?? "any";
@@ -631,7 +639,7 @@ export async function listArtifacts(
 
 export async function countArtifacts(
   pool: pg.Pool,
-  filters: Pick<ListArtifactsFilters, "kind" | "tags" | "tags_mode">
+  filters: Pick<ListArtifactsFilters, "kind" | "source" | "tags" | "tags_mode">
 ): Promise<number> {
   const whereClauses: string[] = [];
   const params: unknown[] = [];
@@ -641,6 +649,12 @@ export async function countArtifacts(
     paramIdx++;
     whereClauses.push(`kind = $${paramIdx}`);
     params.push(filters.kind);
+  }
+
+  if (filters.source) {
+    paramIdx++;
+    whereClauses.push(`ka.source = $${paramIdx}`);
+    params.push(filters.source);
   }
 
   if (filters.tags && filters.tags.length > 0) {
@@ -671,7 +685,7 @@ export async function searchArtifacts(
   pool: pg.Pool,
   queryEmbedding: number[],
   queryText: string,
-  filters: { kind?: ArtifactKind; tags?: string[]; tags_mode?: "any" | "all" },
+  filters: { kind?: ArtifactKind; source?: ArtifactSource; tags?: string[]; tags_mode?: "any" | "all" },
   limit: number
 ): Promise<ArtifactSearchResultRow[]> {
   const embeddingStr = `[${queryEmbedding.join(",")}]`;
@@ -684,6 +698,12 @@ export async function searchArtifacts(
     paramIdx++;
     filterClauses.push(`a.kind = $${paramIdx}`);
     filterParams.push(filters.kind);
+  }
+
+  if (filters.source) {
+    paramIdx++;
+    filterClauses.push(`a.source = $${paramIdx}`);
+    filterParams.push(filters.source);
   }
 
   if (filters.tags && filters.tags.length > 0) {
@@ -790,7 +810,7 @@ export async function searchArtifacts(
 export async function searchArtifactsKeyword(
   pool: pg.Pool,
   queryText: string,
-  filters: { kind?: ArtifactKind; tags?: string[]; tags_mode?: "any" | "all" },
+  filters: { kind?: ArtifactKind; source?: ArtifactSource; tags?: string[]; tags_mode?: "any" | "all" },
   limit: number
 ): Promise<ArtifactSearchResultRow[]> {
   const filterClauses: string[] = [];
@@ -801,6 +821,12 @@ export async function searchArtifactsKeyword(
     paramIdx++;
     filterClauses.push(`a.kind = $${paramIdx}`);
     filterParams.push(filters.kind);
+  }
+
+  if (filters.source) {
+    paramIdx++;
+    filterClauses.push(`a.source = $${paramIdx}`);
+    filterParams.push(filters.source);
   }
 
   if (filters.tags && filters.tags.length > 0) {

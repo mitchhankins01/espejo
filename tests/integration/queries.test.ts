@@ -1491,6 +1491,16 @@ describe("updateArtifact", () => {
     expect(result).toBeNull();
   });
 
+  it("returns source_protected for obsidian-sourced artifact", async () => {
+    // Create an artifact with source='obsidian'
+    await pool.query(
+      `INSERT INTO knowledge_artifacts (id, kind, title, body, source, source_path)
+       VALUES ('00000000-0000-0000-0000-111111111111', 'note', 'Obsidian Note', 'body', 'obsidian', 'test.md')`
+    );
+    const result = await updateArtifact(pool, "00000000-0000-0000-0000-111111111111", 1, { title: "Changed" });
+    expect(result).toBe("source_protected");
+  });
+
   it("invalidates embedding when title changes", async () => {
     // Use a seeded artifact that has an embedding
     const list = await listArtifacts(pool, { kind: "insight" });
@@ -1649,6 +1659,16 @@ describe("listArtifacts", () => {
     const withSources = all.filter((a) => a.source_entry_uuids.length > 0);
     expect(withSources.length).toBeGreaterThan(0);
   });
+
+  it("filters by source", async () => {
+    const webOnly = await listArtifacts(pool, { source: "web" });
+    for (const a of webOnly) expect(a.source).toBe("web");
+    // All seeded artifacts are source='web', so should match all
+    expect(webOnly.length).toBe(fixtureArtifacts.length);
+    // Filtering by obsidian should return none
+    const obsidianOnly = await listArtifacts(pool, { source: "obsidian" });
+    expect(obsidianOnly.length).toBe(0);
+  });
 });
 
 // ============================================================================
@@ -1702,6 +1722,11 @@ describe("countArtifacts", () => {
     const total = await countArtifacts(pool, { tags: ["health", "sleep"], tags_mode: "all" });
     const list = await listArtifacts(pool, { tags: ["health", "sleep"], tags_mode: "all" });
     expect(total).toBe(list.length);
+  });
+
+  it("counts filtered by source", async () => {
+    const total = await countArtifacts(pool, { source: "obsidian" });
+    expect(total).toBe(0);
   });
 });
 
@@ -1774,6 +1799,16 @@ describe("searchArtifacts", () => {
       expect(r.tags).toContain("sleep");
     }
   });
+
+  it("filters by source", async () => {
+    const emb = await pool.query(
+      `SELECT embedding::text FROM knowledge_artifacts WHERE embedding IS NOT NULL LIMIT 1`
+    );
+    const embedding = emb.rows[0].embedding.slice(1, -1).split(",").map(Number);
+
+    const results = await searchArtifacts(pool, embedding, "health", { source: "obsidian" }, 10);
+    expect(results.length).toBe(0);
+  });
 });
 
 describe("searchArtifactsKeyword", () => {
@@ -1829,6 +1864,11 @@ describe("searchArtifactsKeyword", () => {
       expect(row.tags).toContain("health");
       expect(row.tags).toContain("sleep");
     }
+  });
+
+  it("filters by source", async () => {
+    const results = await searchArtifactsKeyword(pool, "sleep", { source: "obsidian" }, 10);
+    expect(results.length).toBe(0);
   });
 });
 
@@ -1948,6 +1988,17 @@ describe("searchContent", () => {
       workStressEntry.embedding,
       "health nicotine",
       { artifact_tags: ["dopamine"] },
+      20
+    );
+    expect(Array.isArray(results)).toBe(true);
+  });
+
+  it("filters artifacts by artifact_source", async () => {
+    const results = await searchContent(
+      pool,
+      workStressEntry.embedding,
+      "health nicotine",
+      { artifact_source: "web" },
       20
     );
     expect(Array.isArray(results)).toBe(true);

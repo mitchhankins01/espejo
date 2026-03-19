@@ -18,6 +18,7 @@ export async function handleSearchArtifacts(
     params.query,
     {
       kind: params.kind,
+      source: params.source,
       tags: params.tags,
       tags_mode: params.tags_mode,
     },

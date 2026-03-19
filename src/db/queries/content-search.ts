@@ -31,6 +31,7 @@ export async function searchContent(
     city?: string;
     entry_tags?: string[];
     artifact_kind?: ArtifactKind;
+    artifact_source?: string;
     artifact_tags?: string[];
   },
   limit: number
@@ -135,6 +136,11 @@ export async function searchContent(
       artIdx++;
       artClauses.push(`a.kind = $${artIdx}`);
       artParams.push(filters.artifact_kind);
+    }
+    if (filters.artifact_source) {
+      artIdx++;
+      artClauses.push(`a.source = $${artIdx}`);
+      artParams.push(filters.artifact_source);
     }
     if (filters.artifact_tags && filters.artifact_tags.length > 0) {
       artIdx++;

@@ -12,6 +12,8 @@ export interface Artifact {
   body: string;
   tags: string[];
   has_embedding: boolean;
+  source: "web" | "obsidian" | "mcp" | "telegram";
+  source_path: string | null;
   created_at: string;
   updated_at: string;
   version: number;

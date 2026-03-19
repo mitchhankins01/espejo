@@ -28,6 +28,8 @@ import { handleCreateTodo } from "./tools/create-todo.js";
 import { handleUpdateTodo } from "./tools/update-todo.js";
 import { handleCompleteTodo } from "./tools/complete-todo.js";
 import { handleSetTodoFocus } from "./tools/set-todo-focus.js";
+import { handleSyncObsidianVault } from "./tools/sync-obsidian-vault.js";
+import { handleGetObsidianSyncStatus } from "./tools/get-obsidian-sync-status.js";
 
 /** Tool handlers can return a plain string or a rich CallToolResult with audience annotations. */
 export type ToolResult = string | CallToolResult;
@@ -60,6 +62,8 @@ export const toolHandlers: Record<string, ToolHandler> = {
   update_todo: handleUpdateTodo,
   complete_todo: handleCompleteTodo,
   set_todo_focus: handleSetTodoFocus,
+  sync_obsidian_vault: handleSyncObsidianVault,
+  get_obsidian_sync_status: handleGetObsidianSyncStatus,
 };
 
 export function createServer(pool: pg.Pool, version: string): McpServer {
