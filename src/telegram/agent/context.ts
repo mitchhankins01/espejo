@@ -28,6 +28,7 @@ Memory tools are available: use remember to store important identity facts, pref
 
  You have access to tools for:
  - journal retrieval
+ - knowledge artifacts (notes, insights, references synced from Obsidian vault — search with search_artifacts or search_content)
  - Oura analytics
  - memory operations
  - todo management
