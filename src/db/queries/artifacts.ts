@@ -185,6 +185,8 @@ export async function listArtifactTags(
     `SELECT t.name, COUNT(at.artifact_id)::int AS count
      FROM tags t
      JOIN artifact_tags at ON at.tag_id = t.id
+     JOIN knowledge_artifacts ka ON ka.id = at.artifact_id
+     WHERE ka.deleted_at IS NULL
      GROUP BY t.id, t.name
      ORDER BY count DESC, t.name ASC`
   );
@@ -197,6 +199,7 @@ export async function listArtifactTitles(
   const result = await pool.query(
     `SELECT id, title, kind
      FROM knowledge_artifacts
+     WHERE deleted_at IS NULL
      ORDER BY updated_at DESC`
   );
 
@@ -215,6 +218,7 @@ export async function resolveArtifactTitleToId(
     `SELECT id
      FROM knowledge_artifacts
      WHERE lower(title) = lower($1)
+       AND deleted_at IS NULL
      LIMIT 1`,
     [title.trim()]
   );
@@ -257,6 +261,7 @@ export async function getExplicitLinks(
      FROM knowledge_artifacts ka
      JOIN artifact_links al ON al.target_id = ka.id
      WHERE al.source_id = $1
+       AND ka.deleted_at IS NULL
      ORDER BY ka.title ASC`,
     [artifactId]
   );
@@ -277,6 +282,7 @@ export async function getExplicitBacklinks(
      FROM knowledge_artifacts ka
      JOIN artifact_links al ON al.source_id = ka.id
      WHERE al.target_id = $1
+       AND ka.deleted_at IS NULL
      ORDER BY ka.title ASC`,
     [artifactId]
   );
@@ -311,6 +317,7 @@ export async function findSimilarArtifacts(
        WHERE ka.id != s.id
          AND ka.embedding IS NOT NULL
          AND s.embedding IS NOT NULL
+         AND ka.deleted_at IS NULL
        ORDER BY ka.embedding <=> s.embedding
        LIMIT $2
      )
@@ -573,7 +580,8 @@ export async function listArtifacts(
     params.push(normalizeTags(filters.tags));
   }
 
-  const whereClause = whereClauses.length > 0 ? "WHERE " + whereClauses.join(" AND ") : "";
+  whereClauses.push(`ka.deleted_at IS NULL`);
+  const whereClause = "WHERE " + whereClauses.join(" AND ");
   const limit = Math.min(filters.limit ?? 20, 100);
   const offset = filters.offset ?? 0;
 
@@ -650,7 +658,8 @@ export async function countArtifacts(
     params.push(normalizeTags(filters.tags));
   }
 
-  const whereClause = whereClauses.length > 0 ? "WHERE " + whereClauses.join(" AND ") : "";
+  whereClauses.push(`ka.deleted_at IS NULL`);
+  const whereClause = "WHERE " + whereClauses.join(" AND ");
   const result = await pool.query(
     `SELECT count(*)::int AS total FROM knowledge_artifacts ka ${whereClause}`,
     params
@@ -716,6 +725,7 @@ export async function searchArtifacts(
              ROW_NUMBER() OVER (ORDER BY a.embedding <=> p.query_embedding) AS rank_s
       FROM knowledge_artifacts a, params p
       WHERE a.embedding IS NOT NULL
+        AND a.deleted_at IS NULL
       ${filterWhere}
       ORDER BY a.embedding <=> p.query_embedding
       LIMIT 20
@@ -729,8 +739,9 @@ export async function searchArtifacts(
                ) DESC
              ) AS rank_f
       FROM knowledge_artifacts a, params p
-      WHERE a.tsv @@ p.ts_query
-         OR (p.prefix_query IS NOT NULL AND a.tsv @@ p.prefix_query)
+      WHERE (a.tsv @@ p.ts_query
+         OR (p.prefix_query IS NOT NULL AND a.tsv @@ p.prefix_query))
+        AND a.deleted_at IS NULL
       ${filterWhere}
       LIMIT 20
     )
@@ -842,6 +853,7 @@ export async function searchArtifactsKeyword(
         OR lower(a.title) LIKE '%' || p.q_lower || '%'
         OR lower(a.body) LIKE '%' || p.q_lower || '%'
       )
+        AND a.deleted_at IS NULL
       ${filterWhere}
     )
     SELECT
@@ -887,17 +899,24 @@ export async function getArtifactGraph(
       pool.query(
         `SELECT id, title, kind, (embedding IS NOT NULL) AS has_embedding
          FROM knowledge_artifacts
+         WHERE deleted_at IS NULL
          ORDER BY updated_at DESC`
       ),
       pool.query(
-        `SELECT source_id, target_id
-         FROM artifact_links`
+        `SELECT al.source_id, al.target_id
+         FROM artifact_links al
+         JOIN knowledge_artifacts ka1 ON ka1.id = al.source_id
+         JOIN knowledge_artifacts ka2 ON ka2.id = al.target_id
+         WHERE ka1.deleted_at IS NULL AND ka2.deleted_at IS NULL`
       ),
       pool.query(
         `SELECT DISTINCT a1.artifact_id AS artifact_id_1, a2.artifact_id AS artifact_id_2
          FROM knowledge_artifact_sources a1
          JOIN knowledge_artifact_sources a2 ON a1.entry_uuid = a2.entry_uuid
-         WHERE a1.artifact_id < a2.artifact_id`
+         JOIN knowledge_artifacts ka1 ON ka1.id = a1.artifact_id
+         JOIN knowledge_artifacts ka2 ON ka2.id = a2.artifact_id
+         WHERE a1.artifact_id < a2.artifact_id
+           AND ka1.deleted_at IS NULL AND ka2.deleted_at IS NULL`
       ),
       pool.query(
         `SELECT
@@ -909,6 +928,8 @@ export async function getArtifactGraph(
          WHERE a1.id < a2.id
            AND a1.embedding IS NOT NULL
            AND a2.embedding IS NOT NULL
+           AND a1.deleted_at IS NULL
+           AND a2.deleted_at IS NULL
            AND 1 - (a1.embedding <=> a2.embedding) > 0.3`
       ),
     ]);
