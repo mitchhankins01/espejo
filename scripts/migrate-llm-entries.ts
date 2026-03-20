@@ -164,7 +164,6 @@ status: pending
 tags:
 ${tagLines}
 ---
-
 # ${title}
 
 ${body}
@@ -179,9 +178,12 @@ function insightToMarkdown(
   sourceTitle: string
 ): string {
   const tagLines = insight.tags.map((t) => `  - ${t}`).join("\n");
+  const dedupedLinks = insight.linkedTo.filter(
+    (t) => t.toLowerCase() !== sourceTitle.toLowerCase()
+  );
   const links = [
     `[[${sourceTitle}]]`,
-    ...insight.linkedTo.map((t) => `[[${t}]]`),
+    ...dedupedLinks.map((t) => `[[${t}]]`),
   ];
 
   return `---
@@ -190,7 +192,6 @@ status: pending
 tags:
 ${tagLines}
 ---
-
 # ${insight.title}
 
 ${insight.body}
@@ -333,7 +334,6 @@ status: pending
 tags:
 ${tags.map((t) => `  - ${t}`).join("\n")}
 ---
-
 # ${title}
 
 ${entry.text}

@@ -106,9 +106,12 @@ function insightToMarkdown(
   sourceReviewTitle: string
 ): string {
   const tags = insight.tags.map((t) => `  - ${t}`).join("\n");
+  const dedupedLinks = insight.linkedTo.filter(
+    (t) => t.toLowerCase() !== sourceReviewTitle.toLowerCase()
+  );
   const links = [
     `[[${sourceReviewTitle}]]`,
-    ...insight.linkedTo.map((t) => `[[${t}]]`),
+    ...dedupedLinks.map((t) => `[[${t}]]`),
   ];
 
   return `---
@@ -117,7 +120,6 @@ status: pending
 tags:
 ${tags}
 ---
-
 # ${insight.title}
 
 ${insight.body}
