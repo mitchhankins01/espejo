@@ -417,7 +417,7 @@ export const toolSpecs = {
     description:
       "List knowledge artifacts with optional filtering by kind and tags. Ordered by most recently updated.",
     params: z.object({
-      kind: z.enum(["insight", "reference", "note", "project"]).optional().describe("Filter by artifact kind"),
+      kind: z.enum(["insight", "reference", "note", "project", "review"]).optional().describe("Filter by artifact kind"),
       source: z.enum(["web", "obsidian", "mcp", "telegram"]).optional().describe("Filter by source"),
       tags: z.array(z.string()).optional().describe("Filter by tags"),
       tags_mode: z.enum(["any", "all"]).default("any").describe("Tag filter mode: 'any' (overlap) or 'all' (contains all)"),
@@ -444,7 +444,7 @@ export const toolSpecs = {
       "Same RRF approach as search_entries but scoped to artifacts only.",
     params: z.object({
       query: z.string().min(1).describe("Search query"),
-      kind: z.enum(["insight", "reference", "note", "project"]).optional().describe("Filter by artifact kind"),
+      kind: z.enum(["insight", "reference", "note", "project", "review"]).optional().describe("Filter by artifact kind"),
       source: z.enum(["web", "obsidian", "mcp", "telegram"]).optional().describe("Filter by source"),
       tags: z.array(z.string()).optional().describe("Filter by tags"),
       tags_mode: z.enum(["any", "all"]).default("any").describe("Tag filter mode"),
@@ -472,7 +472,7 @@ export const toolSpecs = {
       date_to: dateString.optional().describe("Filter entries up to this date"),
       city: z.string().optional().describe("Filter entries by city"),
       entry_tags: z.array(z.string()).optional().describe("Filter entries by tags"),
-      artifact_kind: z.enum(["insight", "reference", "note", "project"]).optional()
+      artifact_kind: z.enum(["insight", "reference", "note", "project", "review"]).optional()
         .describe("Filter artifacts by kind"),
       artifact_source: z.enum(["web", "obsidian", "mcp", "telegram"]).optional()
         .describe("Filter artifacts by source"),

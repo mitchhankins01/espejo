@@ -20,6 +20,7 @@ export default defineConfig({
         "src/storage/r2.ts",
         "src/obsidian/sync.ts",
         "src/obsidian/atomicity.ts",
+        "src/obsidian/extraction.ts",
         "src/db/queries/obsidian.ts",
       ],
       reporter: ["text", "lcov"],

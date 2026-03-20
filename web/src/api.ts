@@ -1,9 +1,9 @@
 export type ArtifactKind =
   | "insight"
-  | "theory"
-  | "model"
   | "reference"
-  | "note";
+  | "note"
+  | "project"
+  | "review";
 
 export interface Artifact {
   id: string;

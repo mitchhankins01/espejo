@@ -6,9 +6,11 @@ import type { TagCountRow } from "./entries.js";
 // Knowledge artifact types
 // ============================================================================
 
-export type ArtifactKind = "insight" | "reference" | "note" | "project";
+export type ArtifactKind = "insight" | "reference" | "note" | "project" | "review";
 
 export type ArtifactSource = "web" | "obsidian" | "mcp" | "telegram";
+
+export type ArtifactStatus = "pending" | "approved";
 
 export interface ArtifactRow {
   id: string;
@@ -17,6 +19,7 @@ export interface ArtifactRow {
   body: string;
   tags: string[];
   has_embedding: boolean;
+  status: ArtifactStatus;
   source: ArtifactSource;
   source_path: string | null;
   deleted_at: Date | null;
@@ -319,6 +322,7 @@ export async function findSimilarArtifacts(
          AND ka.embedding IS NOT NULL
          AND s.embedding IS NOT NULL
          AND ka.deleted_at IS NULL
+         AND ka.status = 'approved'
        ORDER BY ka.embedding <=> s.embedding
        LIMIT $2
      )
@@ -353,7 +357,7 @@ export async function createArtifact(
     `INSERT INTO knowledge_artifacts (kind, title, body)
      VALUES ($1, $2, $3)
      RETURNING id, kind, title, body, (embedding IS NOT NULL) AS has_embedding,
-               source, source_path, deleted_at, created_at, updated_at, version`,
+               status, source, source_path, deleted_at, created_at, updated_at, version`,
     [data.kind, data.title, data.body]
   );
 
@@ -379,6 +383,8 @@ export async function createArtifact(
     body: row.body as string,
     tags,
     has_embedding: row.has_embedding as boolean,
+    /* v8 ignore next */
+    status: (row.status as ArtifactStatus) ?? "approved",
     source: row.source as ArtifactSource,
     source_path: row.source_path as string | null,
     deleted_at: row.deleted_at as Date | null,
@@ -448,7 +454,7 @@ export async function updateArtifact(
      SET ${setClauses.join(", ")}
      WHERE id = $1
      RETURNING id, kind, title, body, (embedding IS NOT NULL) AS has_embedding,
-               source, source_path, deleted_at, created_at, updated_at, version`,
+               status, source, source_path, deleted_at, created_at, updated_at, version`,
     setParams
   );
 
@@ -493,6 +499,8 @@ export async function updateArtifact(
     /* v8 ignore next */
     tags: tagsMap.get(id) ?? [],
     has_embedding: row.has_embedding as boolean,
+    /* v8 ignore next */
+    status: (row.status as ArtifactStatus) ?? "approved",
     source: row.source as ArtifactSource,
     source_path: row.source_path as string | null,
     deleted_at: row.deleted_at as Date | null,
@@ -521,7 +529,7 @@ export async function getArtifactById(
 ): Promise<ArtifactRow | null> {
   const result = await pool.query(
     `SELECT id, kind, title, body, (embedding IS NOT NULL) AS has_embedding,
-            source, source_path, deleted_at, created_at, updated_at, version
+            status, source, source_path, deleted_at, created_at, updated_at, version
      FROM knowledge_artifacts WHERE id = $1`,
     [id]
   );
@@ -543,6 +551,8 @@ export async function getArtifactById(
     /* v8 ignore next */
     tags: tagsMap.get(id) ?? [],
     has_embedding: row.has_embedding as boolean,
+    /* v8 ignore next */
+    status: (row.status as ArtifactStatus) ?? "approved",
     source: row.source as ArtifactSource,
     source_path: row.source_path as string | null,
     deleted_at: row.deleted_at as Date | null,
@@ -603,7 +613,7 @@ export async function listArtifacts(
 
   const result = await pool.query(
     `SELECT id, kind, title, body, (embedding IS NOT NULL) AS has_embedding,
-            source, source_path, deleted_at, created_at, updated_at, version
+            status, source, source_path, deleted_at, created_at, updated_at, version
      FROM knowledge_artifacts ka
      ${whereClause}
      ORDER BY updated_at DESC
@@ -626,6 +636,8 @@ export async function listArtifacts(
     /* v8 ignore next */
     tags: tagsMap.get(row.id as string) ?? [],
     has_embedding: row.has_embedding as boolean,
+    /* v8 ignore next */
+    status: (row.status as ArtifactStatus) ?? "approved",
     source: row.source as ArtifactSource,
     source_path: row.source_path as string | null,
     deleted_at: row.deleted_at as Date | null,
@@ -746,6 +758,7 @@ export async function searchArtifacts(
       FROM knowledge_artifacts a, params p
       WHERE a.embedding IS NOT NULL
         AND a.deleted_at IS NULL
+        AND a.status = 'approved'
       ${filterWhere}
       ORDER BY a.embedding <=> p.query_embedding
       LIMIT 20
@@ -762,6 +775,7 @@ export async function searchArtifacts(
       WHERE (a.tsv @@ p.ts_query
          OR (p.prefix_query IS NOT NULL AND a.tsv @@ p.prefix_query))
         AND a.deleted_at IS NULL
+        AND a.status = 'approved'
       ${filterWhere}
       LIMIT 20
     )
@@ -880,6 +894,7 @@ export async function searchArtifactsKeyword(
         OR lower(a.body) LIKE '%' || p.q_lower || '%'
       )
         AND a.deleted_at IS NULL
+        AND a.status = 'approved'
       ${filterWhere}
     )
     SELECT

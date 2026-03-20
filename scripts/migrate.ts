@@ -1185,6 +1185,20 @@ const migrations: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_sync_runs_started ON obsidian_sync_runs (started_at DESC)`,
     ],
   },
+  {
+    name: "034-artifact-status-review-kind",
+    getSql: () => `
+      ALTER TABLE knowledge_artifacts
+        ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'approved'
+        CHECK (status IN ('pending', 'approved'));
+
+      ALTER TABLE knowledge_artifacts
+        DROP CONSTRAINT IF EXISTS knowledge_artifacts_kind_check;
+      ALTER TABLE knowledge_artifacts
+        ADD CONSTRAINT knowledge_artifacts_kind_check
+        CHECK (kind IN ('insight', 'reference', 'note', 'project', 'review'));
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

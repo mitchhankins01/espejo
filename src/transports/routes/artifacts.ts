@@ -32,6 +32,7 @@ export function registerArtifactRoutes(app: Express, deps: RouteDeps): void {
     "reference",
     "note",
     "project",
+    "review",
   ]);
 
   const artifactSourceSchema = z.enum(["web", "obsidian", "mcp", "telegram"]);

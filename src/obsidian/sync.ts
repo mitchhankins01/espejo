@@ -15,6 +15,7 @@ import {
 import { createClient, listAllObjects, getObjectContent } from "../storage/r2.js";
 import { notifyError } from "../telegram/notify.js";
 import { assessAndNotifyAtomicity } from "./atomicity.js";
+import { extractAndNotifyReviews } from "./extraction.js";
 import { parseObsidianNote } from "./parser.js";
 
 // ============================================================================
@@ -98,7 +99,7 @@ export async function runObsidianSync(
     });
 
     // 5. Download and parse in batches
-    const upsertedArtifacts: Array<{ id: string; key: string; wikiLinks: string[]; title: string; body: string }> = [];
+    const upsertedArtifacts: Array<{ id: string; key: string; wikiLinks: string[]; title: string; body: string; kind: string }> = [];
 
     for (let i = 0; i < toSync.length; i += DOWNLOAD_CONCURRENCY) {
       const batch = toSync.slice(i, i + DOWNLOAD_CONCURRENCY);
@@ -124,6 +125,7 @@ export async function runObsidianSync(
             title: parsed.title,
             body: parsed.body,
             kind: parsed.kind,
+            status: parsed.status,
             contentHash: item.etag,
           });
 
@@ -134,7 +136,7 @@ export async function runObsidianSync(
           );
           await upsertArtifactTags(pool, id, parsed.tags);
 
-          upsertedArtifacts.push({ id, key: item.key, wikiLinks: parsed.wikiLinks, title: parsed.title, body: parsed.body });
+          upsertedArtifacts.push({ id, key: item.key, wikiLinks: parsed.wikiLinks, title: parsed.title, body: parsed.body, kind: parsed.kind });
           filesSynced++;
         } catch (err) {
           errors.push({ file: item.key, error: err instanceof Error ? err.message : "unknown" });
@@ -180,6 +182,15 @@ export async function runObsidianSync(
       void assessAndNotifyAtomicity(
         upsertedArtifacts.map((a) => ({ title: a.title, body: a.body }))
       ).catch((err) => notifyError("Obsidian atomicity", err));
+    }
+
+    // 10. Post-sync: extract insights from newly synced reviews (fire-and-forget)
+    const newReviews = upsertedArtifacts
+      .filter((a) => a.kind === "review")
+      .map((a) => ({ title: a.title, body: a.body }));
+    if (newReviews.length > 0) {
+      void extractAndNotifyReviews(pool, newReviews)
+        .catch((err) => notifyError("Review extraction", err));
     }
 
     await completeObsidianSyncRun(pool, runId, "success", filesSynced, filesDeleted, linksResolved, errors);

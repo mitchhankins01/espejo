@@ -172,5 +172,23 @@ export async function getObjectContent(
   return await response.Body!.transformToString("utf-8");
 }
 
+/** Upload UTF-8 text content (e.g. markdown notes) to a bucket */
+export async function putObjectContent(
+  client: S3Client,
+  bucket: string,
+  key: string,
+  content: string,
+  contentType = "text/markdown; charset=utf-8"
+): Promise<void> {
+  await client.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: Buffer.from(content, "utf-8"),
+      ContentType: contentType,
+    })
+  );
+}
+
 export { createClient, CONTENT_TYPES };
 export type { S3Client };
