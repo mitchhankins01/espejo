@@ -29,11 +29,12 @@ export function registerArtifactRoutes(app: Express, deps: RouteDeps): void {
 
   const artifactKindSchema = z.enum([
     "insight",
-    "theory",
-    "model",
     "reference",
     "note",
+    "project",
   ]);
+
+  const artifactSourceSchema = z.enum(["web", "obsidian", "mcp", "telegram"]);
 
   const wikiLinkPattern = /\[\[([^\]]+)\]\]/g;
 
@@ -74,6 +75,8 @@ export function registerArtifactRoutes(app: Express, deps: RouteDeps): void {
       /* v8 ignore next */
       const kind = req.query.kind ? artifactKindSchema.parse(req.query.kind) : undefined;
       /* v8 ignore next */
+      const source = req.query.source ? artifactSourceSchema.parse(req.query.source) : undefined;
+      /* v8 ignore next */
       const tags = req.query.tags ? String(req.query.tags).split(",").filter(Boolean) : undefined;
       /* v8 ignore next */
       const tagsMode = (req.query.tags_mode === "all" ? "all" : "any") as "any" | "all";
@@ -89,14 +92,14 @@ export function registerArtifactRoutes(app: Express, deps: RouteDeps): void {
         const results = semantic
           ? await (async () => {
             const embedding = await generateEmbedding(q);
-            return searchArtifacts(pool, embedding, q, { kind, tags, tags_mode: tagsMode }, limit);
+            return searchArtifacts(pool, embedding, q, { kind, source, tags, tags_mode: tagsMode }, limit);
           })()
-          : await searchArtifactsKeyword(pool, q, { kind, tags, tags_mode: tagsMode }, limit);
+          : await searchArtifactsKeyword(pool, q, { kind, source, tags, tags_mode: tagsMode }, limit);
         res.json(results);
       } else {
         const [results, total] = await Promise.all([
-          listArtifacts(pool, { kind, tags, tags_mode: tagsMode, limit, offset }),
-          countArtifacts(pool, { kind, tags, tags_mode: tagsMode }),
+          listArtifacts(pool, { kind, source, tags, tags_mode: tagsMode, limit, offset }),
+          countArtifacts(pool, { kind, source, tags, tags_mode: tagsMode }),
         ]);
         res.json({ items: results, total });
       }
@@ -302,11 +305,23 @@ export function registerArtifactRoutes(app: Express, deps: RouteDeps): void {
     }
 
     try {
+      const existing = await getArtifactById(pool, req.params.id);
+      if (!existing) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+      if (existing.source === "obsidian") {
+        res.status(403).json({ error: "This artifact is synced from Obsidian. Edit in Obsidian instead." });
+        return;
+      }
+
       const { expected_version, ...data } = parsed.data;
       const result = await updateArtifact(pool, req.params.id, expected_version, data);
 
       if (result === null) {
         res.status(404).json({ error: "Not found" });
+      } else if (result === "source_protected") {
+        res.status(403).json({ error: "This artifact is synced from Obsidian. Edit in Obsidian instead." });
       } else if (result === "version_conflict") {
         res.status(409).json({ error: "Version conflict. Reload and try again." });
       } else {
@@ -325,6 +340,16 @@ export function registerArtifactRoutes(app: Express, deps: RouteDeps): void {
     if (!requireBearerAuth(req, res, secret)) return;
 
     try {
+      const existing = await getArtifactById(pool, req.params.id);
+      if (!existing) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+      if (existing.source === "obsidian") {
+        res.status(403).json({ error: "This artifact is synced from Obsidian. Delete from your vault instead." });
+        return;
+      }
+
       const deleted = await deleteArtifact(pool, req.params.id);
       if (!deleted) {
         res.status(404).json({ error: "Not found" });

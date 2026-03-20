@@ -132,8 +132,8 @@ async function embedEntries(force: boolean): Promise<void> {
   // Phase 2: Embed knowledge artifacts
   // ---------------------------------------------------------------------------
   const artifactWhere = force
-    ? "WHERE body IS NOT NULL"
-    : "WHERE embedding IS NULL AND body IS NOT NULL";
+    ? "WHERE body IS NOT NULL AND deleted_at IS NULL"
+    : "WHERE embedding IS NULL AND body IS NOT NULL AND deleted_at IS NULL";
   const artifactCountResult = await pool.query(
     `SELECT COUNT(*)::int AS count FROM knowledge_artifacts ${artifactWhere}`
   );

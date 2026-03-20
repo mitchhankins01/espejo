@@ -20,12 +20,12 @@ describe("search_artifacts spec", () => {
   it("accepts optional filters", () => {
     const result = validateToolInput("search_artifacts", {
       query: "test",
-      kind: "theory",
+      kind: "reference",
       tags: ["health"],
       tags_mode: "all",
       limit: 20,
     });
-    expect(result.kind).toBe("theory");
+    expect(result.kind).toBe("reference");
     expect(result.tags).toEqual(["health"]);
     expect(result.tags_mode).toBe("all");
     expect(result.limit).toBe(20);

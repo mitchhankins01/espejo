@@ -1630,6 +1630,9 @@ describe("startHttpServer", () => {
     body: "Body",
     tags: ["test"],
     has_embedding: true,
+    source: "web",
+    source_path: null,
+    deleted_at: null,
     created_at: new Date("2025-01-15"),
     updated_at: new Date("2025-01-15"),
     version: 1,
@@ -1845,7 +1848,7 @@ describe("startHttpServer", () => {
         {
           id: "art-002",
           title: "Two",
-          kind: "theory",
+          kind: "reference",
           tags: ["health", "sleep"],
           has_embedding: true,
         },
@@ -1889,10 +1892,10 @@ describe("startHttpServer", () => {
 
   it("GET /api/artifacts/:id/related returns semantic and explicit links", async () => {
     mockFindSimilarArtifacts.mockResolvedValue([
-      { id: "art-002", title: "Two", kind: "theory", similarity: 0.65 },
+      { id: "art-002", title: "Two", kind: "reference", similarity: 0.65 },
     ]);
     mockGetExplicitLinks.mockResolvedValue([
-      { id: "art-003", title: "Three", kind: "model" },
+      { id: "art-003", title: "Three", kind: "project" },
     ]);
     mockGetExplicitBacklinks.mockResolvedValue([
       { id: "art-004", title: "Four", kind: "note" },
@@ -1914,12 +1917,12 @@ describe("startHttpServer", () => {
       0.3
     );
     expect(mockRes.json).toHaveBeenCalledWith({
-      semantic: [{ id: "art-002", title: "Two", kind: "theory", similarity: 0.65 }],
+      semantic: [{ id: "art-002", title: "Two", kind: "reference", similarity: 0.65 }],
       explicit: [
         {
           id: "art-003",
           title: "Three",
-          kind: "model",
+          kind: "project",
           direction: "outgoing",
         },
         {
@@ -2072,6 +2075,7 @@ describe("startHttpServer", () => {
   });
 
   it("PUT /api/artifacts/:id updates artifact", async () => {
+    mockGetArtifactById.mockResolvedValue(mockArtifact);
     mockUpdateArtifact.mockResolvedValue(mockArtifact);
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
 
@@ -2091,6 +2095,7 @@ describe("startHttpServer", () => {
   });
 
   it("PUT /api/artifacts/:id returns 409 on version conflict", async () => {
+    mockGetArtifactById.mockResolvedValue(mockArtifact);
     mockUpdateArtifact.mockResolvedValue("version_conflict");
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
 
@@ -2109,7 +2114,7 @@ describe("startHttpServer", () => {
   });
 
   it("PUT /api/artifacts/:id returns 404 when not found", async () => {
-    mockUpdateArtifact.mockResolvedValue(null);
+    mockGetArtifactById.mockResolvedValue(null);
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
 
     const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/artifacts/:id");
@@ -2144,6 +2149,7 @@ describe("startHttpServer", () => {
   });
 
   it("PUT /api/artifacts/:id returns 500 on error", async () => {
+    mockGetArtifactById.mockResolvedValue(mockArtifact);
     mockUpdateArtifact.mockRejectedValue(new Error("db error"));
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
 
@@ -2162,6 +2168,7 @@ describe("startHttpServer", () => {
   });
 
   it("DELETE /api/artifacts/:id deletes artifact", async () => {
+    mockGetArtifactById.mockResolvedValue(mockArtifact);
     mockDeleteArtifact.mockResolvedValue(true);
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
 
@@ -2176,7 +2183,7 @@ describe("startHttpServer", () => {
   });
 
   it("DELETE /api/artifacts/:id returns 404 when not found", async () => {
-    mockDeleteArtifact.mockResolvedValue(false);
+    mockGetArtifactById.mockResolvedValue(null);
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
 
     const call = mockApp.delete.mock.calls.find((c: any[]) => c[0] === "/api/artifacts/:id");
@@ -2190,6 +2197,7 @@ describe("startHttpServer", () => {
   });
 
   it("DELETE /api/artifacts/:id returns 500 on error", async () => {
+    mockGetArtifactById.mockResolvedValue(mockArtifact);
     mockDeleteArtifact.mockRejectedValue(new Error("db error"));
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
 

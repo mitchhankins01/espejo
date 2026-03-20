@@ -3,6 +3,8 @@ import {
   PutObjectCommand,
   HeadObjectCommand,
   DeleteObjectCommand,
+  ListObjectsV2Command,
+  GetObjectCommand,
 } from "@aws-sdk/client-s3";
 import fs from "fs";
 import path from "path";
@@ -113,6 +115,61 @@ export async function deleteMediaObject(
   } catch {
     // Best-effort delete — log but don't throw
   }
+}
+
+// ============================================================================
+// Generic object operations (used by Obsidian vault sync)
+// ============================================================================
+
+/** Metadata for an R2 object from ListObjectsV2 */
+export interface R2ObjectMeta {
+  key: string;
+  etag: string;
+  size: number;
+}
+
+/** List all objects in a bucket, handling pagination (>1000 files) */
+export async function listAllObjects(
+  client: S3Client,
+  bucket: string,
+  prefix?: string
+): Promise<R2ObjectMeta[]> {
+  const results: R2ObjectMeta[] = [];
+  let continuationToken: string | undefined;
+  do {
+    const response = await client.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: prefix,
+        ContinuationToken: continuationToken,
+      })
+    );
+    for (const obj of response.Contents ?? []) {
+      if (obj.Key && obj.ETag) {
+        results.push({
+          key: obj.Key,
+          etag: obj.ETag.replace(/"/g, ""),
+          size: obj.Size ?? 0,
+        });
+      }
+    }
+    continuationToken = response.IsTruncated
+      ? response.NextContinuationToken
+      : undefined;
+  } while (continuationToken);
+  return results;
+}
+
+/** Download object content as UTF-8 string */
+export async function getObjectContent(
+  client: S3Client,
+  bucket: string,
+  key: string
+): Promise<string> {
+  const response = await client.send(
+    new GetObjectCommand({ Bucket: bucket, Key: key })
+  );
+  return await response.Body!.transformToString("utf-8");
 }
 
 export { createClient, CONTENT_TYPES };

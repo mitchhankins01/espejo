@@ -31,6 +31,7 @@ export async function searchContent(
     city?: string;
     entry_tags?: string[];
     artifact_kind?: ArtifactKind;
+    artifact_source?: string;
     artifact_tags?: string[];
   },
   limit: number
@@ -136,6 +137,11 @@ export async function searchContent(
       artClauses.push(`a.kind = $${artIdx}`);
       artParams.push(filters.artifact_kind);
     }
+    if (filters.artifact_source) {
+      artIdx++;
+      artClauses.push(`a.source = $${artIdx}`);
+      artParams.push(filters.artifact_source);
+    }
     if (filters.artifact_tags && filters.artifact_tags.length > 0) {
       artIdx++;
       artClauses.push(
@@ -154,6 +160,7 @@ export async function searchContent(
                ROW_NUMBER() OVER (ORDER BY a.embedding <=> p.query_embedding) AS rank_s
         FROM knowledge_artifacts a, params p
         WHERE a.embedding IS NOT NULL
+          AND a.deleted_at IS NULL
         ${artFilterWhere}
         ORDER BY a.embedding <=> p.query_embedding
         LIMIT 20
@@ -163,6 +170,7 @@ export async function searchContent(
                ROW_NUMBER() OVER (ORDER BY ts_rank(a.tsv, p.ts_query) DESC) AS rank_f
         FROM knowledge_artifacts a, params p
         WHERE a.tsv @@ p.ts_query
+          AND a.deleted_at IS NULL
         ${artFilterWhere}
         LIMIT 20
       )

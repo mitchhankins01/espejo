@@ -23,6 +23,7 @@ export async function handleSearchContent(
       city: params.city,
       entry_tags: params.entry_tags,
       artifact_kind: params.artifact_kind,
+      artifact_source: params.artifact_source,
       artifact_tags: params.artifact_tags,
     },
     params.limit

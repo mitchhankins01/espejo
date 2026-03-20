@@ -1473,7 +1473,7 @@ describe("updateArtifact", () => {
 
   it("returns version_conflict on stale version", async () => {
     const created = await createArtifact(pool, {
-      kind: "theory",
+      kind: "reference",
       title: "Conflict test",
       body: "body",
     });
@@ -1491,6 +1491,16 @@ describe("updateArtifact", () => {
     expect(result).toBeNull();
   });
 
+  it("returns source_protected for obsidian-sourced artifact", async () => {
+    // Create an artifact with source='obsidian'
+    await pool.query(
+      `INSERT INTO knowledge_artifacts (id, kind, title, body, source, source_path)
+       VALUES ('00000000-0000-0000-0000-111111111111', 'note', 'Obsidian Note', 'body', 'obsidian', 'test.md')`
+    );
+    const result = await updateArtifact(pool, "00000000-0000-0000-0000-111111111111", 1, { title: "Changed" });
+    expect(result).toBe("source_protected");
+  });
+
   it("invalidates embedding when title changes", async () => {
     // Use a seeded artifact that has an embedding
     const list = await listArtifacts(pool, { kind: "insight" });
@@ -1505,7 +1515,7 @@ describe("updateArtifact", () => {
   });
 
   it("invalidates embedding when body changes", async () => {
-    const list = await listArtifacts(pool, { kind: "theory" });
+    const list = await listArtifacts(pool, { kind: "reference" });
     const seeded = list[0];
     expect(seeded.has_embedding).toBe(true);
 
@@ -1523,17 +1533,17 @@ describe("updateArtifact", () => {
     expect(seeded).toBeDefined();
 
     const updated = await updateArtifact(pool, seeded!.id, seeded!.version, {
-      kind: "model",
+      kind: "project",
       tags: ["updated-tag"],
     });
     const art = updated as Exclude<typeof updated, "version_conflict" | null>;
     expect(art.has_embedding).toBe(true);
-    expect(art.kind).toBe("model");
+    expect(art.kind).toBe("project");
   });
 
   it("updates source entry links", async () => {
     const created = await createArtifact(pool, {
-      kind: "model",
+      kind: "project",
       title: "Source test",
       body: "body",
       source_entry_uuids: ["ENTRY-001-WORK-STRESS"],
@@ -1649,6 +1659,16 @@ describe("listArtifacts", () => {
     const withSources = all.filter((a) => a.source_entry_uuids.length > 0);
     expect(withSources.length).toBeGreaterThan(0);
   });
+
+  it("filters by source", async () => {
+    const webOnly = await listArtifacts(pool, { source: "web" });
+    for (const a of webOnly) expect(a.source).toBe("web");
+    // All seeded artifacts are source='web', so should match all
+    expect(webOnly.length).toBe(fixtureArtifacts.length);
+    // Filtering by obsidian should return none
+    const obsidianOnly = await listArtifacts(pool, { source: "obsidian" });
+    expect(obsidianOnly.length).toBe(0);
+  });
 });
 
 // ============================================================================
@@ -1703,6 +1723,11 @@ describe("countArtifacts", () => {
     const list = await listArtifacts(pool, { tags: ["health", "sleep"], tags_mode: "all" });
     expect(total).toBe(list.length);
   });
+
+  it("counts filtered by source", async () => {
+    const total = await countArtifacts(pool, { source: "obsidian" });
+    expect(total).toBe(0);
+  });
 });
 
 // ============================================================================
@@ -1744,9 +1769,9 @@ describe("searchArtifacts", () => {
     );
     const embedding = emb.rows[0].embedding.slice(1, -1).split(",").map(Number);
 
-    const results = await searchArtifacts(pool, embedding, "health", { kind: "theory" }, 10);
+    const results = await searchArtifacts(pool, embedding, "health", { kind: "reference" }, 10);
     for (const r of results) {
-      expect(r.kind).toBe("theory");
+      expect(r.kind).toBe("reference");
     }
   });
 
@@ -1774,6 +1799,16 @@ describe("searchArtifacts", () => {
       expect(r.tags).toContain("sleep");
     }
   });
+
+  it("filters by source", async () => {
+    const emb = await pool.query(
+      `SELECT embedding::text FROM knowledge_artifacts WHERE embedding IS NOT NULL LIMIT 1`
+    );
+    const embedding = emb.rows[0].embedding.slice(1, -1).split(",").map(Number);
+
+    const results = await searchArtifacts(pool, embedding, "health", { source: "obsidian" }, 10);
+    expect(results.length).toBe(0);
+  });
 });
 
 describe("searchArtifactsKeyword", () => {
@@ -1796,9 +1831,9 @@ describe("searchArtifactsKeyword", () => {
   });
 
   it("supports kind filter and tag filters in any/all modes", async () => {
-    const byKind = await searchArtifactsKeyword(pool, "sleep", { kind: "theory" }, 10);
+    const byKind = await searchArtifactsKeyword(pool, "sleep", { kind: "reference" }, 10);
     expect(byKind.length).toBeGreaterThan(0);
-    for (const row of byKind) expect(row.kind).toBe("theory");
+    for (const row of byKind) expect(row.kind).toBe("reference");
 
     const byTagsAny = await searchArtifactsKeyword(
       pool,
@@ -1829,6 +1864,11 @@ describe("searchArtifactsKeyword", () => {
       expect(row.tags).toContain("health");
       expect(row.tags).toContain("sleep");
     }
+  });
+
+  it("filters by source", async () => {
+    const results = await searchArtifactsKeyword(pool, "sleep", { source: "obsidian" }, 10);
+    expect(results.length).toBe(0);
   });
 });
 
@@ -1917,7 +1957,7 @@ describe("searchContent", () => {
       pool,
       workStressEntry.embedding,
       "health sleep",
-      { artifact_kind: "theory" },
+      { artifact_kind: "reference" },
       20
     );
     // Any artifact results should be theories
@@ -1925,7 +1965,7 @@ describe("searchContent", () => {
     if (artifacts.length > 0) {
       // We can verify by fetching the artifact
       const art = await getArtifactById(pool, artifacts[0].id);
-      expect(art?.kind).toBe("theory");
+      expect(art?.kind).toBe("reference");
     }
   });
 
@@ -1948,6 +1988,17 @@ describe("searchContent", () => {
       workStressEntry.embedding,
       "health nicotine",
       { artifact_tags: ["dopamine"] },
+      20
+    );
+    expect(Array.isArray(results)).toBe(true);
+  });
+
+  it("filters artifacts by artifact_source", async () => {
+    const results = await searchContent(
+      pool,
+      workStressEntry.embedding,
+      "health nicotine",
+      { artifact_source: "web" },
       20
     );
     expect(Array.isArray(results)).toBe(true);
@@ -2022,12 +2073,12 @@ describe("artifact title + link queries", () => {
       body: "Body",
     });
     const alpha = await createArtifact(pool, {
-      kind: "theory",
+      kind: "reference",
       title: "Alpha Target",
       body: "Body",
     });
     const beta = await createArtifact(pool, {
-      kind: "model",
+      kind: "project",
       title: "Beta Target",
       body: "Body",
     });
@@ -2057,7 +2108,7 @@ describe("artifact title + link queries", () => {
       body: "Body",
     });
     const target = await createArtifact(pool, {
-      kind: "theory",
+      kind: "reference",
       title: "Similarity Target",
       body: "Body",
     });
@@ -2089,7 +2140,7 @@ describe("artifact title + link queries", () => {
       source_entry_uuids: ["ENTRY-001-WORK-STRESS"],
     });
     const second = await createArtifact(pool, {
-      kind: "theory",
+      kind: "reference",
       title: "Graph B",
       body: "Body B",
       source_entry_uuids: ["ENTRY-001-WORK-STRESS"],

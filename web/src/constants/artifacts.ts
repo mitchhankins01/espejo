@@ -1,10 +1,8 @@
 export const ARTIFACT_KINDS = [
   "insight",
-  "log",
-  "model",
   "note",
+  "project",
   "reference",
-  "theory",
 ] as const;
 
 export const ARTIFACT_KIND_FILTERS = ["", ...ARTIFACT_KINDS] as const;
@@ -15,11 +13,9 @@ export const ARTIFACT_KIND_LABELS: Record<
 > = {
   "": "All",
   insight: "Insight",
-  log: "Log",
-  theory: "Theory",
-  model: "Model",
-  reference: "Reference",
   note: "Note",
+  project: "Project",
+  reference: "Reference",
 };
 
 export const ARTIFACT_BADGE_COLORS: Record<
@@ -27,9 +23,7 @@ export const ARTIFACT_BADGE_COLORS: Record<
   string
 > = {
   insight: "bg-badge-insight-bg text-badge-insight-text",
-  log: "bg-badge-note-bg text-badge-note-text",
-  theory: "bg-badge-theory-bg text-badge-theory-text",
-  model: "bg-badge-model-bg text-badge-model-text",
-  reference: "bg-badge-reference-bg text-badge-reference-text",
   note: "bg-badge-note-bg text-badge-note-text",
+  project: "bg-badge-theory-bg text-badge-theory-text",
+  reference: "bg-badge-reference-bg text-badge-reference-text",
 };

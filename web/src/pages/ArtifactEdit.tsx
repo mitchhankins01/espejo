@@ -149,6 +149,8 @@ export function ArtifactEdit() {
     );
   }
 
+  const isObsidian = artifact?.source === "obsidian";
+
   if (!artifact && error) {
     return (
       <div className="max-w-3xl mx-auto px-4 py-8">
@@ -177,23 +179,31 @@ export function ArtifactEdit() {
           </Link>
           <h1 className="text-xl font-semibold text-text-primary">Edit Artifact</h1>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            className="px-4 py-2 rounded-lg bg-pine-600 dark:bg-pine-500 text-white text-sm font-medium hover:bg-pine-700 dark:hover:bg-pine-400 transition-colors disabled:opacity-50"
-            onClick={handleSave}
-            disabled={saving || !title.trim() || !body.trim()}
-          >
-            {saving ? "Saving..." : "Save"}
-          </button>
-          <button
-            className="px-4 py-2 rounded-lg text-red-600 dark:text-red-400 border border-red-300 dark:border-red-700 text-sm font-medium hover:bg-red-600 hover:text-white dark:hover:bg-red-500 transition-colors disabled:opacity-50"
-            onClick={handleDelete}
-            disabled={deleting}
-          >
-            {deleting ? "Deleting..." : "Delete"}
-          </button>
-        </div>
+        {!isObsidian && (
+          <div className="flex items-center gap-2">
+            <button
+              className="px-4 py-2 rounded-lg bg-pine-600 dark:bg-pine-500 text-white text-sm font-medium hover:bg-pine-700 dark:hover:bg-pine-400 transition-colors disabled:opacity-50"
+              onClick={handleSave}
+              disabled={saving || !title.trim() || !body.trim()}
+            >
+              {saving ? "Saving..." : "Save"}
+            </button>
+            <button
+              className="px-4 py-2 rounded-lg text-red-600 dark:text-red-400 border border-red-300 dark:border-red-700 text-sm font-medium hover:bg-red-600 hover:text-white dark:hover:bg-red-500 transition-colors disabled:opacity-50"
+              onClick={handleDelete}
+              disabled={deleting}
+            >
+              {deleting ? "Deleting..." : "Delete"}
+            </button>
+          </div>
+        )}
       </div>
+
+      {isObsidian && (
+        <div className="text-amber-800 dark:text-amber-200 text-sm bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-700 rounded-lg px-4 py-3 mb-4">
+          This artifact is synced from Obsidian and cannot be edited here. Make changes in your Obsidian vault instead.
+        </div>
+      )}
 
       {error && (
         <div className="text-red-600 dark:text-red-400 text-sm bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg px-4 py-3 mb-4">
@@ -201,7 +211,7 @@ export function ArtifactEdit() {
         </div>
       )}
 
-      <div className="flex flex-col gap-5">
+      <div className={`flex flex-col gap-5${isObsidian ? " pointer-events-none opacity-60" : ""}`}>
         <div className="flex gap-3 max-sm:flex-col">
           <div className="w-40 max-sm:w-full shrink-0">
             <label

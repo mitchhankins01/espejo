@@ -1157,6 +1157,34 @@ const migrations: Migration[] = [
       DROP TABLE IF EXISTS user_settings CASCADE;
     `,
   },
+  {
+    name: "033-obsidian-vault-sync",
+    getSql: () => `
+      UPDATE knowledge_artifacts SET kind = 'note' WHERE kind IN ('theory', 'model', 'log');
+
+      ALTER TABLE knowledge_artifacts ADD COLUMN IF NOT EXISTS source_path TEXT;
+      ALTER TABLE knowledge_artifacts ADD COLUMN IF NOT EXISTS content_hash TEXT;
+      ALTER TABLE knowledge_artifacts ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+    `,
+    rawStatements: [
+      `ALTER TABLE knowledge_artifacts ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'web' CHECK (source IN ('web', 'obsidian', 'mcp', 'telegram'))`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_artifacts_source_path ON knowledge_artifacts (source_path) WHERE source_path IS NOT NULL`,
+      `CREATE INDEX IF NOT EXISTS idx_artifacts_title_lower ON knowledge_artifacts (lower(title))`,
+      `ALTER TABLE knowledge_artifacts DROP CONSTRAINT IF EXISTS knowledge_artifacts_kind_check`,
+      `ALTER TABLE knowledge_artifacts ADD CONSTRAINT knowledge_artifacts_kind_check CHECK (kind IN ('insight', 'reference', 'note', 'project'))`,
+      `CREATE TABLE IF NOT EXISTS obsidian_sync_runs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        finished_at TIMESTAMPTZ,
+        status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'success', 'error')),
+        files_synced INT NOT NULL DEFAULT 0,
+        files_deleted INT NOT NULL DEFAULT 0,
+        links_resolved INT NOT NULL DEFAULT 0,
+        errors JSONB NOT NULL DEFAULT '[]'::jsonb
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_sync_runs_started ON obsidian_sync_runs (started_at DESC)`,
+    ],
+  },
 ];
 
 async function migrate(): Promise<void> {

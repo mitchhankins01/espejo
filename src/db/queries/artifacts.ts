@@ -6,13 +6,9 @@ import type { TagCountRow } from "./entries.js";
 // Knowledge artifact types
 // ============================================================================
 
-export type ArtifactKind =
-  | "insight"
-  | "theory"
-  | "model"
-  | "reference"
-  | "note"
-  | "log";
+export type ArtifactKind = "insight" | "reference" | "note" | "project";
+
+export type ArtifactSource = "web" | "obsidian" | "mcp" | "telegram";
 
 export interface ArtifactRow {
   id: string;
@@ -21,6 +17,9 @@ export interface ArtifactRow {
   body: string;
   tags: string[];
   has_embedding: boolean;
+  source: ArtifactSource;
+  source_path: string | null;
+  deleted_at: Date | null;
   created_at: Date;
   updated_at: Date;
   version: number;
@@ -75,6 +74,7 @@ export interface ArtifactGraphData {
 
 export interface ListArtifactsFilters {
   kind?: ArtifactKind;
+  source?: ArtifactSource;
   tags?: string[];
   tags_mode?: "any" | "all";
   limit?: number;
@@ -105,7 +105,7 @@ export function normalizeTags(tags: string[]): string[] {
 // Private helpers
 // ============================================================================
 
-async function upsertArtifactTags(
+export async function upsertArtifactTags(
   pool: pg.Pool,
   artifactId: string,
   tags: string[]
@@ -186,6 +186,8 @@ export async function listArtifactTags(
     `SELECT t.name, COUNT(at.artifact_id)::int AS count
      FROM tags t
      JOIN artifact_tags at ON at.tag_id = t.id
+     JOIN knowledge_artifacts ka ON ka.id = at.artifact_id
+     WHERE ka.deleted_at IS NULL
      GROUP BY t.id, t.name
      ORDER BY count DESC, t.name ASC`
   );
@@ -198,6 +200,7 @@ export async function listArtifactTitles(
   const result = await pool.query(
     `SELECT id, title, kind
      FROM knowledge_artifacts
+     WHERE deleted_at IS NULL
      ORDER BY updated_at DESC`
   );
 
@@ -216,6 +219,7 @@ export async function resolveArtifactTitleToId(
     `SELECT id
      FROM knowledge_artifacts
      WHERE lower(title) = lower($1)
+       AND deleted_at IS NULL
      LIMIT 1`,
     [title.trim()]
   );
@@ -258,6 +262,7 @@ export async function getExplicitLinks(
      FROM knowledge_artifacts ka
      JOIN artifact_links al ON al.target_id = ka.id
      WHERE al.source_id = $1
+       AND ka.deleted_at IS NULL
      ORDER BY ka.title ASC`,
     [artifactId]
   );
@@ -278,6 +283,7 @@ export async function getExplicitBacklinks(
      FROM knowledge_artifacts ka
      JOIN artifact_links al ON al.source_id = ka.id
      WHERE al.target_id = $1
+       AND ka.deleted_at IS NULL
      ORDER BY ka.title ASC`,
     [artifactId]
   );
@@ -312,6 +318,7 @@ export async function findSimilarArtifacts(
        WHERE ka.id != s.id
          AND ka.embedding IS NOT NULL
          AND s.embedding IS NOT NULL
+         AND ka.deleted_at IS NULL
        ORDER BY ka.embedding <=> s.embedding
        LIMIT $2
      )
@@ -346,7 +353,7 @@ export async function createArtifact(
     `INSERT INTO knowledge_artifacts (kind, title, body)
      VALUES ($1, $2, $3)
      RETURNING id, kind, title, body, (embedding IS NOT NULL) AS has_embedding,
-               created_at, updated_at, version`,
+               source, source_path, deleted_at, created_at, updated_at, version`,
     [data.kind, data.title, data.body]
   );
 
@@ -372,6 +379,9 @@ export async function createArtifact(
     body: row.body as string,
     tags,
     has_embedding: row.has_embedding as boolean,
+    source: row.source as ArtifactSource,
+    source_path: row.source_path as string | null,
+    deleted_at: row.deleted_at as Date | null,
     created_at: row.created_at as Date,
     updated_at: row.updated_at as Date,
     version: row.version as number,
@@ -390,15 +400,16 @@ export async function updateArtifact(
     tags?: string[];
     source_entry_uuids?: string[];
   }
-): Promise<ArtifactRow | "version_conflict" | null> {
+): Promise<ArtifactRow | "version_conflict" | "source_protected" | null> {
   // Fetch current state to detect what changed
   const current = await pool.query(
-    `SELECT title, body, kind, version FROM knowledge_artifacts WHERE id = $1`,
+    `SELECT title, body, kind, version, source FROM knowledge_artifacts WHERE id = $1`,
     [id]
   );
   if (current.rows.length === 0) return null;
 
   const currentRow = current.rows[0];
+  if (currentRow.source === "obsidian") return "source_protected";
   if ((currentRow.version as number) !== expectedVersion) return "version_conflict";
 
   const newTitle = data.title ?? (currentRow.title as string);
@@ -437,7 +448,7 @@ export async function updateArtifact(
      SET ${setClauses.join(", ")}
      WHERE id = $1
      RETURNING id, kind, title, body, (embedding IS NOT NULL) AS has_embedding,
-               created_at, updated_at, version`,
+               source, source_path, deleted_at, created_at, updated_at, version`,
     setParams
   );
 
@@ -482,6 +493,9 @@ export async function updateArtifact(
     /* v8 ignore next */
     tags: tagsMap.get(id) ?? [],
     has_embedding: row.has_embedding as boolean,
+    source: row.source as ArtifactSource,
+    source_path: row.source_path as string | null,
+    deleted_at: row.deleted_at as Date | null,
     created_at: row.created_at as Date,
     updated_at: row.updated_at as Date,
     version: row.version as number,
@@ -507,7 +521,7 @@ export async function getArtifactById(
 ): Promise<ArtifactRow | null> {
   const result = await pool.query(
     `SELECT id, kind, title, body, (embedding IS NOT NULL) AS has_embedding,
-            created_at, updated_at, version
+            source, source_path, deleted_at, created_at, updated_at, version
      FROM knowledge_artifacts WHERE id = $1`,
     [id]
   );
@@ -529,6 +543,9 @@ export async function getArtifactById(
     /* v8 ignore next */
     tags: tagsMap.get(id) ?? [],
     has_embedding: row.has_embedding as boolean,
+    source: row.source as ArtifactSource,
+    source_path: row.source_path as string | null,
+    deleted_at: row.deleted_at as Date | null,
     created_at: row.created_at as Date,
     updated_at: row.updated_at as Date,
     version: row.version as number,
@@ -550,6 +567,12 @@ export async function listArtifacts(
     params.push(filters.kind);
   }
 
+  if (filters.source) {
+    paramIdx++;
+    whereClauses.push(`ka.source = $${paramIdx}`);
+    params.push(filters.source);
+  }
+
   if (filters.tags && filters.tags.length > 0) {
     paramIdx++;
     const mode = filters.tags_mode ?? "any";
@@ -565,7 +588,8 @@ export async function listArtifacts(
     params.push(normalizeTags(filters.tags));
   }
 
-  const whereClause = whereClauses.length > 0 ? "WHERE " + whereClauses.join(" AND ") : "";
+  whereClauses.push(`ka.deleted_at IS NULL`);
+  const whereClause = "WHERE " + whereClauses.join(" AND ");
   const limit = Math.min(filters.limit ?? 20, 100);
   const offset = filters.offset ?? 0;
 
@@ -579,7 +603,7 @@ export async function listArtifacts(
 
   const result = await pool.query(
     `SELECT id, kind, title, body, (embedding IS NOT NULL) AS has_embedding,
-            created_at, updated_at, version
+            source, source_path, deleted_at, created_at, updated_at, version
      FROM knowledge_artifacts ka
      ${whereClause}
      ORDER BY updated_at DESC
@@ -602,6 +626,9 @@ export async function listArtifacts(
     /* v8 ignore next */
     tags: tagsMap.get(row.id as string) ?? [],
     has_embedding: row.has_embedding as boolean,
+    source: row.source as ArtifactSource,
+    source_path: row.source_path as string | null,
+    deleted_at: row.deleted_at as Date | null,
     created_at: row.created_at as Date,
     updated_at: row.updated_at as Date,
     version: row.version as number,
@@ -612,7 +639,7 @@ export async function listArtifacts(
 
 export async function countArtifacts(
   pool: pg.Pool,
-  filters: Pick<ListArtifactsFilters, "kind" | "tags" | "tags_mode">
+  filters: Pick<ListArtifactsFilters, "kind" | "source" | "tags" | "tags_mode">
 ): Promise<number> {
   const whereClauses: string[] = [];
   const params: unknown[] = [];
@@ -622,6 +649,12 @@ export async function countArtifacts(
     paramIdx++;
     whereClauses.push(`kind = $${paramIdx}`);
     params.push(filters.kind);
+  }
+
+  if (filters.source) {
+    paramIdx++;
+    whereClauses.push(`ka.source = $${paramIdx}`);
+    params.push(filters.source);
   }
 
   if (filters.tags && filters.tags.length > 0) {
@@ -639,7 +672,8 @@ export async function countArtifacts(
     params.push(normalizeTags(filters.tags));
   }
 
-  const whereClause = whereClauses.length > 0 ? "WHERE " + whereClauses.join(" AND ") : "";
+  whereClauses.push(`ka.deleted_at IS NULL`);
+  const whereClause = "WHERE " + whereClauses.join(" AND ");
   const result = await pool.query(
     `SELECT count(*)::int AS total FROM knowledge_artifacts ka ${whereClause}`,
     params
@@ -651,7 +685,7 @@ export async function searchArtifacts(
   pool: pg.Pool,
   queryEmbedding: number[],
   queryText: string,
-  filters: { kind?: ArtifactKind; tags?: string[]; tags_mode?: "any" | "all" },
+  filters: { kind?: ArtifactKind; source?: ArtifactSource; tags?: string[]; tags_mode?: "any" | "all" },
   limit: number
 ): Promise<ArtifactSearchResultRow[]> {
   const embeddingStr = `[${queryEmbedding.join(",")}]`;
@@ -664,6 +698,12 @@ export async function searchArtifacts(
     paramIdx++;
     filterClauses.push(`a.kind = $${paramIdx}`);
     filterParams.push(filters.kind);
+  }
+
+  if (filters.source) {
+    paramIdx++;
+    filterClauses.push(`a.source = $${paramIdx}`);
+    filterParams.push(filters.source);
   }
 
   if (filters.tags && filters.tags.length > 0) {
@@ -705,6 +745,7 @@ export async function searchArtifacts(
              ROW_NUMBER() OVER (ORDER BY a.embedding <=> p.query_embedding) AS rank_s
       FROM knowledge_artifacts a, params p
       WHERE a.embedding IS NOT NULL
+        AND a.deleted_at IS NULL
       ${filterWhere}
       ORDER BY a.embedding <=> p.query_embedding
       LIMIT 20
@@ -718,8 +759,9 @@ export async function searchArtifacts(
                ) DESC
              ) AS rank_f
       FROM knowledge_artifacts a, params p
-      WHERE a.tsv @@ p.ts_query
-         OR (p.prefix_query IS NOT NULL AND a.tsv @@ p.prefix_query)
+      WHERE (a.tsv @@ p.ts_query
+         OR (p.prefix_query IS NOT NULL AND a.tsv @@ p.prefix_query))
+        AND a.deleted_at IS NULL
       ${filterWhere}
       LIMIT 20
     )
@@ -768,7 +810,7 @@ export async function searchArtifacts(
 export async function searchArtifactsKeyword(
   pool: pg.Pool,
   queryText: string,
-  filters: { kind?: ArtifactKind; tags?: string[]; tags_mode?: "any" | "all" },
+  filters: { kind?: ArtifactKind; source?: ArtifactSource; tags?: string[]; tags_mode?: "any" | "all" },
   limit: number
 ): Promise<ArtifactSearchResultRow[]> {
   const filterClauses: string[] = [];
@@ -779,6 +821,12 @@ export async function searchArtifactsKeyword(
     paramIdx++;
     filterClauses.push(`a.kind = $${paramIdx}`);
     filterParams.push(filters.kind);
+  }
+
+  if (filters.source) {
+    paramIdx++;
+    filterClauses.push(`a.source = $${paramIdx}`);
+    filterParams.push(filters.source);
   }
 
   if (filters.tags && filters.tags.length > 0) {
@@ -831,6 +879,7 @@ export async function searchArtifactsKeyword(
         OR lower(a.title) LIKE '%' || p.q_lower || '%'
         OR lower(a.body) LIKE '%' || p.q_lower || '%'
       )
+        AND a.deleted_at IS NULL
       ${filterWhere}
     )
     SELECT
@@ -876,17 +925,24 @@ export async function getArtifactGraph(
       pool.query(
         `SELECT id, title, kind, (embedding IS NOT NULL) AS has_embedding
          FROM knowledge_artifacts
+         WHERE deleted_at IS NULL
          ORDER BY updated_at DESC`
       ),
       pool.query(
-        `SELECT source_id, target_id
-         FROM artifact_links`
+        `SELECT al.source_id, al.target_id
+         FROM artifact_links al
+         JOIN knowledge_artifacts ka1 ON ka1.id = al.source_id
+         JOIN knowledge_artifacts ka2 ON ka2.id = al.target_id
+         WHERE ka1.deleted_at IS NULL AND ka2.deleted_at IS NULL`
       ),
       pool.query(
         `SELECT DISTINCT a1.artifact_id AS artifact_id_1, a2.artifact_id AS artifact_id_2
          FROM knowledge_artifact_sources a1
          JOIN knowledge_artifact_sources a2 ON a1.entry_uuid = a2.entry_uuid
-         WHERE a1.artifact_id < a2.artifact_id`
+         JOIN knowledge_artifacts ka1 ON ka1.id = a1.artifact_id
+         JOIN knowledge_artifacts ka2 ON ka2.id = a2.artifact_id
+         WHERE a1.artifact_id < a2.artifact_id
+           AND ka1.deleted_at IS NULL AND ka2.deleted_at IS NULL`
       ),
       pool.query(
         `SELECT
@@ -898,6 +954,8 @@ export async function getArtifactGraph(
          WHERE a1.id < a2.id
            AND a1.embedding IS NOT NULL
            AND a2.embedding IS NOT NULL
+           AND a1.deleted_at IS NULL
+           AND a2.deleted_at IS NULL
            AND 1 - (a1.embedding <=> a2.embedding) > 0.3`
       ),
     ]);

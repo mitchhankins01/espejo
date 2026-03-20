@@ -11,6 +11,7 @@ export async function handleListArtifacts(
 
   const rows = await listArtifacts(pool, {
     kind: params.kind,
+    source: params.source,
     tags: params.tags,
     tags_mode: params.tags_mode,
     limit: params.limit,

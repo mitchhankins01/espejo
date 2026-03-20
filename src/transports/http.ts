@@ -10,6 +10,7 @@ import { sendTelegramMessage } from "../telegram/client.js";
 import { runMemoryConsolidation } from "../memory/consolidation.js";
 import { registerOAuthRoutes, isValidOAuthToken } from "./oauth.js";
 import { startOuraSyncTimer } from "../oura/sync.js";
+import { startObsidianSyncTimer } from "../obsidian/sync.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerMetricsRoutes } from "./routes/metrics.js";
 import { registerActivityRoutes } from "./routes/activity.js";
@@ -51,6 +52,7 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
   };
   /* v8 ignore stop */
   startOuraSyncTimer(pool, runAfterSync);
+  startObsidianSyncTimer(pool);
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
 

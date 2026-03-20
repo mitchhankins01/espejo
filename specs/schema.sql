@@ -385,7 +385,7 @@ CREATE INDEX IF NOT EXISTS idx_oura_workouts_day ON oura_workouts(day DESC);
 
 CREATE TABLE IF NOT EXISTS knowledge_artifacts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    kind TEXT NOT NULL CHECK (kind IN ('insight', 'theory', 'model', 'reference', 'note', 'log')),
+    kind TEXT NOT NULL CHECK (kind IN ('insight', 'reference', 'note', 'project')),
     title TEXT NOT NULL CHECK (char_length(title) BETWEEN 1 AND 300),
     body TEXT NOT NULL CHECK (char_length(body) > 0),
     tags TEXT[] NOT NULL DEFAULT '{}',
@@ -394,6 +394,10 @@ CREATE TABLE IF NOT EXISTS knowledge_artifacts (
     tsv tsvector GENERATED ALWAYS AS (
         to_tsvector('english', coalesce(title, '') || ' ' || coalesce(body, ''))
     ) STORED,
+    source_path TEXT,
+    content_hash TEXT,
+    source TEXT NOT NULL DEFAULT 'web' CHECK (source IN ('web', 'obsidian', 'mcp', 'telegram')),
+    deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     version INT NOT NULL DEFAULT 1
@@ -409,6 +413,10 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_artifacts_tags
     ON knowledge_artifacts USING GIN (tags);
 CREATE INDEX IF NOT EXISTS idx_knowledge_artifacts_updated
     ON knowledge_artifacts (updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_artifacts_source_path
+    ON knowledge_artifacts (source_path) WHERE source_path IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_artifacts_title_lower
+    ON knowledge_artifacts (lower(title));
 
 CREATE TABLE IF NOT EXISTS knowledge_artifact_sources (
     artifact_id UUID NOT NULL REFERENCES knowledge_artifacts(id) ON DELETE CASCADE,
@@ -438,6 +446,24 @@ CREATE INDEX IF NOT EXISTS idx_artifact_links_target
     ON artifact_links (target_id);
 CREATE INDEX IF NOT EXISTS idx_artifact_links_created_at
     ON artifact_links (created_at DESC);
+
+-- ============================================================================
+-- Obsidian sync runs
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS obsidian_sync_runs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finished_at TIMESTAMPTZ,
+    status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'success', 'error')),
+    files_synced INT NOT NULL DEFAULT 0,
+    files_deleted INT NOT NULL DEFAULT 0,
+    links_resolved INT NOT NULL DEFAULT 0,
+    errors JSONB NOT NULL DEFAULT '[]'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_runs_started
+    ON obsidian_sync_runs (started_at DESC);
 
 -- Trigger: auto-bump updated_at and version on UPDATE
 CREATE OR REPLACE FUNCTION knowledge_artifact_version_bump()

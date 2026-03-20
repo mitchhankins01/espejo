@@ -417,7 +417,8 @@ export const toolSpecs = {
     description:
       "List knowledge artifacts with optional filtering by kind and tags. Ordered by most recently updated.",
     params: z.object({
-      kind: z.enum(["insight", "theory", "model", "reference", "note"]).optional().describe("Filter by artifact kind"),
+      kind: z.enum(["insight", "reference", "note", "project"]).optional().describe("Filter by artifact kind"),
+      source: z.enum(["web", "obsidian", "mcp", "telegram"]).optional().describe("Filter by source"),
       tags: z.array(z.string()).optional().describe("Filter by tags"),
       tags_mode: z.enum(["any", "all"]).default("any").describe("Tag filter mode: 'any' (overlap) or 'all' (contains all)"),
       limit: limitParam(20, 100),
@@ -443,7 +444,8 @@ export const toolSpecs = {
       "Same RRF approach as search_entries but scoped to artifacts only.",
     params: z.object({
       query: z.string().min(1).describe("Search query"),
-      kind: z.enum(["insight", "theory", "model", "reference", "note"]).optional().describe("Filter by artifact kind"),
+      kind: z.enum(["insight", "reference", "note", "project"]).optional().describe("Filter by artifact kind"),
+      source: z.enum(["web", "obsidian", "mcp", "telegram"]).optional().describe("Filter by source"),
       tags: z.array(z.string()).optional().describe("Filter by tags"),
       tags_mode: z.enum(["any", "all"]).default("any").describe("Tag filter mode"),
       limit: limitParam(10, 50),
@@ -470,8 +472,10 @@ export const toolSpecs = {
       date_to: dateString.optional().describe("Filter entries up to this date"),
       city: z.string().optional().describe("Filter entries by city"),
       entry_tags: z.array(z.string()).optional().describe("Filter entries by tags"),
-      artifact_kind: z.enum(["insight", "theory", "model", "reference", "note"]).optional()
+      artifact_kind: z.enum(["insight", "reference", "note", "project"]).optional()
         .describe("Filter artifacts by kind"),
+      artifact_source: z.enum(["web", "obsidian", "mcp", "telegram"]).optional()
+        .describe("Filter artifacts by source"),
       artifact_tags: z.array(z.string()).optional().describe("Filter artifacts by tags"),
       limit: limitParam(10, 50),
     }),
@@ -671,6 +675,28 @@ export const toolSpecs = {
         input: { id: "abc-123" },
         behavior: "Sets status=done, completed_at=now, clears is_focus",
       },
+    ],
+  },
+
+  sync_obsidian_vault: {
+    name: "sync_obsidian_vault" as const,
+    annotations: WRITE_IDEMPOTENT,
+    description: "Manually trigger Obsidian vault sync from R2. Optionally sync a single file by path.",
+    params: z.object({
+      file_path: z.string().optional().describe("Sync only this vault-relative file path"),
+    }),
+    examples: [
+      { input: {}, behavior: "Full vault sync, returns summary of files synced/deleted/errors" },
+    ],
+  },
+
+  get_obsidian_sync_status: {
+    name: "get_obsidian_sync_status" as const,
+    annotations: READ_ONLY,
+    description: "Get Obsidian vault sync status: last run, file count, pending embeddings",
+    params: z.object({}),
+    examples: [
+      { input: {}, behavior: "Returns sync status with last run info, counts, pending embeddings" },
     ],
   },
 
