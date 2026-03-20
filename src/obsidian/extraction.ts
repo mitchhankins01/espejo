@@ -3,6 +3,8 @@ import type pg from "pg";
 import { z } from "zod";
 
 import { config } from "../config.js";
+import { searchArtifacts } from "../db/queries/artifacts.js";
+import { generateEmbedding } from "../db/embeddings.js";
 import { createClient, putObjectContent } from "../storage/r2.js";
 import { sendTelegramMessage } from "../telegram/client.js";
 
@@ -40,20 +42,17 @@ export interface ExtractionResult {
   errors: string[];
 }
 
-/** Fetch existing artifact titles and short bodies for cross-referencing context */
+/** Find semantically relevant artifacts for cross-referencing via hybrid search */
 async function fetchArtifactContext(
-  pool: pg.Pool
+  pool: pg.Pool,
+  reviewText: string
 ): Promise<string> {
-  const result = await pool.query(
-    `SELECT title, kind, LEFT(body, 200) AS snippet
-     FROM knowledge_artifacts
-     WHERE deleted_at IS NULL AND status = 'approved'
-     ORDER BY updated_at DESC
-     LIMIT 100`
-  );
+  const queryText = reviewText.slice(0, 1000);
+  const embedding = await generateEmbedding(queryText);
+  const results = await searchArtifacts(pool, embedding, queryText, {}, 30);
 
-  return result.rows
-    .map((r) => `- [${r.kind as string}] ${r.title as string}: ${(r.snippet as string).replace(/\n/g, " ")}`)
+  return results
+    .map((r) => `- [${r.kind}] ${r.title}: ${r.body.slice(0, 200).replace(/\n/g, " ")}`)
     .join("\n");
 }
 
@@ -165,7 +164,7 @@ export async function extractInsightsFromReview(
   }
 
   try {
-    const artifactContext = await fetchArtifactContext(pool);
+    const artifactContext = await fetchArtifactContext(pool, reviewBody);
     const prompt = buildExtractionPrompt(reviewBody, reviewTitle, artifactContext);
 
     const client = new Anthropic({ apiKey: config.anthropic.apiKey });

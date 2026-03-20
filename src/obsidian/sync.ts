@@ -177,15 +177,16 @@ export async function runObsidianSync(
       }
     }
 
-    // 9. Post-sync: atomicity assessment (fire-and-forget)
-    if (upsertedArtifacts.length > 0) {
+    // 9. Post-sync: atomicity assessment (fire-and-forget, skip pending insights)
+    const approvedArtifacts = upsertedArtifacts.filter((a) => !a.key.startsWith("Pending/"));
+    if (approvedArtifacts.length > 0) {
       void assessAndNotifyAtomicity(
-        upsertedArtifacts.map((a) => ({ title: a.title, body: a.body }))
+        approvedArtifacts.map((a) => ({ title: a.title, body: a.body }))
       ).catch((err) => notifyError("Obsidian atomicity", err));
     }
 
     // 10. Post-sync: extract insights from newly synced reviews (fire-and-forget)
-    const newReviews = upsertedArtifacts
+    const newReviews = approvedArtifacts
       .filter((a) => a.kind === "review")
       .map((a) => ({ title: a.title, body: a.body }));
     if (newReviews.length > 0) {
