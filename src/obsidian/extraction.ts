@@ -197,7 +197,7 @@ export async function extractInsightsFromReview(
       try {
         const markdown = insightToMarkdown(insight, reviewTitle);
         const filename = `${titleToFilename(insight.title)}.md`;
-        const key = `_pending/${filename}`;
+        const key = `Pending/${filename}`;
 
         await putObjectContent(r2Client, VAULT_BUCKET, key, markdown);
         result.filesWritten.push(key);

@@ -295,7 +295,7 @@ async function processEntries(
       const insights = await extractInsights(client, title, entry.text, artifactContext);
       for (const insight of insights) {
         const insightMd = insightToMarkdown(insight, title);
-        const insightKey = `_pending/${titleToFilename(insight.title)}.md`;
+        const insightKey = `Pending/${titleToFilename(insight.title)}.md`;
         console.log(`    → ${insight.title}`);
         await putObjectContent(r2Client, VAULT_BUCKET, insightKey, insightMd);
         filesWritten++;
@@ -317,7 +317,7 @@ async function processEntries(
       const insights = await extractInsights(client, title, entry.text, artifactContext);
       for (const insight of insights) {
         const insightMd = insightToMarkdown(insight, title);
-        const insightKey = `_pending/${titleToFilename(insight.title)}.md`;
+        const insightKey = `Pending/${titleToFilename(insight.title)}.md`;
         console.log(`    → ${insight.title}`);
         await putObjectContent(r2Client, VAULT_BUCKET, insightKey, insightMd);
         filesWritten++;
