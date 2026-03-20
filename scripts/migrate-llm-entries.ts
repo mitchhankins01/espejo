@@ -11,6 +11,7 @@
  */
 import dotenv from "dotenv";
 dotenv.config({ path: ".env" });
+dotenv.config({ path: ".env.production.local", override: true });
 
 import Anthropic from "@anthropic-ai/sdk";
 import pg from "pg";
