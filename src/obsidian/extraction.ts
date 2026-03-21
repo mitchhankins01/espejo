@@ -239,7 +239,9 @@ export async function extractAndNotifyReviews(
   const allResults: ExtractionResult[] = [];
 
   for (const review of reviewArtifacts) {
+    console.log(`[extraction] Processing review: "${review.title}" (${review.body.length} chars)`);
     const result = await extractInsightsFromReview(pool, review.title, review.body);
+    console.log(`[extraction] "${review.title}" → ${result.insights.length} insights, ${result.filesWritten.length} files written${result.errors.length > 0 ? `, errors: ${result.errors.join("; ")}` : ""}`);
     allResults.push(result);
   }
 

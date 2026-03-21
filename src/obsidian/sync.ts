@@ -98,6 +98,8 @@ export async function runObsidianSync(
       return !ex || ex.content_hash !== obj.etag;
     });
 
+    console.log(`[obsidian-sync] R2: ${mdFiles.length} files, ${existing.length} existing, ${toSync.length} to sync`);
+
     // 5. Download and parse in batches
     const upsertedArtifacts: Array<{ id: string; key: string; wikiLinks: string[]; title: string; body: string; kind: string }> = [];
 
@@ -147,6 +149,9 @@ export async function runObsidianSync(
     // 7. Soft-delete artifacts whose files no longer exist in R2
     const activeKeys = mdFiles.map((obj) => obj.key);
     filesDeleted = await softDeleteMissingObsidianArtifacts(pool, activeKeys);
+    if (filesDeleted > 0) {
+      console.log(`[obsidian-sync] Soft-deleted ${filesDeleted} artifacts (paths no longer in R2)`);
+    }
 
     // 8. Resolve wiki links (pass 2) — in-memory title map
     const allTitles = await pool.query<{ id: string; title: string; source_path: string | null }>(
@@ -179,6 +184,7 @@ export async function runObsidianSync(
 
     // 9. Post-sync: atomicity assessment (fire-and-forget, skip pending insights)
     const approvedArtifacts = upsertedArtifacts.filter((a) => !a.key.startsWith("Pending/"));
+    console.log(`[obsidian-sync] Post-sync: ${upsertedArtifacts.length} upserted, ${approvedArtifacts.length} approved (non-Pending)`);
     if (approvedArtifacts.length > 0) {
       void assessAndNotifyAtomicity(
         approvedArtifacts.map((a) => ({ title: a.title, body: a.body }))
@@ -189,6 +195,7 @@ export async function runObsidianSync(
     const newReviews = approvedArtifacts
       .filter((a) => a.kind === "review")
       .map((a) => ({ title: a.title, body: a.body }));
+    console.log(`[obsidian-sync] Reviews for extraction: ${newReviews.map((r) => r.title).join(", ") || "(none)"}`);
     if (newReviews.length > 0) {
       void extractAndNotifyReviews(pool, newReviews)
         .catch((err) => notifyError("Review extraction", err));

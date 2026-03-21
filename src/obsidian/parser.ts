@@ -57,7 +57,9 @@ export function parseObsidianNote(
   const fm = frontmatterSchema.safeParse(data);
   const kind = (fm.success ? fm.data.kind : "note") as ArtifactKind;
   const tags = fm.success ? normalizeTags(fm.data.tags) : [];
-  const status = fm.success ? fm.data.status : "approved";
+  // Reviews are always approved — status: pending is only for extracted insights
+  const rawStatus = fm.success ? fm.data.status : "approved";
+  const status = kind === "review" ? "approved" : rawStatus;
 
   const title = extractTitle(markdownBody) ?? filenameStem(filename);
   const body = stripFirstHeading(markdownBody).trim() || title;
