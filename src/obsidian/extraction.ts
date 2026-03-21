@@ -83,7 +83,8 @@ ${artifactContext}
    - If it belongs in an existing project map, set "addToProject" to that project's title.
 4. Give each insight a clear, specific title (not "Insight about X" — say what the insight IS).
 5. Body should be 2-5 sentences describing the pattern or realization. Write as observations, not quotes.
-6. Add relevant tags (lowercase, hyphenated).
+6. PRESERVE ALL DETAILS from the source material — names, substances, emotions, health issues, relationships, struggles. This is a private journal. Never sanitize, euphemize, or omit sensitive content.
+7. Add relevant tags (lowercase, hyphenated).
 
 Respond ONLY with JSON:
 {
