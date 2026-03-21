@@ -20,7 +20,7 @@ const extractedInsightSchema = z.object({
   body: z.string(),
   tags: z.array(z.string()),
   linkedTo: z.array(z.string()),
-  addToProject: z.string().optional(),
+  addToProject: z.string().nullable().optional(),
 });
 
 const extractionResponseSchema = z.object({
@@ -32,7 +32,7 @@ export interface ExtractedInsight {
   body: string;
   tags: string[];
   linkedTo: string[];
-  addToProject?: string;
+  addToProject?: string | null;
 }
 
 export interface ExtractionResult {
