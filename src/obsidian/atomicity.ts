@@ -26,6 +26,7 @@ export interface AtomicityResult {
 interface NoteToAssess {
   title: string;
   body: string;
+  kind: string;
 }
 
 /** Assess a single note's atomicity via LLM */
@@ -88,12 +89,16 @@ export async function assessAndNotifyAtomicity(
     const results = await Promise.all(
       batch.map(async (note) => {
         const result = await assessSingleNote(client, note);
-        return { title: note.title, result };
+        return { title: note.title, kind: note.kind, result };
       })
     );
 
-    for (const { title, result } of results) {
+    for (const { title, kind, result } of results) {
       if (result && !result.atomic) {
+        // Insights are already meant to be atomic — only warn if >1 distinct idea
+        if (kind === "insight" && (!result.suggestedSplits || result.suggestedSplits.length <= 1)) {
+          continue;
+        }
         nonAtomic.push({ title, result });
       }
     }

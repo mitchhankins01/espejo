@@ -187,7 +187,7 @@ export async function runObsidianSync(
     console.log(`[obsidian-sync] Post-sync: ${upsertedArtifacts.length} upserted, ${approvedArtifacts.length} approved (non-Pending)`);
     if (approvedArtifacts.length > 0) {
       void assessAndNotifyAtomicity(
-        approvedArtifacts.map((a) => ({ title: a.title, body: a.body }))
+        approvedArtifacts.map((a) => ({ title: a.title, body: a.body, kind: a.kind }))
       ).catch((err) => notifyError("Obsidian atomicity", err));
     }
 
