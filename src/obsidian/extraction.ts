@@ -64,6 +64,8 @@ function buildExtractionPrompt(
 ): string {
   return `You are extracting atomic knowledge insights from a reflective review.
 
+IMPORTANT: The review below was written by an LLM summarizing a conversation with Mitch. Do NOT treat its phrasing as direct quotes from Mitch. Write insights in third person as observations about patterns and realizations, not as things "Mitch said" or "Mitch quoted."
+
 ## Source review
 Title: ${reviewTitle}
 Body:
@@ -80,7 +82,7 @@ ${artifactContext}
    - If it connects to existing artifacts, include them in "linkedTo" (use exact titles).
    - If it belongs in an existing project map, set "addToProject" to that project's title.
 4. Give each insight a clear, specific title (not "Insight about X" — say what the insight IS).
-5. Body should be 2-5 sentences with context from the review.
+5. Body should be 2-5 sentences describing the pattern or realization. Write as observations, not quotes.
 6. Add relevant tags (lowercase, hyphenated).
 
 Respond ONLY with JSON:
