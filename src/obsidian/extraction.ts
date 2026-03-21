@@ -62,9 +62,9 @@ function buildExtractionPrompt(
   reviewTitle: string,
   artifactContext: string
 ): string {
-  return `You are extracting atomic knowledge insights from a reflective review.
+  return `You are extracting atomic zettelkasten notes from a reflective review. Each note should state a core idea directly — like a claim or observation you'd write on an index card. Never describe or summarize the source ("The review discusses...", "The check-in describes..."). Just state the idea.
 
-IMPORTANT: The review below was written by an LLM summarizing a conversation with Mitch. Do NOT treat its phrasing as direct quotes from Mitch. Write insights in third person as observations about patterns and realizations, not as things "Mitch said" or "Mitch quoted."
+IMPORTANT: The review below was written by an LLM summarizing a conversation with Mitch. This is a private journal — preserve all details including names, substances, emotions, health issues, relationships, and struggles. Never sanitize or omit sensitive content.
 
 ## Source review
 Title: ${reviewTitle}
@@ -75,23 +75,22 @@ ${reviewBody}
 ${artifactContext}
 
 ## Instructions
-1. Identify distinct insights, learnings, realizations, or patterns in this review.
-2. Each insight should be ATOMIC — one clear idea per note.
+1. Extract distinct ideas, patterns, or realizations from this review.
+2. Each note must be ATOMIC — one clear idea.
 3. Cross-reference with existing artifacts above:
-   - If an insight duplicates an existing artifact, skip it.
+   - If an idea duplicates an existing artifact, skip it.
    - If it connects to existing artifacts, include them in "linkedTo" (use exact titles).
    - If it belongs in an existing project map, set "addToProject" to that project's title.
-4. Give each insight a clear, specific title (not "Insight about X" — say what the insight IS).
-5. Body should be 2-5 sentences describing the pattern or realization. Write as observations, not quotes.
-6. PRESERVE ALL DETAILS from the source material — names, substances, emotions, health issues, relationships, struggles. This is a private journal. Never sanitize, euphemize, or omit sensitive content.
-7. Add relevant tags (lowercase, hyphenated).
+4. Title should state the idea directly (e.g. "Nicotine cravings mask an underlying need for stimulation" not "Insight about nicotine").
+5. Body should be 1-3 sentences expanding on the idea. State facts and observations directly — no meta-commentary about the source material.
+6. Add relevant tags (lowercase, hyphenated).
 
 Respond ONLY with JSON:
 {
   "insights": [
     {
-      "title": "specific insight title",
-      "body": "the core idea in 2-5 sentences",
+      "title": "the idea stated directly",
+      "body": "1-3 sentences expanding on the core idea",
       "tags": ["tag1", "tag2"],
       "linkedTo": ["Existing Artifact Title"],
       "addToProject": "Project Title or omit"
