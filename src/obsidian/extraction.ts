@@ -119,8 +119,6 @@ status: pending
 tags:
 ${tags}
 ---
-# ${insight.title}
-
 ${insight.body}
 
 ## Sources
@@ -134,7 +132,7 @@ function titleToFilename(title: string): string {
     .replace(/[/\\:*?"<>|]/g, "-")
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, 80);
+    .slice(0, 200);
 }
 
 /**
