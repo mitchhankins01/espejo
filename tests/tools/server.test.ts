@@ -63,6 +63,12 @@ vi.mock("../../src/tools/search-artifacts.js", () => ({
 vi.mock("../../src/tools/search-content.js", () => ({
   handleSearchContent: mockHandlers.handleSearchContent,
 }));
+vi.mock("../../src/tools/save-evening-review.js", () => ({
+  handleSaveEveningReview: vi.fn(),
+}));
+vi.mock("../../src/prompts/evening-review.js", () => ({
+  handleEveningReviewPrompt: vi.fn(),
+}));
 import { createServer, toolHandlers } from "../../src/server.js";
 import type { ToolHandler } from "../../src/server.js";
 import { toolSpecs } from "../../specs/tools.spec.js";

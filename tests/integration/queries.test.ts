@@ -89,6 +89,8 @@ import {
   deleteTemplate,
   getEntryIdByUuid,
   updateEntryEmbeddingIfVersionMatches,
+  findArtifactByKindAndTitle,
+  getRecentReviewArtifacts,
 } from "../../src/db/queries.js";
 import { fixturePatterns, fixtureArtifacts } from "../../specs/fixtures/seed.js";
 
@@ -1427,6 +1429,98 @@ describe("createArtifact", () => {
 
     expect(art.source_entry_uuids).toEqual([]);
     expect(art.tags).toEqual([]);
+  });
+
+  it("creates artifact with custom source and status", async () => {
+    const art = await createArtifact(pool, {
+      kind: "review",
+      title: "2026-03-28 — Evening Checkin",
+      body: "Evening review body",
+      source: "mcp",
+      status: "pending",
+    });
+
+    expect(art.source).toBe("mcp");
+    expect(art.status).toBe("pending");
+    expect(art.kind).toBe("review");
+  });
+
+  it("uses DB defaults when source/status not provided", async () => {
+    const art = await createArtifact(pool, {
+      kind: "note",
+      title: "Default source test",
+      body: "body",
+    });
+
+    expect(art.source).toBe("web");
+    expect(art.status).toBe("approved");
+  });
+});
+
+describe("findArtifactByKindAndTitle", () => {
+  it("finds existing artifact by kind and title", async () => {
+    const created = await createArtifact(pool, {
+      kind: "review",
+      title: "Find me review",
+      body: "body content",
+      source: "mcp",
+      status: "pending",
+    });
+
+    const found = await findArtifactByKindAndTitle(pool, "review", "Find me review");
+    expect(found).not.toBeNull();
+    expect(found!.id).toBe(created.id);
+    expect(found!.kind).toBe("review");
+    expect(found!.body).toBe("body content");
+  });
+
+  it("returns null when no match", async () => {
+    const result = await findArtifactByKindAndTitle(pool, "review", "Nonexistent");
+    expect(result).toBeNull();
+  });
+
+  it("does not find deleted artifacts", async () => {
+    const created = await createArtifact(pool, {
+      kind: "review",
+      title: "Deleted review",
+      body: "body",
+    });
+    await deleteArtifact(pool, created.id);
+
+    const result = await findArtifactByKindAndTitle(pool, "review", "Deleted review");
+    expect(result).toBeNull();
+  });
+});
+
+describe("getRecentReviewArtifacts", () => {
+  it("returns review artifacts within date range", async () => {
+    await createArtifact(pool, {
+      kind: "review",
+      title: "2026-03-28 — Evening Checkin",
+      body: "March 28 review",
+      source: "mcp",
+      status: "pending",
+    });
+
+    const results = await getRecentReviewArtifacts(pool, "2026-03-27", "2026-03-29");
+    expect(results.length).toBeGreaterThan(0);
+    expect(results.every((r) => r.kind === "review")).toBe(true);
+  });
+
+  it("returns empty array when no reviews in range", async () => {
+    const results = await getRecentReviewArtifacts(pool, "2020-01-01", "2020-01-02");
+    expect(results).toEqual([]);
+  });
+
+  it("excludes non-review artifacts", async () => {
+    await createArtifact(pool, {
+      kind: "note",
+      title: "Not a review",
+      body: "body",
+    });
+
+    const results = await getRecentReviewArtifacts(pool, "2026-03-27", "2026-03-29");
+    expect(results.every((r) => r.kind === "review")).toBe(true);
   });
 });
 

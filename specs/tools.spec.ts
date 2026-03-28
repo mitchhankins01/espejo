@@ -722,6 +722,32 @@ export const toolSpecs = {
     ],
   },
 
+  save_evening_review: {
+    name: "save_evening_review" as const,
+    annotations: WRITE_IDEMPOTENT,
+    description:
+      "Save the evening review entry as a knowledge artifact (kind: review). " +
+      "If a review already exists for the given date, updates it instead of creating a duplicate. " +
+      "Generates an embedding for semantic search after saving.",
+    params: z.object({
+      text: z.string().min(1).describe("The final evening review markdown text"),
+      date: dateString.optional().describe(
+        "Date for the review title (YYYY-MM-DD). Defaults to today. " +
+        "Use yesterday's date if the session started before midnight but it's now past midnight."
+      ),
+    }),
+    examples: [
+      {
+        input: { text: "**Nervous system**\nTired but grounded..." },
+        behavior: "Creates a review artifact titled 'YYYY-MM-DD — Evening Checkin' with status pending, source mcp",
+      },
+      {
+        input: { text: "Updated review text...", date: "2026-03-27" },
+        behavior: "Upserts: updates existing review for 2026-03-27 if one exists, otherwise creates new",
+      },
+    ],
+  },
+
 } as const;
 
 // ============================================================================

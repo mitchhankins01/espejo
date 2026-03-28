@@ -214,6 +214,93 @@ export async function listArtifactTitles(
   }));
 }
 
+export async function findArtifactByKindAndTitle(
+  pool: pg.Pool,
+  kind: ArtifactKind,
+  title: string
+): Promise<ArtifactRow | null> {
+  const result = await pool.query(
+    `SELECT id, kind, title, body, (embedding IS NOT NULL) AS has_embedding,
+            status, source, source_path, deleted_at, created_at, updated_at, version
+     FROM knowledge_artifacts
+     WHERE kind = $1 AND title = $2 AND deleted_at IS NULL
+     LIMIT 1`,
+    [kind, title]
+  );
+  if (result.rows.length === 0) return null;
+  const row = result.rows[0];
+  const id = row.id as string;
+  const [sourcesMap, tagsMap] = await Promise.all([
+    getArtifactSourcesMap(pool, [id]),
+    getArtifactTagsMap(pool, [id]),
+  ]);
+  return {
+    id,
+    kind: row.kind as ArtifactKind,
+    title: row.title as string,
+    body: row.body as string,
+    /* v8 ignore next */
+    tags: tagsMap.get(id) ?? [],
+    has_embedding: row.has_embedding as boolean,
+    /* v8 ignore next */
+    status: (row.status as ArtifactStatus) ?? "approved",
+    source: row.source as ArtifactSource,
+    source_path: row.source_path as string | null,
+    deleted_at: row.deleted_at as Date | null,
+    created_at: row.created_at as Date,
+    updated_at: row.updated_at as Date,
+    version: row.version as number,
+    /* v8 ignore next */
+    source_entry_uuids: sourcesMap.get(id) ?? [],
+  };
+}
+
+export async function getRecentReviewArtifacts(
+  pool: pg.Pool,
+  dateFrom: string,
+  dateTo: string,
+  limit: number = 20
+): Promise<ArtifactRow[]> {
+  const result = await pool.query(
+    `SELECT id, kind, title, body, (embedding IS NOT NULL) AS has_embedding,
+            status, source, source_path, deleted_at, created_at, updated_at, version
+     FROM knowledge_artifacts
+     WHERE kind = 'review'
+       AND deleted_at IS NULL
+       AND created_at >= $1::date
+       AND created_at < ($2::date + interval '1 day')
+     ORDER BY created_at DESC
+     LIMIT $3`,
+    [dateFrom, dateTo, limit]
+  );
+
+  const ids = result.rows.map((r) => r.id as string);
+  const [sourcesMap, tagsMap] = await Promise.all([
+    getArtifactSourcesMap(pool, ids),
+    getArtifactTagsMap(pool, ids),
+  ]);
+
+  return result.rows.map((row) => ({
+    id: row.id as string,
+    kind: row.kind as ArtifactKind,
+    title: row.title as string,
+    body: row.body as string,
+    /* v8 ignore next */
+    tags: tagsMap.get(row.id as string) ?? [],
+    has_embedding: row.has_embedding as boolean,
+    /* v8 ignore next */
+    status: (row.status as ArtifactStatus) ?? "approved",
+    source: row.source as ArtifactSource,
+    source_path: row.source_path as string | null,
+    deleted_at: row.deleted_at as Date | null,
+    created_at: row.created_at as Date,
+    updated_at: row.updated_at as Date,
+    version: row.version as number,
+    /* v8 ignore next */
+    source_entry_uuids: sourcesMap.get(row.id as string) ?? [],
+  }));
+}
+
 export async function resolveArtifactTitleToId(
   pool: pg.Pool,
   title: string
@@ -349,16 +436,31 @@ export async function createArtifact(
     body: string;
     tags?: string[];
     source_entry_uuids?: string[];
+    source?: ArtifactSource;
+    status?: ArtifactStatus;
   }
 ): Promise<ArtifactRow> {
   const tags = normalizeTags(data.tags ?? []);
 
+  const columns = ["kind", "title", "body"];
+  const values: string[] = [data.kind, data.title, data.body];
+
+  if (data.source) {
+    columns.push("source");
+    values.push(data.source);
+  }
+  if (data.status) {
+    columns.push("status");
+    values.push(data.status);
+  }
+
+  const placeholders = values.map((_, i) => `$${i + 1}`).join(", ");
   const result = await pool.query(
-    `INSERT INTO knowledge_artifacts (kind, title, body)
-     VALUES ($1, $2, $3)
+    `INSERT INTO knowledge_artifacts (${columns.join(", ")})
+     VALUES (${placeholders})
      RETURNING id, kind, title, body, (embedding IS NOT NULL) AS has_embedding,
                status, source, source_path, deleted_at, created_at, updated_at, version`,
-    [data.kind, data.title, data.body]
+    values
   );
 
   const row = result.rows[0];

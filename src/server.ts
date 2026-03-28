@@ -30,6 +30,8 @@ import { handleCompleteTodo } from "./tools/complete-todo.js";
 import { handleSetTodoFocus } from "./tools/set-todo-focus.js";
 import { handleSyncObsidianVault } from "./tools/sync-obsidian-vault.js";
 import { handleGetObsidianSyncStatus } from "./tools/get-obsidian-sync-status.js";
+import { handleSaveEveningReview } from "./tools/save-evening-review.js";
+import { handleEveningReviewPrompt } from "./prompts/evening-review.js";
 
 /** Tool handlers can return a plain string or a rich CallToolResult with audience annotations. */
 export type ToolResult = string | CallToolResult;
@@ -64,6 +66,7 @@ export const toolHandlers: Record<string, ToolHandler> = {
   set_todo_focus: handleSetTodoFocus,
   sync_obsidian_vault: handleSyncObsidianVault,
   get_obsidian_sync_status: handleGetObsidianSyncStatus,
+  save_evening_review: handleSaveEveningReview,
 };
 
 export function createServer(pool: pg.Pool, version: string): McpServer {
@@ -104,6 +107,17 @@ export function createServer(pool: pg.Pool, version: string): McpServer {
       }
     );
   }
+
+  // Register prompts
+  server.registerPrompt(
+    "evening-review",
+    {
+      title: "Evening Review",
+      description:
+        "Start an evening review session with 7 days of journal context, past reviews, Oura biometrics, and weight data.",
+    },
+    async () => handleEveningReviewPrompt(pool)
+  );
 
   return server;
 }
