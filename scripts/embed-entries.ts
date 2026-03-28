@@ -16,6 +16,8 @@ const EMBEDDING_MODEL = "text-embedding-3-small";
 const EMBEDDING_DIMENSIONS = 1536;
 const BATCH_SIZE = 100;
 const SLEEP_MS = 1000;
+// text-embedding-3-small has an 8192 token limit (~32k chars is a safe estimate)
+const MAX_CHARS = 30000;
 
 function elapsed(start: bigint): string {
   const ms = Number(process.hrtime.bigint() - start) / 1e6;
@@ -161,9 +163,10 @@ async function embedEntries(force: boolean): Promise<void> {
 
       if (batch.rows.length === 0) break;
 
-      const texts = batch.rows.map(
-        (row) => `${row.title as string}\n\n${row.body as string}`
-      );
+      const texts = batch.rows.map((row) => {
+        const full = `${row.title as string}\n\n${row.body as string}`;
+        return full.length > MAX_CHARS ? full.slice(0, MAX_CHARS) : full;
+      });
       const ids = batch.rows.map((row) => row.id as string);
 
       try {
