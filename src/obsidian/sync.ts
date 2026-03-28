@@ -220,9 +220,16 @@ export async function runObsidianSync(
 // Timer
 // ============================================================================
 
-async function syncAndNotify(pool: pg.Pool): Promise<void> {
+async function syncAndNotify(
+  pool: pg.Pool,
+  onAfterSync?: () => Promise<void>
+): Promise<void> {
   try {
     await runObsidianSync(pool);
+    /* v8 ignore next 3 -- background callback is runtime-only */
+    if (onAfterSync) {
+      await onAfterSync();
+    }
   /* v8 ignore next 3 -- background sync: errors already recorded in obsidian_sync_runs */
   } catch (err) {
     notifyError("Obsidian sync", err);
@@ -230,13 +237,14 @@ async function syncAndNotify(pool: pg.Pool): Promise<void> {
 }
 
 export function startObsidianSyncTimer(
-  pool: pg.Pool
+  pool: pg.Pool,
+  onAfterSync?: () => Promise<void>
 ): NodeJS.Timeout | null {
   if (!config.r2.accountId || !config.r2.accessKeyId) return null;
-  void syncAndNotify(pool);
+  void syncAndNotify(pool, onAfterSync);
   /* v8 ignore next 3 — interval callback body is not testable in unit tests */
   return setInterval(() => {
-    void syncAndNotify(pool);
+    void syncAndNotify(pool, onAfterSync);
   }, SYNC_INTERVAL_MS);
 }
 

@@ -11,6 +11,7 @@ import { runMemoryConsolidation } from "../memory/consolidation.js";
 import { registerOAuthRoutes, isValidOAuthToken } from "./oauth.js";
 import { startOuraSyncTimer } from "../oura/sync.js";
 import { startObsidianSyncTimer } from "../obsidian/sync.js";
+import { embedPending } from "../db/embed-pending.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerMetricsRoutes } from "./routes/metrics.js";
 import { registerActivityRoutes } from "./routes/activity.js";
@@ -30,6 +31,16 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
 
   app.set("trust proxy", 1);
   /* v8 ignore start -- background timer callback is runtime-only */
+  const runEmbedPending = async (): Promise<void> => {
+    try {
+      const result = await embedPending(pool);
+      if (result.entries > 0 || result.artifacts > 0) {
+        console.log(`[embed] Embedded ${result.entries} entries, ${result.artifacts} artifacts`);
+      }
+    } catch (err) {
+      notifyError("Embed pending", err);
+    }
+  };
   const runMemoryMaintenance = async (): Promise<void> => {
     try {
       const result = await runMemoryConsolidation(pool, {
@@ -49,10 +60,11 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
   };
   const runAfterSync = async (): Promise<void> => {
     await runMemoryMaintenance();
+    await runEmbedPending();
   };
   /* v8 ignore stop */
   startOuraSyncTimer(pool, runAfterSync);
-  startObsidianSyncTimer(pool);
+  startObsidianSyncTimer(pool, runEmbedPending);
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
 
