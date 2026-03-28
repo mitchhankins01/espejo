@@ -131,27 +131,12 @@ describe("handleEveningReviewPrompt", () => {
     expect(contextText).toContain("WEIGHT DATA");
   });
 
-  it("includes full text for recent entries (last 2 days)", async () => {
+  it("includes full text for all entries (no truncation)", async () => {
     const todayEntry = makeEntry({ text: "Today's entry" });
-    mockEntries.getEntriesByDateRange.mockResolvedValue([todayEntry]);
-    mockArtifacts.getRecentReviewArtifacts.mockResolvedValue([]);
-    mockOura.getOuraWeeklyRows.mockResolvedValue([]);
-    mockWeights.listWeights.mockResolvedValue({ rows: [], count: 0 });
-
-    const result = await handleEveningReviewPrompt(mockPool);
-    const contextText = (result.messages[1].content as { text: string }).text;
-
-    // formatEntry is mocked to return "FULL: text"
-    expect(contextText).toContain("FULL: Today's entry");
-  });
-
-  it("truncates older entries and shows notice", async () => {
-    const longText = "A".repeat(500);
     const oldEntry = makeEntry({
-      text: longText,
+      text: "A".repeat(500),
       created_at: new Date("2026-03-22T08:00:00Z"),
     });
-    const todayEntry = makeEntry({ text: "Today" });
     mockEntries.getEntriesByDateRange.mockResolvedValue([oldEntry, todayEntry]);
     mockArtifacts.getRecentReviewArtifacts.mockResolvedValue([]);
     mockOura.getOuraWeeklyRows.mockResolvedValue([]);
@@ -160,10 +145,10 @@ describe("handleEveningReviewPrompt", () => {
     const result = await handleEveningReviewPrompt(mockPool);
     const contextText = (result.messages[1].content as { text: string }).text;
 
-    expect(contextText).toContain("CONTEXT NOTE");
-    expect(contextText).toContain("summarized");
-    // Old entry should be truncated, not use formatEntry
-    expect(contextText).not.toContain(`FULL: ${"A".repeat(500)}`);
+    // formatEntry is mocked to return "FULL: text" — both entries should use it
+    expect(contextText).toContain("FULL: Today's entry");
+    expect(contextText).toContain(`FULL: ${"A".repeat(500)}`);
+    expect(contextText).not.toContain("CONTEXT NOTE");
   });
 
   it("degrades gracefully when Oura fails", async () => {

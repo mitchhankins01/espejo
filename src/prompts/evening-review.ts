@@ -87,23 +87,6 @@ When I approve the final entry, call the save_evening_review tool with the text.
 // Context formatting
 // ============================================================================
 
-const TRUNCATION_CHAR_LIMIT = 300;
-
-function formatTruncatedEntry(entry: EntryRow): string {
-  const date = new Date(entry.created_at);
-  const dateStr = date.toLocaleDateString("en-US", {
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  });
-  const tags = entry.tags.length > 0 ? ` | Tags: ${entry.tags.join(", ")}` : "";
-  const text = entry.text
-    ? entry.text.slice(0, TRUNCATION_CHAR_LIMIT) + (entry.text.length > TRUNCATION_CHAR_LIMIT ? "..." : "")
-    : "(no text)";
-  return `📅 ${dateStr}${tags}\n${text}\n🔑 ${entry.uuid}`;
-}
-
 function formatWeightTrend(weights: WeightRow[]): string {
   if (weights.length === 0) return "No weight data available for the last 7 days.";
 
@@ -142,32 +125,18 @@ interface ContextData {
   reviews: ArtifactRow[];
   ouraWeekly: string;
   weightTrend: string;
-  truncated: boolean;
-  truncatedDateRange: string | null;
 }
 
 function buildContextMessage(data: ContextData): string {
   const sections: string[] = [];
 
-  // Truncation notice
-  if (data.truncated && data.truncatedDateRange) {
-    sections.push(
-      `⚠️ CONTEXT NOTE: Entries from ${data.truncatedDateRange} were summarized (first ${TRUNCATION_CHAR_LIMIT} chars each) to fit context limits.\n` +
-      `Full text is available for today and yesterday. Ask to pull any specific entry if needed.`
-    );
-  }
-
-  // Journal entries
+  // Journal entries — full text, no truncation
   sections.push("=== JOURNAL ENTRIES (last 7 days) ===");
   if (data.entries.length === 0) {
     sections.push("No journal entries found in the last 7 days.");
   } else {
-    const cutoff = daysAgoInTimezone(1);
-
     for (const entry of data.entries) {
-      const entryDate = new Date(entry.created_at).toISOString().slice(0, 10);
-      const isRecent = entryDate >= cutoff;
-      sections.push(isRecent ? formatEntry(entry) : formatTruncatedEntry(entry));
+      sections.push(formatEntry(entry));
     }
   }
 
@@ -195,7 +164,6 @@ export async function handleEveningReviewPrompt(
 ): Promise<GetPromptResult> {
   const dateTo = todayInTimezone();
   const dateFrom = daysAgoInTimezone(7);
-  const yesterday = daysAgoInTimezone(1);
 
   // Parallel queries with graceful degradation
   const [entriesResult, reviewsResult, ouraResult, weightResult] =
@@ -210,24 +178,6 @@ export async function handleEveningReviewPrompt(
   const reviews = reviewsResult.status === "fulfilled" ? reviewsResult.value : [];
   const ouraRows = ouraResult.status === "fulfilled" ? ouraResult.value : [];
   const weightData = weightResult.status === "fulfilled" ? weightResult.value.rows : [];
-
-  // Determine truncation
-  let truncated = false;
-  let truncatedDateRange: string | null = null;
-  const olderEntries = entries.filter((e) => {
-    const d = new Date(e.created_at).toISOString().slice(0, 10);
-    return d < yesterday;
-  });
-  if (olderEntries.length > 0) {
-    const hasLong = olderEntries.some((e) => e.text && e.text.length > TRUNCATION_CHAR_LIMIT);
-    if (hasLong) {
-      truncated = true;
-      const dates = olderEntries.map((e) => new Date(e.created_at));
-      const earliest = new Date(Math.min(...dates.map((d) => d.getTime())));
-      const latest = new Date(Math.max(...dates.map((d) => d.getTime())));
-      truncatedDateRange = `${earliest.toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" })}–${latest.toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" })}`;
-    }
-  }
 
   // Build Oura text with graceful degradation
   let ouraWeekly: string;
@@ -250,8 +200,6 @@ export async function handleEveningReviewPrompt(
     reviews,
     ouraWeekly,
     weightTrend,
-    truncated,
-    truncatedDateRange,
   });
 
   return {
