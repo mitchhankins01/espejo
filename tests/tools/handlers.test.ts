@@ -3,7 +3,6 @@ import type {
   EntryRow,
   SearchResultRow,
   SimilarResultRow,
-  TagCountRow,
   EntryStatsRow,
 } from "../../src/db/queries.js";
 
@@ -13,7 +12,6 @@ const mockQueries = vi.hoisted(() => ({
   getEntriesByDateRange: vi.fn(),
   getEntriesOnThisDay: vi.fn(),
   findSimilarEntries: vi.fn(),
-  listTags: vi.fn(),
   getEntryStats: vi.fn(),
 }));
 
@@ -34,7 +32,6 @@ import { handleGetEntry } from "../../src/tools/get-entry.js";
 import { handleGetEntriesByDate } from "../../src/tools/get-entries-by-date.js";
 import { handleOnThisDay } from "../../src/tools/on-this-day.js";
 import { handleFindSimilar } from "../../src/tools/find-similar.js";
-import { handleListTags } from "../../src/tools/list-tags.js";
 import { handleEntryStats } from "../../src/tools/entry-stats.js";
 
 const mockPool = {} as any;
@@ -56,7 +53,6 @@ function makeEntry(overrides: Partial<EntryRow> = {}): EntryRow {
     temperature: null,
     weather_conditions: null,
     humidity: null,
-    tags: [],
     photo_count: 0,
     video_count: 0,
     audio_count: 0,
@@ -133,7 +129,6 @@ describe("handleGetEntry", () => {
       uuid: "TEST-UUID",
       city: "Barcelona",
       country: "Spain",
-      tags: [],
       media_counts: { photos: 0, videos: 0, audios: 0 },
     });
   });
@@ -247,30 +242,6 @@ describe("handleFindSimilar", () => {
 
     const result = await handleFindSimilar(mockPool, { uuid: "TEST" });
     expect(result).toContain("No similar entries found");
-  });
-});
-
-describe("handleListTags", () => {
-  it("returns JSON tag list", async () => {
-    const tags: TagCountRow[] = [
-      { name: "work", count: 10 },
-      { name: "health", count: 5 },
-    ];
-    mockQueries.listTags.mockResolvedValue(tags);
-
-    const result = await handleListTags(mockPool, {});
-    const parsed = JSON.parse(result);
-
-    expect(parsed).toHaveLength(2);
-    expect(parsed[0]).toEqual({ name: "work", count: 10 });
-    expect(parsed[1]).toEqual({ name: "health", count: 5 });
-  });
-
-  it("returns message for no tags", async () => {
-    mockQueries.listTags.mockResolvedValue([]);
-
-    const result = await handleListTags(mockPool, {});
-    expect(result).toContain("No tags found");
   });
 });
 

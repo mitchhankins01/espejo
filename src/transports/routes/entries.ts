@@ -10,7 +10,6 @@ import {
   getEntryIdByUuid,
   insertMedia,
   deleteMedia as deleteMediaRow,
-  listTags,
   updateEntryEmbeddingIfVersionMatches,
 } from "../../db/queries.js";
 import { generateEmbedding } from "../../db/embeddings.js";
@@ -27,20 +26,6 @@ import type { RouteDeps } from "./types.js";
 export function registerEntryRoutes(app: Express, deps: RouteDeps): void {
   const { pool, secret } = deps;
 
-  // GET /api/entries/tags — list tags used on entries with counts
-  app.get("/api/entries/tags", async (req, res) => {
-    /* v8 ignore next */
-    if (!requireBearerAuth(req, res, secret)) return;
-
-    try {
-      const tags = await listTags(pool);
-      res.json(tags);
-    } catch (err) {
-      console.error("Entry tags error:", err);
-      res.status(500).json({ error: String(err) });
-    }
-  });
-
   // GET /api/entries — list entries with filters
   app.get("/api/entries", async (req, res) => {
     /* v8 ignore next */
@@ -51,7 +36,6 @@ export function registerEntryRoutes(app: Express, deps: RouteDeps): void {
         offset: req.query.offset ? parseInt(req.query.offset as string, 10) : undefined,
         from: req.query.from as string | undefined,
         to: req.query.to as string | undefined,
-        tag: req.query.tag as string | undefined,
         source: req.query.source as string | undefined,
         q: req.query.q as string | undefined,
       });
@@ -88,7 +72,6 @@ export function registerEntryRoutes(app: Express, deps: RouteDeps): void {
     try {
       const schema = z.object({
         text: z.string().min(1),
-        tags: z.array(z.string()).optional(),
         timezone: z.string().optional(),
         created_at: z.string().optional(),
         city: z.string().optional(),
@@ -128,7 +111,6 @@ export function registerEntryRoutes(app: Express, deps: RouteDeps): void {
     try {
       const schema = z.object({
         text: z.string().min(1).optional(),
-        tags: z.array(z.string()).optional(),
         timezone: z.string().optional(),
         created_at: z.string().optional(),
         city: z.string().optional(),

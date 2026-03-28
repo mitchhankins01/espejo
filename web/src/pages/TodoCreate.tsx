@@ -3,7 +3,6 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { createTodo, listTodos, type Todo } from "../api.ts";
 import { StatusSelect } from "../components/StatusSelect.tsx";
 import { MarkdownEditor } from "../components/MarkdownEditor.tsx";
-import { TagInput } from "../components/TagInput.tsx";
 
 export function TodoCreate() {
   const navigate = useNavigate();
@@ -13,7 +12,6 @@ export function TodoCreate() {
   const [status, setStatus] = useState("active");
   const [nextStep, setNextStep] = useState("");
   const [body, setBody] = useState("");
-  const [tags, setTags] = useState<string[]>([]);
   const [urgent, setUrgent] = useState(false);
   const [important, setImportant] = useState(false);
   const [parentId, setParentId] = useState(parentIdParam ?? "");
@@ -41,7 +39,6 @@ export function TodoCreate() {
         status: status as "active" | "waiting" | "done" | "someday",
         next_step: nextStep.trim() ? nextStep.trim() : null,
         body: body.trim(),
-        tags: tags.length > 0 ? tags : undefined,
         urgent,
         important,
         parent_id: parentId || undefined,
@@ -175,16 +172,6 @@ export function TodoCreate() {
             onChange={setBody}
             placeholder="Add notes, context, and progress..."
           />
-        </div>
-
-        <div>
-          <label
-            htmlFor="todo-create-tags"
-            className="block text-sm text-text-muted mb-1.5 font-medium"
-          >
-            Tags
-          </label>
-          <TagInput id="todo-create-tags" tags={tags} onChange={setTags} />
         </div>
 
         <div className="flex justify-end">

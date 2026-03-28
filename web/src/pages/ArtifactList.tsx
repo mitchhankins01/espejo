@@ -3,7 +3,6 @@ import { Link, useSearchParams, useNavigate } from "react-router-dom";
 import {
   listArtifacts,
   searchArtifacts,
-  listArtifactTags,
   type Artifact,
 } from "../api.ts";
 import {
@@ -37,8 +36,6 @@ function plainSnippet(md: string, max: number): string {
 
 export function ArtifactList() {
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
-  const [allTags, setAllTags] = useState<string[]>([]);
-  const [tagFilters, setTagFilters] = useState<string[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -52,33 +49,25 @@ export function ArtifactList() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const page = Number(searchParams.get("page") ?? "0");
-  const tagsKey = tagFilters.join(",");
 
-  const prevFiltersRef = useRef({ search, semanticSearch, kindFilter, tagsKey });
+  const prevFiltersRef = useRef({ search, semanticSearch, kindFilter });
 
   function goToPage(p: number): void {
     navigate(p === 0 ? "/" : `/?page=${p}`);
   }
 
   useEffect(() => {
-    listArtifactTags()
-      .then((tags) => setAllTags(tags.map((t) => t.name)))
-      .catch(() => setAllTags([]));
-  }, []);
-
-  useEffect(() => {
     const prev = prevFiltersRef.current;
     if (
       prev.search !== search ||
       prev.semanticSearch !== semanticSearch ||
-      prev.kindFilter !== kindFilter ||
-      prev.tagsKey !== tagsKey
+      prev.kindFilter !== kindFilter
     ) {
-      prevFiltersRef.current = { search, semanticSearch, kindFilter, tagsKey };
+      prevFiltersRef.current = { search, semanticSearch, kindFilter };
       if (page !== 0) goToPage(0);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, semanticSearch, kindFilter, tagsKey]);
+  }, [search, semanticSearch, kindFilter]);
 
   useEffect(() => {
     localStorage.setItem(VIEW_STORAGE_KEY, view);
@@ -88,14 +77,10 @@ export function ArtifactList() {
     setLoading(true);
     setError("");
     try {
-      const tags = tagsKey || undefined;
-      const tagsMode = tags ? "all" : undefined;
       if (search.trim()) {
         const results = await searchArtifacts(
           search,
           kindFilter || undefined,
-          tags,
-          tagsMode,
           semanticSearch
         );
         setArtifacts(results);
@@ -103,8 +88,6 @@ export function ArtifactList() {
       } else {
         const { items, total: t } = await listArtifacts({
           kind: kindFilter || undefined,
-          tags,
-          tags_mode: tagsMode,
           limit: PAGE_SIZE,
           offset: page * PAGE_SIZE,
         });
@@ -116,7 +99,7 @@ export function ArtifactList() {
     } finally {
       setLoading(false);
     }
-  }, [search, semanticSearch, kindFilter, tagsKey, page]);
+  }, [search, semanticSearch, kindFilter, page]);
 
   useEffect(() => {
     if (view === "graph") return;
@@ -126,12 +109,6 @@ export function ArtifactList() {
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const isSearching = !!search.trim();
-
-  function toggleTag(tag: string): void {
-    setTagFilters((prev) =>
-      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
-    );
-  }
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 pb-24 min-h-[calc(100vh-4rem)]">
@@ -201,27 +178,6 @@ export function ArtifactList() {
             ))}
           </div>
 
-          {allTags.length > 0 && (
-            <div className="flex gap-2 mb-6 flex-wrap">
-              {allTags.map((tag) => {
-                const active = tagFilters.includes(tag);
-                return (
-                  <button
-                    key={tag}
-                    onClick={() => toggleTag(tag)}
-                    className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
-                      active
-                        ? "bg-pine-600 dark:bg-pine-500 text-white shadow-sm"
-                        : "bg-surface-elevated text-text-muted hover:text-text-primary hover:bg-border"
-                    }`}
-                  >
-                    {active ? `${tag} ×` : tag}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
           {error && (
             <div className="text-red-600 dark:text-red-400 text-sm bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg px-4 py-3 mb-4">
               {error}
@@ -277,14 +233,6 @@ export function ArtifactList() {
                     )}
                     <div className="flex items-center gap-2 text-xs text-text-muted">
                       <span>{new Date(artifact.created_at).toLocaleDateString()}</span>
-                      {artifact.tags.map((tag) => (
-                        <span
-                          key={tag}
-                          className="px-2 py-0.5 rounded-full bg-pine-500/10 text-pine-700 dark:text-pine-300 font-medium"
-                        >
-                          {tag}
-                        </span>
-                      ))}
                     </div>
                   </Link>
                 ))}

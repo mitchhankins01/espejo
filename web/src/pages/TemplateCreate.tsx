@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { createTemplate } from "../api.ts";
 import { MarkdownEditor } from "../components/MarkdownEditor.tsx";
-import { TagInput } from "../components/TagInput.tsx";
 
 function slugify(input: string): string {
   return input
@@ -19,7 +18,6 @@ export function TemplateCreate() {
   const [slug, setSlug] = useState("");
   const [description, setDescription] = useState("");
   const [body, setBody] = useState("");
-  const [defaultTags, setDefaultTags] = useState<string[]>([]);
   const [sortOrder, setSortOrder] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -38,7 +36,6 @@ export function TemplateCreate() {
         slug: (slug || slugify(name)).trim(),
         description: description.trim() || null,
         body,
-        default_tags: defaultTags,
         sort_order: sortOrder,
       });
       navigate(`/templates/${created.id}`);
@@ -125,16 +122,6 @@ export function TemplateCreate() {
             Body (Markdown)
           </label>
           <MarkdownEditor value={body} onChange={setBody} />
-        </div>
-
-        <div>
-          <label
-            htmlFor="template-create-tags"
-            className="block text-sm text-text-muted mb-1.5 font-medium"
-          >
-            Default tags
-          </label>
-          <TagInput id="template-create-tags" tags={defaultTags} onChange={setDefaultTags} />
         </div>
 
         <div>

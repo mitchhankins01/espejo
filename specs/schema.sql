@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS entries (
     ) STORED
 );
 
+-- NOTE: tags, entry_tags, artifact_tags are created here for migration history
+-- compatibility (migrations 017-018 reference them). Migration 035 drops them.
 CREATE TABLE IF NOT EXISTS tags (
     id SERIAL PRIMARY KEY,
     name TEXT UNIQUE NOT NULL

@@ -32,9 +32,7 @@ describe("search_content spec", () => {
       date_from: "2024-01-01",
       date_to: "2024-12-31",
       city: "Barcelona",
-      entry_tags: ["health"],
       artifact_kind: "insight",
-      artifact_tags: ["sleep"],
       limit: 20,
     });
     expect(result.date_from).toBe("2024-01-01");

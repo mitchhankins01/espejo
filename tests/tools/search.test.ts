@@ -25,13 +25,11 @@ describe("search_entries spec", () => {
       query: "test",
       date_from: "2024-01-01",
       date_to: "2024-12-31",
-      tags: ["work", "health"],
       city: "Barcelona",
       limit: 20,
     });
     expect(result.date_from).toBe("2024-01-01");
     expect(result.date_to).toBe("2024-12-31");
-    expect(result.tags).toEqual(["work", "health"]);
     expect(result.city).toBe("Barcelona");
     expect(result.limit).toBe(20);
   });

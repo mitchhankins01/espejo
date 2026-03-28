@@ -2,14 +2,12 @@ import type {
   EntryRow,
   SearchResultRow,
   SimilarResultRow,
-  TagCountRow,
   EntryStatsRow,
 } from "../db/queries.js";
 import type {
   EntryResult,
   SearchResult,
   SimilarResult,
-  TagCount,
   EntryStats,
 } from "../../specs/tools.spec.js";
 import { getWordCount } from "./entry.js";
@@ -23,7 +21,6 @@ export function toEntryResult(row: EntryRow): EntryResult {
     uuid: row.uuid,
     created_at: row.created_at.toISOString(),
     text: row.text,
-    tags: row.tags,
     media_counts: {
       photos: row.photo_count,
       videos: row.video_count,
@@ -74,16 +71,6 @@ export function toSimilarResult(row: SimilarResultRow): SimilarResult {
   return {
     ...toEntryResult(row),
     similarity_score: row.similarity_score,
-  };
-}
-
-/**
- * Map a DB tag count row to a structured TagCount.
- */
-export function toTagCount(row: TagCountRow): TagCount {
-  return {
-    name: row.name,
-    count: row.count,
   };
 }
 

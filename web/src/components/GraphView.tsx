@@ -187,7 +187,6 @@ export function GraphView({ onNavigate }: GraphViewProps) {
         }}
         linkLineDash={(link) => {
           const typed = link as { type: string };
-          if (typed.type === "tag") return [6, 4];
           if (typed.type === "source") return [2, 4];
           return [];
         }}

@@ -11,7 +11,6 @@ export interface FixtureEntry {
   latitude?: number;
   longitude?: number;
   timezone?: string;
-  tags?: string[];
   temperature?: number;
   weather_conditions?: string;
   humidity?: number;
@@ -78,7 +77,6 @@ export const fixtureEntries: FixtureEntry[] = [
     latitude: 41.3851,
     longitude: 2.1734,
     timezone: "Europe/Madrid",
-    tags: ["morning-review", "work"],
     temperature: 18,
     weather_conditions: "Partly Cloudy",
     humidity: 65,
@@ -95,7 +93,6 @@ export const fixtureEntries: FixtureEntry[] = [
     latitude: 41.4035,
     longitude: 2.1567,
     timezone: "Europe/Madrid",
-    tags: ["evening-review", "work", "burnout"],
     temperature: 16,
     weather_conditions: "Clear",
     humidity: 55,
@@ -112,7 +109,6 @@ export const fixtureEntries: FixtureEntry[] = [
     latitude: 32.7465,
     longitude: -117.1297,
     timezone: "America/Los_Angeles",
-    tags: ["morning-review", "health", "routine"],
     temperature: 22,
     weather_conditions: "Sunny",
     humidity: 70,
@@ -129,7 +125,6 @@ export const fixtureEntries: FixtureEntry[] = [
     latitude: 32.7488,
     longitude: -117.1617,
     timezone: "America/Los_Angeles",
-    tags: ["morning-review"],
     temperature: 20,
     weather_conditions: "Sunny",
     humidity: 68,
@@ -146,7 +141,6 @@ export const fixtureEntries: FixtureEntry[] = [
     latitude: 41.3851,
     longitude: 2.1821,
     timezone: "Europe/Madrid",
-    tags: ["travel", "barcelona"],
     temperature: 21,
     weather_conditions: "Sunny",
     humidity: 58,
@@ -163,7 +157,6 @@ export const fixtureEntries: FixtureEntry[] = [
     latitude: 41.3888,
     longitude: 2.1700,
     timezone: "Europe/Madrid",
-    tags: ["morning-review", "nicotine", "health"],
     temperature: 10,
     weather_conditions: "Overcast",
     humidity: 75,
@@ -180,7 +173,6 @@ export const fixtureEntries: FixtureEntry[] = [
     latitude: 41.3870,
     longitude: 2.1690,
     timezone: "Europe/Madrid",
-    tags: ["reflection", "year-review"],
     temperature: 12,
     weather_conditions: "Clear",
     humidity: 60,
@@ -197,7 +189,6 @@ export const fixtureEntries: FixtureEntry[] = [
     latitude: 32.7465,
     longitude: -117.1297,
     timezone: "America/Los_Angeles",
-    tags: ["health", "sleep", "morning-review"],
     temperature: 16,
     weather_conditions: "Foggy",
     humidity: 85,
@@ -220,7 +211,6 @@ export const fixtureEntries: FixtureEntry[] = [
     latitude: 38.7139,
     longitude: -9.1337,
     timezone: "Europe/Lisbon",
-    tags: ["travel"],
     temperature: 19,
     weather_conditions: "Sunny",
     humidity: 52,
@@ -316,7 +306,6 @@ export interface FixtureArtifact {
   kind: string;
   title: string;
   body: string;
-  tags: string[];
   embedding: number[];
   source_entry_uuids?: string[];
 }
@@ -326,7 +315,6 @@ export const fixtureArtifacts: FixtureArtifact[] = [
     kind: "insight",
     title: "Nicotine crashes dopamine baseline for 24-48 hours",
     body: "Observed pattern: nicotine use leads to a measurable crash in dopamine baseline the following day. Readiness scores drop 20-30 points. The short-term focus boost is not worth the multi-day recovery cost. This aligns with Huberman's dopamine regulation model.",
-    tags: ["dopamine", "nicotine", "health"],
     embedding: artifactNicotineBase,
     source_entry_uuids: ["ENTRY-006-HEALTH-NICOTINE"],
   },
@@ -334,7 +322,6 @@ export const fixtureArtifacts: FixtureArtifact[] = [
     kind: "reference",
     title: "Sleep quality is primarily determined by pre-sleep habits",
     body: "Theory: sleep quality correlates more strongly with evening behavior (screen time, caffeine timing, stress) than with sleep environment factors. Evidence from journal entries and HRV data suggests a 2pm caffeine cutoff and 9pm screen cutoff are the two highest-leverage interventions.",
-    tags: ["sleep", "health", "habits"],
     embedding: artifactSleepBase,
     source_entry_uuids: ["ENTRY-008-HEALTH-SLEEP"],
   },
@@ -375,27 +362,6 @@ export async function seedFixtures(pool: pg.Pool): Promise<void> {
       ]
     );
 
-    const entryId = result.rows[0].id as number;
-
-    // Insert tags
-    if (entry.tags && entry.tags.length > 0) {
-      for (const tag of entry.tags) {
-        await pool.query(
-          `INSERT INTO tags (name) VALUES ($1) ON CONFLICT (name) DO NOTHING`,
-          [tag]
-        );
-        const tagResult = await pool.query(
-          `SELECT id FROM tags WHERE name = $1`,
-          [tag]
-        );
-        const tagId = tagResult.rows[0].id as number;
-        await pool.query(
-          `INSERT INTO entry_tags (entry_id, tag_id) VALUES ($1, $2)
-           ON CONFLICT DO NOTHING`,
-          [entryId, tagId]
-        );
-      }
-    }
   }
 
   // Seed daily_metrics (weight data for some entry dates — not all)
@@ -438,25 +404,6 @@ export async function seedFixtures(pool: pg.Pool): Promise<void> {
       [artifact.kind, artifact.title, artifact.body, embeddingStr]
     );
     const artifactId = result.rows[0].id as string;
-
-    if (artifact.tags && artifact.tags.length > 0) {
-      for (const tag of artifact.tags) {
-        await pool.query(
-          `INSERT INTO tags (name) VALUES ($1) ON CONFLICT (name) DO NOTHING`,
-          [tag]
-        );
-        const tagResult = await pool.query(
-          `SELECT id FROM tags WHERE name = $1`,
-          [tag]
-        );
-        const tagId = tagResult.rows[0].id as number;
-        await pool.query(
-          `INSERT INTO artifact_tags (artifact_id, tag_id) VALUES ($1, $2)
-           ON CONFLICT DO NOTHING`,
-          [artifactId, tagId]
-        );
-      }
-    }
 
     if (artifact.source_entry_uuids) {
       for (const uuid of artifact.source_entry_uuids) {

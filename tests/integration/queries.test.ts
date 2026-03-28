@@ -13,7 +13,6 @@ import {
   getEntriesByDateRange,
   getEntriesOnThisDay,
   findSimilarEntries,
-  listTags,
   getEntryStats,
   upsertDailyMetric,
   getWeightByDate,
@@ -57,7 +56,6 @@ import {
   countArtifacts,
   searchArtifacts,
   searchArtifactsKeyword,
-  listArtifactTags,
   listArtifactTitles,
   resolveArtifactTitleToId,
   syncExplicitLinks,
@@ -165,20 +163,6 @@ describe("searchEntries", () => {
     }
   });
 
-  it("filters by tags", async () => {
-    const results = await searchEntries(
-      pool,
-      workStressEntry.embedding,
-      "review",
-      { tags: ["travel"] },
-      10
-    );
-
-    for (const r of results) {
-      expect(r.tags.some((t: string) => t === "travel")).toBe(true);
-    }
-  });
-
   it("includes match source information", async () => {
     const results = await searchEntries(
       pool,
@@ -193,22 +177,6 @@ describe("searchEntries", () => {
     expect(results[0].has_semantic || results[0].has_fulltext).toBe(true);
   });
 
-  it("includes tags in results", async () => {
-    const results = await searchEntries(
-      pool,
-      workStressEntry.embedding,
-      "overwhelmed",
-      {},
-      10
-    );
-
-    expectSearchResults(results, { query: "overwhelmed" });
-    // Entry 001 has tags
-    const entry001 = results.find((r) => r.uuid === "ENTRY-001-WORK-STRESS");
-    if (entry001) {
-      expect(entry001.tags.length).toBeGreaterThan(0);
-    }
-  });
 });
 
 describe("getEntryByUuid", () => {
@@ -219,8 +187,6 @@ describe("getEntryByUuid", () => {
     expectEntryShape(entry as Record<string, unknown>);
     expect(entry!.uuid).toBe("ENTRY-001-WORK-STRESS");
     expect(entry!.city).toBe("Barcelona");
-    expect(entry!.tags).toContain("morning-review");
-    expect(entry!.tags).toContain("work");
   });
 
   it("returns null for non-existent UUID", async () => {
@@ -241,7 +207,6 @@ describe("getEntryByUuid", () => {
     expect(entry).not.toBeNull();
     expect(entry!.city).toBeNull();
     expect(entry!.temperature).toBeNull();
-    expect(entry!.tags).toEqual([]);
   });
 });
 
@@ -370,32 +335,6 @@ describe("findSimilarEntries", () => {
       2
     );
     expect(results.length).toBeLessThanOrEqual(2);
-  });
-});
-
-describe("listTags", () => {
-  it("returns all tags with counts", async () => {
-    const tags = await listTags(pool);
-
-    expect(tags.length).toBeGreaterThan(0);
-    for (const tag of tags) {
-      expect(tag.name).toBeTruthy();
-      expect(tag.count).toBeGreaterThan(0);
-    }
-  });
-
-  it("orders by frequency descending", async () => {
-    const tags = await listTags(pool);
-
-    for (let i = 1; i < tags.length; i++) {
-      expect(tags[i].count).toBeLessThanOrEqual(tags[i - 1].count);
-    }
-  });
-
-  it("includes morning-review as most used tag", async () => {
-    const tags = await listTags(pool);
-    // morning-review appears in 6 entries
-    expect(tags[0].name).toBe("morning-review");
   });
 });
 
@@ -1404,7 +1343,6 @@ describe("createArtifact", () => {
       kind: "insight",
       title: "Test insight",
       body: "Body text here",
-      tags: ["Health", " sleep "],
       source_entry_uuids: ["ENTRY-001-WORK-STRESS"],
     });
 
@@ -1412,7 +1350,6 @@ describe("createArtifact", () => {
     expect(art.kind).toBe("insight");
     expect(art.title).toBe("Test insight");
     expect(art.body).toBe("Body text here");
-    expect(art.tags).toEqual(["health", "sleep"]); // normalized
     expect(art.has_embedding).toBe(false);
     expect(art.version).toBe(1);
     expect(art.source_entry_uuids).toEqual(["ENTRY-001-WORK-STRESS"]);
@@ -1428,7 +1365,6 @@ describe("createArtifact", () => {
     });
 
     expect(art.source_entry_uuids).toEqual([]);
-    expect(art.tags).toEqual([]);
   });
 
   it("creates artifact with custom source and status", async () => {
@@ -1553,7 +1489,6 @@ describe("updateArtifact", () => {
 
     const updated = await updateArtifact(pool, created.id, 1, {
       title: "New title",
-      tags: ["new-tag"],
     });
 
     expect(updated).not.toBe("version_conflict");
@@ -1561,7 +1496,6 @@ describe("updateArtifact", () => {
     const art = updated as Exclude<typeof updated, "version_conflict" | null>;
     expect(art.title).toBe("New title");
     expect(art.body).toBe("Original body");
-    expect(art.tags).toEqual(["new-tag"]);
     expect(art.version).toBe(2);
   });
 
@@ -1620,7 +1554,7 @@ describe("updateArtifact", () => {
     expect(art.has_embedding).toBe(false);
   });
 
-  it("preserves embedding when only tags/kind change", async () => {
+  it("preserves embedding when only kind changes", async () => {
     // Use a seeded artifact that already has an embedding (avoids trigger version bump from manual UPDATE)
     const list = await listArtifacts(pool, {});
     const seeded = list.find((a) => a.has_embedding);
@@ -1628,7 +1562,6 @@ describe("updateArtifact", () => {
 
     const updated = await updateArtifact(pool, seeded!.id, seeded!.version, {
       kind: "project",
-      tags: ["updated-tag"],
     });
     const art = updated as Exclude<typeof updated, "version_conflict" | null>;
     expect(art.has_embedding).toBe(true);
@@ -1720,25 +1653,6 @@ describe("listArtifacts", () => {
     expect(insights.length).toBeGreaterThan(0);
   });
 
-  it("filters by tags with any mode (default)", async () => {
-    const results = await listArtifacts(pool, { tags: ["dopamine"] });
-    expect(results.length).toBeGreaterThan(0);
-    for (const a of results) {
-      expect(a.tags).toContain("dopamine");
-    }
-  });
-
-  it("filters by tags with all mode", async () => {
-    const results = await listArtifacts(pool, {
-      tags: ["health", "sleep"],
-      tags_mode: "all",
-    });
-    for (const a of results) {
-      expect(a.tags).toContain("health");
-      expect(a.tags).toContain("sleep");
-    }
-  });
-
   it("respects limit and offset", async () => {
     const page1 = await listArtifacts(pool, { limit: 1, offset: 0 });
     const page2 = await listArtifacts(pool, { limit: 1, offset: 1 });
@@ -1766,32 +1680,6 @@ describe("listArtifacts", () => {
 });
 
 // ============================================================================
-// Knowledge Artifacts — Tag listing
-// ============================================================================
-
-describe("listArtifactTags", () => {
-  it("returns tags used on artifacts with counts", async () => {
-    const tags = await listArtifactTags(pool);
-    expect(tags.length).toBeGreaterThan(0);
-    for (const t of tags) {
-      expect(t.name).toBeTruthy();
-      expect(t.count).toBeGreaterThan(0);
-    }
-    // Should be sorted by count descending
-    for (let i = 1; i < tags.length; i++) {
-      expect(tags[i].count).toBeLessThanOrEqual(tags[i - 1].count);
-    }
-  });
-
-  it("includes health tag from seeded artifacts", async () => {
-    const tags = await listArtifactTags(pool);
-    const healthTag = tags.find((t) => t.name === "health");
-    expect(healthTag).toBeDefined();
-    expect(healthTag!.count).toBe(2); // both seeded artifacts have "health"
-  });
-});
-
-// ============================================================================
 // Knowledge Artifacts — Count
 // ============================================================================
 
@@ -1805,17 +1693,6 @@ describe("countArtifacts", () => {
     const total = await countArtifacts(pool, { kind: "insight" });
     const expected = fixtureArtifacts.filter((a) => a.kind === "insight").length;
     expect(total).toBe(expected);
-  });
-
-  it("counts filtered by tags", async () => {
-    const total = await countArtifacts(pool, { tags: ["dopamine"] });
-    expect(total).toBeGreaterThan(0);
-  });
-
-  it("counts filtered by tags with all mode", async () => {
-    const total = await countArtifacts(pool, { tags: ["health", "sleep"], tags_mode: "all" });
-    const list = await listArtifacts(pool, { tags: ["health", "sleep"], tags_mode: "all" });
-    expect(total).toBe(list.length);
   });
 
   it("counts filtered by source", async () => {
@@ -1869,31 +1746,6 @@ describe("searchArtifacts", () => {
     }
   });
 
-  it("filters by tags", async () => {
-    const emb = await pool.query(
-      `SELECT embedding::text FROM knowledge_artifacts WHERE embedding IS NOT NULL LIMIT 1`
-    );
-    const embedding = emb.rows[0].embedding.slice(1, -1).split(",").map(Number);
-
-    const results = await searchArtifacts(pool, embedding, "health", { tags: ["sleep"] }, 10);
-    for (const r of results) {
-      expect(r.tags).toContain("sleep");
-    }
-  });
-
-  it("filters by tags with all mode", async () => {
-    const emb = await pool.query(
-      `SELECT embedding::text FROM knowledge_artifacts WHERE embedding IS NOT NULL LIMIT 1`
-    );
-    const embedding = emb.rows[0].embedding.slice(1, -1).split(",").map(Number);
-
-    const results = await searchArtifacts(pool, embedding, "health", { tags: ["health", "sleep"], tags_mode: "all" }, 10);
-    for (const r of results) {
-      expect(r.tags).toContain("health");
-      expect(r.tags).toContain("sleep");
-    }
-  });
-
   it("filters by source", async () => {
     const emb = await pool.query(
       `SELECT embedding::text FROM knowledge_artifacts WHERE embedding IS NOT NULL LIMIT 1`
@@ -1911,7 +1763,6 @@ describe("searchArtifactsKeyword", () => {
       kind: "note",
       title: "Classroom regulation protocol",
       body: "Notes on classroom co-regulation and trauma-informed pacing.",
-      tags: ["education", "trauma"],
       source_entry_uuids: [],
     });
 
@@ -1924,40 +1775,10 @@ describe("searchArtifactsKeyword", () => {
     expect(match?.has_fulltext).toBe(true);
   });
 
-  it("supports kind filter and tag filters in any/all modes", async () => {
+  it("supports kind filter", async () => {
     const byKind = await searchArtifactsKeyword(pool, "sleep", { kind: "reference" }, 10);
     expect(byKind.length).toBeGreaterThan(0);
     for (const row of byKind) expect(row.kind).toBe("reference");
-
-    const byTagsAny = await searchArtifactsKeyword(
-      pool,
-      "sleep",
-      { tags: ["sleep"], tags_mode: "any" },
-      10
-    );
-    expect(byTagsAny.length).toBeGreaterThan(0);
-    for (const row of byTagsAny) expect(row.tags).toContain("sleep");
-
-    const byTagsDefaultMode = await searchArtifactsKeyword(
-      pool,
-      "sleep",
-      { tags: ["sleep"] },
-      10
-    );
-    expect(byTagsDefaultMode.length).toBeGreaterThan(0);
-    for (const row of byTagsDefaultMode) expect(row.tags).toContain("sleep");
-
-    const byTagsAll = await searchArtifactsKeyword(
-      pool,
-      "sleep",
-      { tags: ["health", "sleep"], tags_mode: "all" },
-      10
-    );
-    expect(byTagsAll.length).toBeGreaterThan(0);
-    for (const row of byTagsAll) {
-      expect(row.tags).toContain("health");
-      expect(row.tags).toContain("sleep");
-    }
   });
 
   it("filters by source", async () => {
@@ -2061,30 +1882,6 @@ describe("searchContent", () => {
       const art = await getArtifactById(pool, artifacts[0].id);
       expect(art?.kind).toBe("reference");
     }
-  });
-
-  it("filters entries by entry_tags", async () => {
-    const results = await searchContent(
-      pool,
-      workStressEntry.embedding,
-      "work morning",
-      { entry_tags: ["travel"] },
-      20
-    );
-    // Results should only include entries tagged with "travel" (and any artifacts)
-    // No crash is the key assertion — this exercises the entry_tags filter branch
-    expect(Array.isArray(results)).toBe(true);
-  });
-
-  it("filters artifacts by artifact_tags", async () => {
-    const results = await searchContent(
-      pool,
-      workStressEntry.embedding,
-      "health nicotine",
-      { artifact_tags: ["dopamine"] },
-      20
-    );
-    expect(Array.isArray(results)).toBe(true);
   });
 
   it("filters artifacts by artifact_source", async () => {
@@ -2274,18 +2071,16 @@ describe("artifact title + link queries", () => {
 });
 
 describe("todo queries", () => {
-  it("createTodo inserts and normalizes tags", async () => {
+  it("createTodo inserts with correct fields", async () => {
     const todo = await createTodo(pool, {
       title: "Spanish taxes 2025",
       status: "active",
       next_step: "Send docs",
       body: "Track updates",
-      tags: [" admin ", "Finance", "finance"],
     });
 
     expect(todo.id).toBeTruthy();
     expect(todo.status).toBe("active");
-    expect(todo.tags).toEqual(["admin", "finance"]);
   });
 
   it("getTodoById returns null for missing row", async () => {
@@ -2315,18 +2110,15 @@ describe("todo queries", () => {
       status: "active",
       next_step: "Step 1",
       body: "Body",
-      tags: ["one"],
     });
 
     const updated = await updateTodo(pool, created.id, {
       status: "done",
       next_step: null,
-      tags: ["Done", " done "],
     });
     expect(updated).not.toBeNull();
     expect(updated!.status).toBe("done");
     expect(updated!.next_step).toBeNull();
-    expect(updated!.tags).toEqual(["done"]);
     expect(updated!.completed_at).not.toBeNull();
 
     // Moving away from done clears completed_at
@@ -2552,7 +2344,6 @@ describe("Entry CRUD", () => {
   it("creates an entry with source=web and version=1", async () => {
     const entry = await createEntry(pool, {
       text: "Test journal entry",
-      tags: ["test", "web"],
       timezone: "Europe/Madrid",
       city: "Barcelona",
     });
@@ -2561,7 +2352,6 @@ describe("Entry CRUD", () => {
     expect(entry.text).toBe("Test journal entry");
     expect(entry.source).toBe("web");
     expect(entry.version).toBe(1);
-    expect(entry.tags).toEqual(["test", "web"]);
     expect(entry.city).toBe("Barcelona");
     expect(entry.timezone).toBe("Europe/Madrid");
   });
@@ -2587,14 +2377,12 @@ describe("Entry CRUD", () => {
 
     const updated = await updateEntry(pool, entry.uuid, 1, {
       text: "Updated text",
-      tags: ["updated"],
     });
     expect(updated).not.toBe("version_conflict");
     expect(updated).not.toBeNull();
     if (updated && updated !== "version_conflict") {
       expect(updated.text).toBe("Updated text");
       expect(updated.version).toBe(2);
-      expect(updated.tags).toEqual(["updated"]);
       expect(updated.modified_at).not.toBeNull();
     }
   });
@@ -2670,14 +2458,11 @@ describe("Entry CRUD", () => {
   });
 
   it("lists entries with filters", async () => {
-    await createEntry(pool, { text: "Web entry 1", tags: ["alpha"] });
-    await createEntry(pool, { text: "Web entry 2", tags: ["beta"] });
+    await createEntry(pool, { text: "Web entry 1" });
+    await createEntry(pool, { text: "Web entry 2" });
 
     const all = await listEntries(pool, { source: "web" });
     expect(all.count).toBeGreaterThanOrEqual(2);
-
-    const tagged = await listEntries(pool, { tag: "alpha", source: "web" });
-    expect(tagged.rows.some((r) => r.tags.includes("alpha"))).toBe(true);
   });
 
   it("lists entries with text search", async () => {
@@ -2823,14 +2608,12 @@ describe("Entry templates", () => {
       name: "Test Template",
       description: "A test",
       body: "## Test\n\nWrite here",
-      default_tags: ["test"],
       sort_order: 99,
     });
 
     expect(template.id).toBeTruthy();
     expect(template.slug).toBe("test-template");
     expect(template.name).toBe("Test Template");
-    expect(template.default_tags).toEqual(["test"]);
 
     const all = await listTemplates(pool);
     expect(all.some((t) => t.slug === "test-template")).toBe(true);
@@ -2853,7 +2636,7 @@ describe("Entry templates", () => {
     expect(updated!.slug).toBe("update-me"); // unchanged
   });
 
-  it("updates template optional fields (slug, description, default_tags, sort_order)", async () => {
+  it("updates template optional fields (slug, description, sort_order)", async () => {
     const template = await createTemplate(pool, {
       slug: "optional-fields",
       name: "Optional Fields Test",
@@ -2862,14 +2645,12 @@ describe("Entry templates", () => {
     const updated = await updateTemplate(pool, template.id, {
       slug: "optional-fields-updated",
       description: "A description",
-      default_tags: ["tag1", "tag2"],
       sort_order: 42,
     });
 
     expect(updated).not.toBeNull();
     expect(updated!.slug).toBe("optional-fields-updated");
     expect(updated!.description).toBe("A description");
-    expect(updated!.default_tags).toEqual(["tag1", "tag2"]);
     expect(updated!.sort_order).toBe(42);
   });
 

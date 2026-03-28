@@ -30,10 +30,6 @@ export function formatSearchResults(results: SearchResultRow[]): string {
 
     lines.push(headerParts.join(" "));
 
-    if (r.tags.length > 0) {
-      lines.push(`   \uD83C\uDFF7\uFE0F ${r.tags.join(", ")}`);
-    }
-
     const preview = r.text ? r.text.replace(/\n/g, " ").trim() : "";
     if (preview) {
       const truncated = preview.length > 200 ? preview.slice(0, 200) + "..." : preview;
@@ -74,10 +70,6 @@ export function formatSimilarResults(results: SimilarResultRow[]): string {
     if (r.city) headerParts.push(`\uD83D\uDCCD ${r.city}`);
 
     lines.push(headerParts.join(" "));
-
-    if (r.tags.length > 0) {
-      lines.push(`   \uD83C\uDFF7\uFE0F ${r.tags.join(", ")}`);
-    }
 
     const preview = r.text ? r.text.replace(/\n/g, " ").trim() : "";
     if (preview) {

@@ -1199,6 +1199,18 @@ const migrations: Migration[] = [
         CHECK (kind IN ('insight', 'reference', 'note', 'project', 'review'));
     `,
   },
+  {
+    name: "035-drop-tags",
+    getSql: () => `
+      DROP TABLE IF EXISTS entry_tags;
+      DROP TABLE IF EXISTS artifact_tags;
+      DROP TABLE IF EXISTS tags;
+      DROP INDEX IF EXISTS idx_knowledge_artifacts_tags;
+      ALTER TABLE knowledge_artifacts DROP COLUMN IF EXISTS tags;
+      ALTER TABLE todos DROP COLUMN IF EXISTS tags;
+      ALTER TABLE entry_templates DROP COLUMN IF EXISTS default_tags;
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

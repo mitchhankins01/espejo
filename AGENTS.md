@@ -81,13 +81,12 @@ src/
     get-entries-by-date.ts — Date range query.
     on-this-day.ts  — MM-DD across all years.
     find-similar.ts — Cosine similarity from a source entry.
-    list-tags.ts    — All tags with counts.
     entry-stats.ts  — Writing frequency and trends.
     conjugate-verb.ts — Spanish verb conjugation lookup from reference DB.
     log-vocabulary.ts — Track Spanish vocabulary with SRS state per chat.
     spanish-quiz.ts — Spaced-repetition quiz: get due cards, record reviews, stats.
     get-artifact.ts — Single artifact by ID with sources and version.
-    list-artifacts.ts — List/filter artifacts by kind, tags, pagination.
+    list-artifacts.ts — List/filter artifacts by kind, pagination.
     search-artifacts.ts — Hybrid RRF search over knowledge artifacts.
     search-content.ts — Unified cross-type search over entries + artifacts.
     get-oura-summary.ts — Single-day Oura health snapshot.
@@ -185,7 +184,7 @@ specs/
   spanish-learning.md, telegram-chatbot-plan.md, telegram-personality-plan.md,
   self-healing-organism.md, episodic-memory.md, memory-v2.md,
   oura-integration-plan.md, knowledge-artifacts.md, todos.md,
-  web-app.spec.md, web-tag-filtering.md, web-quick-switcher.md,
+  web-app.spec.md, web-quick-switcher.md,
   web-semantic-links.md, web-graph-view.md, web-feature-rollout.md,
   web-journaling.md, insight-engine.md
   — Research: ltm-research.md
@@ -202,7 +201,7 @@ web/                — React + Vite frontend (@espejo/web workspace). Knowledge
     index.css       — Tailwind CSS v4 entry + theme vars.
     constants/      — Shared artifact constants (kinds, labels, badge class mapping).
     pages/          — ArtifactList/Create/Edit + TodoList/Create/Edit + EntryList/Create/Edit + TemplateList/Create/Edit.
-    components/     — AuthGate, KindSelect, StatusSelect, EisenhowerMatrix, TagInput, SourcePicker, MarkdownEditor, QuickSwitcher, GraphView, MediaGallery, MediaUpload, TemplatePicker.
+    components/     — AuthGate, KindSelect, StatusSelect, EisenhowerMatrix, SourcePicker, MarkdownEditor, QuickSwitcher, GraphView, MediaGallery, MediaUpload, TemplatePicker.
   e2e/              — Playwright e2e tests (auth, CRUD, filters, pagination, theme).
 docs/               — Deep documentation (see Deep Docs section below).
 ```
@@ -232,7 +231,7 @@ The hybrid search in `search_entries` runs two parallel retrievals and merges wi
 2. **BM25**: Full-text search via tsvector (`@@` operator with `ts_rank`)
 3. **Merge**: RRF with k=60 — `score = 1/(60 + rank_semantic) + 1/(60 + rank_bm25)`
 
-Both retrievals pull top-20 candidates. The merge produces the final ranked list. Optional filters (date range, tags, city) are applied as WHERE clauses in BOTH retrievals to keep results consistent.
+Both retrievals pull top-20 candidates. The merge produces the final ranked list. Optional filters (date range, city) are applied as WHERE clauses in BOTH retrievals to keep results consistent.
 
 The query must embed the search string at runtime using the same model used for indexing (`text-embedding-3-small`).
 
@@ -257,9 +256,6 @@ my dopamine baseline...
 
 Keep formatters pure functions with no side effects.
 
-### Tags Are Normalized
-
-Tags live in a separate `tags` table with a junction table `entry_tags`. This enables efficient tag-based queries and `list_tags` aggregation. When importing, upsert tags (`ON CONFLICT (name) DO NOTHING`) and create junction records.
 
 ### Sync Is Idempotent
 

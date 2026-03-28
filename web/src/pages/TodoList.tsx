@@ -196,14 +196,6 @@ export function TodoList() {
                           })()}
                         </span>
                       )}
-                      {todo.tags.map((tag) => (
-                        <span
-                          key={tag}
-                          className="px-2 py-0.5 rounded-full bg-pine-500/10 text-pine-700 dark:text-pine-300 font-medium"
-                        >
-                          {tag}
-                        </span>
-                      ))}
                     </div>
                   </Link>
                 ))}

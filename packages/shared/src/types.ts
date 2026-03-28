@@ -8,7 +8,6 @@ export interface JournalEntry {
   created_at: string;
   modified_at: string | null;
   timezone: string | null;
-  tags: string[];
 
   // Location
   city: string | null;
@@ -47,7 +46,6 @@ export interface SearchResult {
   created_at: string;
   preview: string;
   city: string | null;
-  tags: string[];
   rrf_score: number;
   match_sources: ("semantic" | "fulltext")[];
 }
@@ -57,13 +55,7 @@ export interface SimilarResult {
   created_at: string;
   preview: string;
   city: string | null;
-  tags: string[];
   similarity_score: number;
-}
-
-export interface TagCount {
-  name: string;
-  count: number;
 }
 
 export interface EntryStats {
@@ -84,11 +76,9 @@ export interface EntryStats {
 
 export interface CreateEntryInput {
   text: string;
-  tags?: string[];
   timezone?: string;
 }
 
 export interface UpdateEntryInput {
   text?: string;
-  tags?: string[];
 }

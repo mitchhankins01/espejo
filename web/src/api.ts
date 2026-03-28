@@ -10,7 +10,6 @@ export interface Artifact {
   kind: ArtifactKind;
   title: string;
   body: string;
-  tags: string[];
   has_embedding: boolean;
   source: "web" | "obsidian" | "mcp" | "telegram";
   source_path: string | null;
@@ -46,12 +45,11 @@ export interface GraphData {
     id: string;
     title: string;
     kind: ArtifactKind;
-    tags: string[];
   }>;
   edges: Array<{
     source: string;
     target: string;
-    type: "semantic" | "explicit" | "tag" | "source";
+    type: "semantic" | "explicit" | "source";
     weight?: number;
   }>;
 }
@@ -90,7 +88,6 @@ export interface Entry {
   temperature: number | null;
   weather_conditions: string | null;
   humidity: number | null;
-  tags: string[];
   photo_count: number;
   video_count: number;
   audio_count: number;
@@ -104,7 +101,6 @@ export interface EntryTemplate {
   description: string | null;
   body: string;
   system_prompt: string | null;
-  default_tags: string[];
   sort_order: number;
   created_at: string;
   updated_at: string;
@@ -118,7 +114,6 @@ export interface Todo {
   status: TodoStatus;
   next_step: string | null;
   body: string;
-  tags: string[];
   urgent: boolean;
   important: boolean;
   is_focus: boolean;
@@ -237,15 +232,11 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function listArtifacts(params?: {
   kind?: string;
-  tags?: string;
-  tags_mode?: "any" | "all";
   limit?: number;
   offset?: number;
 }): Promise<{ items: Artifact[]; total: number }> {
   const qs = new URLSearchParams();
   if (params?.kind) qs.set("kind", params.kind);
-  if (params?.tags) qs.set("tags", params.tags);
-  if (params?.tags_mode) qs.set("tags_mode", params.tags_mode);
   if (params?.limit) qs.set("limit", String(params.limit));
   if (params?.offset) qs.set("offset", String(params.offset));
   const query = qs.toString();
@@ -255,14 +246,10 @@ export function listArtifacts(params?: {
 export function searchArtifacts(
   q: string,
   kind?: string,
-  tags?: string,
-  tagsMode?: "any" | "all",
   semantic?: boolean
 ): Promise<Artifact[]> {
   const qs = new URLSearchParams({ q });
   if (kind) qs.set("kind", kind);
-  if (tags) qs.set("tags", tags);
-  if (tagsMode) qs.set("tags_mode", tagsMode);
   if (semantic !== undefined) qs.set("semantic", String(semantic));
   return apiFetch(`/api/artifacts?${qs.toString()}`);
 }
@@ -275,7 +262,6 @@ export function createArtifact(data: {
   kind: string;
   title: string;
   body: string;
-  tags?: string[];
   source_entry_uuids?: string[];
 }): Promise<Artifact> {
   return apiFetch("/api/artifacts", {
@@ -290,7 +276,6 @@ export function updateArtifact(
     kind?: string;
     title?: string;
     body?: string;
-    tags?: string[];
     source_entry_uuids?: string[];
     expected_version: number;
   }
@@ -303,10 +288,6 @@ export function updateArtifact(
 
 export function deleteArtifact(id: string): Promise<void> {
   return apiFetch(`/api/artifacts/${id}`, { method: "DELETE" });
-}
-
-export function listArtifactTags(): Promise<{ name: string; count: number }[]> {
-  return apiFetch("/api/artifacts/tags");
 }
 
 export function listArtifactTitles(): Promise<ArtifactTitle[]> {
@@ -325,16 +306,11 @@ export function searchEntries(q: string): Promise<EntrySearchResult[]> {
   return apiFetch(`/api/entries/search?q=${encodeURIComponent(q)}`);
 }
 
-export function listEntryTags(): Promise<{ name: string; count: number }[]> {
-  return apiFetch("/api/entries/tags");
-}
-
 export function listEntries(params?: {
   limit?: number;
   offset?: number;
   from?: string;
   to?: string;
-  tag?: string;
   source?: EntrySource;
   q?: string;
 }): Promise<{ items: Entry[]; total: number }> {
@@ -343,7 +319,6 @@ export function listEntries(params?: {
   if (params?.offset) qs.set("offset", String(params.offset));
   if (params?.from) qs.set("from", params.from);
   if (params?.to) qs.set("to", params.to);
-  if (params?.tag) qs.set("tag", params.tag);
   if (params?.source) qs.set("source", params.source);
   if (params?.q) qs.set("q", params.q);
   const query = qs.toString();
@@ -358,7 +333,6 @@ export function createEntry(data: {
   text: string;
   created_at?: string;
   timezone?: string;
-  tags?: string[];
 }): Promise<Entry> {
   return apiFetch("/api/entries", {
     method: "POST",
@@ -372,7 +346,6 @@ export function updateEntry(
     text?: string;
     created_at?: string;
     timezone?: string;
-    tags?: string[];
     expected_version: number;
   }
 ): Promise<Entry> {
@@ -459,7 +432,6 @@ export function createTemplate(data: {
   name: string;
   description?: string | null;
   body: string;
-  default_tags?: string[];
   sort_order?: number;
 }): Promise<EntryTemplate> {
   return apiFetch("/api/templates", {
@@ -475,7 +447,6 @@ export function updateTemplate(
     name?: string;
     description?: string | null;
     body?: string;
-    default_tags?: string[];
     sort_order?: number;
   }
 ): Promise<EntryTemplate> {
@@ -523,7 +494,6 @@ export function createTodo(data: {
   status?: TodoStatus;
   next_step?: string | null;
   body?: string;
-  tags?: string[];
   urgent?: boolean;
   important?: boolean;
   parent_id?: string;
@@ -541,7 +511,6 @@ export function updateTodo(
     status?: TodoStatus;
     next_step?: string | null;
     body?: string;
-    tags?: string[];
     urgent?: boolean;
     important?: boolean;
   }

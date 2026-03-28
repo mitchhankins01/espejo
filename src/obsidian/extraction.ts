@@ -18,7 +18,6 @@ const VAULT_BUCKET = "artifacts";
 const extractedInsightSchema = z.object({
   title: z.string(),
   body: z.string(),
-  tags: z.array(z.string()),
   linkedTo: z.array(z.string()),
   addToProject: z.string().nullable().optional(),
 });
@@ -30,7 +29,6 @@ const extractionResponseSchema = z.object({
 export interface ExtractedInsight {
   title: string;
   body: string;
-  tags: string[];
   linkedTo: string[];
   addToProject?: string | null;
 }
@@ -83,7 +81,6 @@ ${artifactContext}
    - If it belongs in an existing project map, set "addToProject" to that project's title.
 4. Title should state the idea directly (e.g. "Nicotine cravings mask an underlying need for stimulation" not "Insight about nicotine").
 5. Body should be 1-3 sentences expanding on the idea. State facts and observations directly — no meta-commentary about the source material.
-6. Add relevant tags (lowercase, hyphenated).
 
 Respond ONLY with JSON:
 {
@@ -91,7 +88,6 @@ Respond ONLY with JSON:
     {
       "title": "the idea stated directly",
       "body": "1-3 sentences expanding on the core idea",
-      "tags": ["tag1", "tag2"],
       "linkedTo": ["Existing Artifact Title"],
       "addToProject": "Project Title or omit"
     }
@@ -106,7 +102,6 @@ function insightToMarkdown(
   insight: ExtractedInsight,
   sourceReviewTitle: string
 ): string {
-  const tags = insight.tags.map((t) => `  - ${t}`).join("\n");
   const dedupedLinks = insight.linkedTo.filter(
     (t) => t.toLowerCase() !== sourceReviewTitle.toLowerCase()
   );
@@ -118,8 +113,6 @@ function insightToMarkdown(
   return `---
 kind: insight
 status: pending
-tags:
-${tags}
 ---
 ${insight.body}
 

@@ -20,11 +20,6 @@ export function formatEntry(entry: EntryRow): string {
   const locationStr = locationParts.length > 0 ? ` \u2014 ${locationParts.join(", ")}` : "";
   lines.push(`\uD83D\uDCC5 ${dateStr}${locationStr}`);
 
-  // Tags
-  if (entry.tags.length > 0) {
-    lines.push(`\uD83C\uDFF7\uFE0F ${entry.tags.join(", ")}`);
-  }
-
   lines.push("");
 
   // Text

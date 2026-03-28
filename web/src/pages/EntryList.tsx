@@ -41,7 +41,6 @@ export function EntryList() {
   const [q, setQ] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  const [tag, setTag] = useState("");
   const [source, setSource] = useState<"" | EntrySource>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -64,7 +63,6 @@ export function EntryList() {
         q: q.trim() || undefined,
         from: from || undefined,
         to: to || undefined,
-        tag: tag.trim() || undefined,
         source: source || undefined,
       });
       setEntries(result.items);
@@ -74,7 +72,7 @@ export function EntryList() {
     } finally {
       setLoading(false);
     }
-  }, [page, q, from, to, tag, source]);
+  }, [page, q, from, to, source]);
 
   useEffect(() => {
     const timer = setTimeout(load, q ? 300 : 0);
@@ -162,12 +160,6 @@ export function EntryList() {
           <option value="dayone">Day One</option>
           <option value="telegram">Telegram</option>
         </select>
-        <input
-          value={tag}
-          onChange={(event) => setTag(event.target.value)}
-          placeholder="Filter by tag"
-          className="px-3 py-2 rounded-lg border border-border bg-surface-alt text-sm text-text-primary"
-        />
       </div>
 
       {error && (
@@ -221,18 +213,6 @@ export function EntryList() {
                               alt={`Entry ${entry.uuid} photo`}
                               className="h-14 w-14 rounded-md object-cover border border-border"
                             />
-                          ))}
-                        </div>
-                      )}
-                      {entry.tags.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {entry.tags.map((item) => (
-                            <span
-                              key={item}
-                              className="px-2 py-0.5 rounded-full text-[11px] bg-pine-500/10 text-pine-700 dark:text-pine-300"
-                            >
-                              {item}
-                            </span>
                           ))}
                         </div>
                       )}

@@ -3,8 +3,8 @@ import {
   formatSearchResults,
   formatSimilarResults,
 } from "../../src/formatters/search-results.js";
-import { toSearchResult, toSimilarResult, toTagCount } from "../../src/formatters/mappers.js";
-import type { EntryRow, SearchResultRow, SimilarResultRow, TagCountRow } from "../../src/db/queries.js";
+import { toSearchResult, toSimilarResult } from "../../src/formatters/mappers.js";
+import type { EntryRow, SearchResultRow, SimilarResultRow } from "../../src/db/queries.js";
 
 function makeEntry(overrides: Partial<EntryRow> = {}): EntryRow {
   return {
@@ -23,7 +23,6 @@ function makeEntry(overrides: Partial<EntryRow> = {}): EntryRow {
     temperature: null,
     weather_conditions: null,
     humidity: null,
-    tags: [],
     photo_count: 0,
     video_count: 0,
     audio_count: 0,
@@ -107,13 +106,6 @@ describe("formatSearchResults", () => {
     expect(result).toContain("TEST-UUID");
   });
 
-  it("shows tags when present", () => {
-    const result = formatSearchResults([
-      makeSearchResult({ tags: ["work", "health"] }),
-    ]);
-    expect(result).toContain("work, health");
-  });
-
   it("truncates long text in preview", () => {
     const longText = "a".repeat(300);
     const result = formatSearchResults([
@@ -146,13 +138,6 @@ describe("formatSimilarResults", () => {
   it("includes UUID", () => {
     const result = formatSimilarResults([makeSimilarResult()]);
     expect(result).toContain("TEST-UUID");
-  });
-
-  it("shows tags when present", () => {
-    const result = formatSimilarResults([
-      makeSimilarResult({ tags: ["work", "health"] }),
-    ]);
-    expect(result).toContain("work, health");
   });
 
   it("shows city when present", () => {
@@ -202,7 +187,6 @@ describe("toSearchResult", () => {
       uuid: "TEST-UUID",
       created_at: "2024-03-15T09:30:00.000Z",
       text: "This is a preview of the entry content...",
-      tags: [],
       rrf_score: 0.032,
       media_counts: { photos: 0, videos: 0, audios: 0 },
     });
@@ -250,7 +234,6 @@ describe("toSimilarResult", () => {
       uuid: "TEST-UUID",
       created_at: "2024-03-15T09:30:00.000Z",
       text: "This is a preview...",
-      tags: [],
       similarity_score: 0.85,
       media_counts: { photos: 0, videos: 0, audios: 0 },
     });
@@ -267,9 +250,3 @@ describe("toSimilarResult", () => {
   });
 });
 
-describe("toTagCount", () => {
-  it("maps name and count", () => {
-    const row: TagCountRow = { name: "work", count: 42 };
-    expect(toTagCount(row)).toEqual({ name: "work", count: 42 });
-  });
-});

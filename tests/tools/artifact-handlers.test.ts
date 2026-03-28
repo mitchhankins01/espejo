@@ -28,7 +28,6 @@ function makeArtifact(overrides: Partial<ArtifactRow> = {}): ArtifactRow {
     kind: "insight",
     title: "Test Artifact",
     body: "Test body content",
-    tags: ["test"],
     has_embedding: true,
     created_at: new Date("2025-01-15T10:00:00Z"),
     updated_at: new Date("2025-01-15T10:00:00Z"),
@@ -46,7 +45,6 @@ function makeArtifactSearchResult(
     kind: "insight",
     title: "Test Artifact",
     body: "Test body content",
-    tags: ["test"],
     has_embedding: true,
     rrf_score: 0.032,
     has_semantic: true,
@@ -126,16 +124,12 @@ describe("handleListArtifacts", () => {
 
     await handleListArtifacts(mockPool, {
       kind: "reference",
-      tags: ["sleep"],
-      tags_mode: "all",
       limit: 5,
       offset: 10,
     });
 
     expect(mockQueries.listArtifacts).toHaveBeenCalledWith(mockPool, {
       kind: "reference",
-      tags: ["sleep"],
-      tags_mode: "all",
       limit: 5,
       offset: 10,
     });
@@ -218,9 +212,7 @@ describe("handleSearchContent", () => {
       date_from: "2024-01-01",
       date_to: "2024-12-31",
       city: "Barcelona",
-      entry_tags: ["health"],
       artifact_kind: "insight",
-      artifact_tags: ["sleep"],
       limit: 20,
     });
 
@@ -233,9 +225,7 @@ describe("handleSearchContent", () => {
         date_from: "2024-01-01",
         date_to: "2024-12-31",
         city: "Barcelona",
-        entry_tags: ["health"],
         artifact_kind: "insight",
-        artifact_tags: ["sleep"],
       },
       20
     );

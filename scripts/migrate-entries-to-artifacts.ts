@@ -78,10 +78,10 @@ async function main(): Promise<void> {
         await client.query("BEGIN");
 
         const { rows: [artifact] } = await client.query<{ id: string }>(
-          `INSERT INTO knowledge_artifacts (kind, title, body, tags, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $5)
+          `INSERT INTO knowledge_artifacts (kind, title, body, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $4)
            RETURNING id`,
-          [KIND, title, body, ["llm"], entry.created_at]
+          [KIND, title, body, entry.created_at]
         );
 
         await client.query(

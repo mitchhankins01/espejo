@@ -1,8 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { createArtifact, listArtifactTags } from "../api.ts";
+import { createArtifact } from "../api.ts";
 import { KindSelect } from "../components/KindSelect.tsx";
-import { TagInput } from "../components/TagInput.tsx";
 import { SourcePicker } from "../components/SourcePicker.tsx";
 import { MarkdownEditor } from "../components/MarkdownEditor.tsx";
 
@@ -11,15 +10,9 @@ export function ArtifactCreate() {
   const [kind, setKind] = useState("note");
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
-  const [tags, setTags] = useState<string[]>([]);
   const [sources, setSources] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [tagSuggestions, setTagSuggestions] = useState<string[]>([]);
-
-  useEffect(() => {
-    listArtifactTags().then((t) => setTagSuggestions(t.map((x) => x.name))).catch(() => {});
-  }, []);
 
   async function handleSave() {
     if (!title.trim() || !body.trim()) {
@@ -34,7 +27,6 @@ export function ArtifactCreate() {
         kind,
         title: title.trim(),
         body: body.trim(),
-        tags: tags.length > 0 ? tags : undefined,
         source_entry_uuids: sources.length > 0 ? sources : undefined,
       });
       navigate(`/${artifact.id}`);
@@ -89,11 +81,6 @@ export function ArtifactCreate() {
             placeholder="Write your artifact content in markdown..."
             enableArtifactLinks
           />
-        </div>
-
-        <div>
-          <label htmlFor="create-tags" className="block text-sm text-text-muted mb-1.5 font-medium">Tags</label>
-          <TagInput id="create-tags" tags={tags} onChange={setTags} suggestions={tagSuggestions} />
         </div>
 
         <div>

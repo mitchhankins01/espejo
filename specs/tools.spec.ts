@@ -93,7 +93,6 @@ export interface EntryResult {
   latitude?: number;
   longitude?: number;
   timezone?: string;
-  tags: string[];
   weather?: {
     temperature?: number;
     conditions?: string;
@@ -112,11 +111,6 @@ export type SearchResult = EntryResult & {
   rrf_score: number;
   match_sources: ("semantic" | "fulltext")[];
 };
-
-export interface TagCount {
-  name: string;
-  count: number;
-}
 
 export interface EntryStats {
   total_entries: number;
@@ -145,7 +139,7 @@ export const toolSpecs = {
     description:
       "Hybrid semantic + keyword search across journal entries using Reciprocal Rank Fusion (BM25 full-text + vector cosine similarity). " +
       "Finds entries by meaning even when exact words don't match. " +
-      "Supports optional filtering by date range, tags, and city. " +
+      "Supports optional filtering by date range and city. " +
       "Entries often contain somatic check-ins, sleep/readiness scores, and body-state reflections that can be cross-referenced with health and biometric data.",
     params: z.object({
       query: z
@@ -160,10 +154,6 @@ export const toolSpecs = {
       date_to: dateString
         .optional()
         .describe("Filter entries up to this date, inclusive"),
-      tags: z
-        .array(z.string())
-        .optional()
-        .describe("Filter to entries with any of these tags"),
       city: z.string().optional().describe("Filter by city name"),
       limit: limitParam(10, 50),
     }),
@@ -179,11 +169,6 @@ export const toolSpecs = {
           "Combines keyword match on 'Barcelona' with date filter, boosted by semantic relevance",
       },
       {
-        input: { query: "morning routine", tags: ["5-minute-am"] },
-        behavior:
-          "Searches within tagged entries for semantic match on morning routines",
-      },
-      {
         input: { query: "nicotine dopamine baseline" },
         behavior:
           "Multi-term query works correctly (unlike Day One MCP which returns 0 results for multi-term queries)",
@@ -195,7 +180,7 @@ export const toolSpecs = {
     name: "get_entry" as const,
     annotations: READ_ONLY,
     description:
-      "Get a single journal entry by its UUID with full text, all metadata, tags, weather, location, and media counts. " +
+      "Get a single journal entry by its UUID with full text, all metadata, weather, location, and media counts. " +
       "Returns structured data including nested weather and location objects.",
     params: z.object({
       uuid: z.string().min(1).describe("The unique entry identifier"),
@@ -204,7 +189,7 @@ export const toolSpecs = {
       {
         input: { uuid: "ABC123-DEF456" },
         behavior:
-          "Returns full entry with text, location, weather, tags, and media counts",
+          "Returns full entry with text, location, weather, and media counts",
       },
     ],
   },
@@ -287,21 +272,6 @@ export const toolSpecs = {
         input: { uuid: "ABC123", limit: 10 },
         behavior:
           "Returns 10 similar entries with similarity scores between 0 and 1",
-      },
-    ],
-  },
-
-  list_tags: {
-    name: "list_tags" as const,
-    annotations: READ_ONLY,
-    description:
-      "List all unique tags used across journal entries, with usage counts, ordered by frequency (most used first).",
-    params: z.object({}),
-    examples: [
-      {
-        input: {},
-        behavior:
-          'Returns array of {name, count} like [{name: "morning-review", count: 342}, {name: "reflection", count: 201}, ...]',
       },
     ],
   },
@@ -399,14 +369,14 @@ export const toolSpecs = {
     name: "get_artifact" as const,
     annotations: READ_ONLY,
     description:
-      "Get a single knowledge artifact by ID with full content, tags, source entry UUIDs, version, and embedding status.",
+      "Get a single knowledge artifact by ID with full content, source entry UUIDs, version, and embedding status.",
     params: z.object({
       id: z.string().min(1).describe("The artifact UUID"),
     }),
     examples: [
       {
         input: { id: "abc-123" },
-        behavior: "Returns full artifact with body, tags, source_entry_uuids, version, has_embedding",
+        behavior: "Returns full artifact with body, source_entry_uuids, version, has_embedding",
       },
     ],
   },
@@ -415,12 +385,10 @@ export const toolSpecs = {
     name: "list_artifacts" as const,
     annotations: READ_ONLY,
     description:
-      "List knowledge artifacts with optional filtering by kind and tags. Ordered by most recently updated.",
+      "List knowledge artifacts with optional filtering by kind. Ordered by most recently updated.",
     params: z.object({
       kind: z.enum(["insight", "reference", "note", "project", "review"]).optional().describe("Filter by artifact kind"),
       source: z.enum(["web", "obsidian", "mcp", "telegram"]).optional().describe("Filter by source"),
-      tags: z.array(z.string()).optional().describe("Filter by tags"),
-      tags_mode: z.enum(["any", "all"]).default("any").describe("Tag filter mode: 'any' (overlap) or 'all' (contains all)"),
       limit: limitParam(20, 100),
       offset: z.number().int().min(0).default(0).describe("Pagination offset"),
     }),
@@ -428,10 +396,6 @@ export const toolSpecs = {
       {
         input: { kind: "insight" },
         behavior: "Returns up to 20 insight artifacts ordered by updated_at DESC",
-      },
-      {
-        input: { tags: ["sleep", "dopamine"], tags_mode: "all" },
-        behavior: "Returns artifacts tagged with both 'sleep' AND 'dopamine'",
       },
     ],
   },
@@ -446,8 +410,6 @@ export const toolSpecs = {
       query: z.string().min(1).describe("Search query"),
       kind: z.enum(["insight", "reference", "note", "project", "review"]).optional().describe("Filter by artifact kind"),
       source: z.enum(["web", "obsidian", "mcp", "telegram"]).optional().describe("Filter by source"),
-      tags: z.array(z.string()).optional().describe("Filter by tags"),
-      tags_mode: z.enum(["any", "all"]).default("any").describe("Tag filter mode"),
       limit: limitParam(10, 50),
     }),
     examples: [
@@ -471,12 +433,10 @@ export const toolSpecs = {
       date_from: dateString.optional().describe("Filter entries from this date"),
       date_to: dateString.optional().describe("Filter entries up to this date"),
       city: z.string().optional().describe("Filter entries by city"),
-      entry_tags: z.array(z.string()).optional().describe("Filter entries by tags"),
       artifact_kind: z.enum(["insight", "reference", "note", "project", "review"]).optional()
         .describe("Filter artifacts by kind"),
       artifact_source: z.enum(["web", "obsidian", "mcp", "telegram"]).optional()
         .describe("Filter artifacts by source"),
-      artifact_tags: z.array(z.string()).optional().describe("Filter artifacts by tags"),
       limit: limitParam(10, 50),
     }),
     examples: [
@@ -621,7 +581,6 @@ export const toolSpecs = {
       status: z.enum(["active", "waiting", "done", "someday"]).optional().describe("Status (default: active)"),
       next_step: z.string().max(500).optional().describe("Current action step"),
       body: z.string().optional().describe("Markdown notes/context"),
-      tags: z.array(z.string()).optional().describe("Tags"),
       urgent: z.boolean().optional().describe("Is urgent (Eisenhower)"),
       important: z.boolean().optional().describe("Is important (Eisenhower)"),
       parent_id: z.string().optional().describe("Parent todo ID for subtasks"),
@@ -649,7 +608,6 @@ export const toolSpecs = {
       status: z.enum(["active", "waiting", "done", "someday"]).optional().describe("New status"),
       next_step: z.string().max(500).nullable().optional().describe("New next step (null to clear)"),
       body: z.string().optional().describe("New body"),
-      tags: z.array(z.string()).optional().describe("New tags"),
       urgent: z.boolean().optional().describe("Update urgency"),
       important: z.boolean().optional().describe("Update importance"),
     }),
@@ -759,7 +717,6 @@ export interface ArtifactResult {
   kind: string;
   title: string;
   body: string;
-  tags: string[];
   has_embedding: boolean;
   source_entry_uuids: string[];
   version: number;
@@ -772,7 +729,6 @@ export interface ArtifactSearchResult {
   kind: string;
   title: string;
   body: string;
-  tags: string[];
   has_embedding: boolean;
   rrf_score: number;
   match_sources: ("semantic" | "fulltext")[];

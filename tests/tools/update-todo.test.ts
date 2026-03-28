@@ -14,7 +14,6 @@ describe("update_todo spec", () => {
       status: "done",
       next_step: null,
       body: "Updated",
-      tags: ["x"],
       urgent: false,
       important: true,
     });

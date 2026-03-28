@@ -80,7 +80,6 @@ const {
   mockCountArtifacts,
   mockSearchArtifacts,
   mockSearchArtifactsKeyword,
-  mockListArtifactTags,
   mockListArtifactTitles,
   mockResolveArtifactTitleToId,
   mockSyncExplicitLinks,
@@ -118,7 +117,6 @@ const {
   mockUpdateTemplate,
   mockDeleteTemplate,
   mockUpdateEntryEmbeddingIfVersionMatches,
-  mockListTags,
 } = vi.hoisted(() => ({
   mockPool: {},
   mockUpsertDailyMetric: vi.fn(),
@@ -136,7 +134,6 @@ const {
   mockCountArtifacts: vi.fn(),
   mockSearchArtifacts: vi.fn(),
   mockSearchArtifactsKeyword: vi.fn(),
-  mockListArtifactTags: vi.fn(),
   mockListArtifactTitles: vi.fn(),
   mockResolveArtifactTitleToId: vi.fn(),
   mockSyncExplicitLinks: vi.fn(),
@@ -173,7 +170,6 @@ const {
   mockUpdateTemplate: vi.fn(),
   mockDeleteTemplate: vi.fn(),
   mockUpdateEntryEmbeddingIfVersionMatches: vi.fn(),
-  mockListTags: vi.fn(),
 }));
 
 vi.mock("../../src/db/client.js", () => ({
@@ -200,7 +196,6 @@ vi.mock("../../src/db/queries.js", () => ({
   countArtifacts: mockCountArtifacts,
   searchArtifacts: mockSearchArtifacts,
   searchArtifactsKeyword: mockSearchArtifactsKeyword,
-  listArtifactTags: mockListArtifactTags,
   listArtifactTitles: mockListArtifactTitles,
   resolveArtifactTitleToId: mockResolveArtifactTitleToId,
   syncExplicitLinks: mockSyncExplicitLinks,
@@ -236,7 +231,6 @@ vi.mock("../../src/db/queries.js", () => ({
   updateTemplate: mockUpdateTemplate,
   deleteTemplate: mockDeleteTemplate,
   updateEntryEmbeddingIfVersionMatches: mockUpdateEntryEmbeddingIfVersionMatches,
-  listTags: mockListTags,
 }));
 
 const mockHandleRequest = vi.fn();
@@ -1628,7 +1622,6 @@ describe("startHttpServer", () => {
     kind: "insight",
     title: "Test",
     body: "Body",
-    tags: ["test"],
     has_embedding: true,
     source: "web",
     source_path: null,
@@ -1695,7 +1688,7 @@ describe("startHttpServer", () => {
     expect(mockSearchArtifactsKeyword).toHaveBeenCalledWith(
       mockPool,
       "class",
-      { kind: undefined, tags: undefined, tags_mode: "any" },
+      { kind: undefined, source: undefined },
       20
     );
     expect(mockRes.json).toHaveBeenCalledWith([mockArtifact]);
@@ -1769,35 +1762,6 @@ describe("startHttpServer", () => {
     (config as any).server.mcpSecret = "";
   });
 
-  it("GET /api/artifacts/tags returns tag list", async () => {
-    mockListArtifactTags.mockResolvedValue([{ name: "health", count: 3 }]);
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/artifacts/tags");
-    const handler = call![1];
-
-    const mockReq = { headers: {} };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockListArtifactTags).toHaveBeenCalled();
-    expect(mockRes.json).toHaveBeenCalledWith([{ name: "health", count: 3 }]);
-  });
-
-  it("GET /api/artifacts/tags returns 500 on error", async () => {
-    mockListArtifactTags.mockRejectedValue(new Error("db error"));
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/artifacts/tags");
-    const handler = call![1];
-
-    const mockReq = { headers: {} };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockRes.status).toHaveBeenCalledWith(500);
-  });
-
   it("GET /api/artifacts/titles returns artifact titles", async () => {
     mockListArtifactTitles.mockResolvedValue([
       { id: "art-001", title: "First", kind: "insight" },
@@ -1842,14 +1806,12 @@ describe("startHttpServer", () => {
           id: "art-001",
           title: "One",
           kind: "insight",
-          tags: ["health"],
           has_embedding: true,
         },
         {
           id: "art-002",
           title: "Two",
           kind: "reference",
-          tags: ["health", "sleep"],
           has_embedding: true,
         },
       ],
@@ -2325,7 +2287,6 @@ describe("startHttpServer", () => {
         status: "active",
         next_step: null,
         body: "",
-        tags: [],
         urgent: false,
         important: false,
         is_focus: false,
@@ -2389,7 +2350,6 @@ describe("startHttpServer", () => {
       status: "active",
       next_step: null,
       body: "",
-      tags: [],
     };
     mockGetTodoById.mockResolvedValue(todo);
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
@@ -2423,7 +2383,6 @@ describe("startHttpServer", () => {
       status: "active",
       next_step: null,
       body: "",
-      tags: [],
     };
     mockCreateTodo.mockResolvedValue(todo);
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
@@ -2470,7 +2429,6 @@ describe("startHttpServer", () => {
       status: "done",
       next_step: null,
       body: "",
-      tags: [],
     };
     mockUpdateTodo.mockResolvedValue(todo);
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
@@ -2716,37 +2674,8 @@ describe("startHttpServer", () => {
   // Journal Entries CRUD
   // ====================================================================
 
-  it("GET /api/entries/tags returns tag list", async () => {
-    mockListTags.mockResolvedValue([{ name: "morning", count: 5 }]);
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/entries/tags");
-    const handler = call![1];
-
-    const mockReq = { headers: {} };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockListTags).toHaveBeenCalledWith(mockPool);
-    expect(mockRes.json).toHaveBeenCalledWith([{ name: "morning", count: 5 }]);
-  });
-
-  it("GET /api/entries/tags returns 500 on error", async () => {
-    mockListTags.mockRejectedValue(new Error("db error"));
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/entries/tags");
-    const handler = call![1];
-
-    const mockReq = { headers: {} };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockRes.status).toHaveBeenCalledWith(500);
-  });
-
   it("GET /api/entries returns paginated list", async () => {
-    const items = [{ uuid: "e1", text: "hello", source: "web", version: 1, tags: [] }];
+    const items = [{ uuid: "e1", text: "hello", source: "web", version: 1 }];
     mockListEntries.mockResolvedValue({ rows: items, count: 1 });
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
 
@@ -2801,17 +2730,17 @@ describe("startHttpServer", () => {
   });
 
   it("POST /api/entries creates entry", async () => {
-    const entry = { uuid: "new-1", text: "hello", source: "web", version: 1, tags: [] };
+    const entry = { uuid: "new-1", text: "hello", source: "web", version: 1 };
     mockCreateEntry.mockResolvedValue(entry);
     await startHttpServer((() => ({ connect: vi.fn() })) as any);
 
     const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/entries");
     const handler = call![1];
-    const mockReq = { headers: {}, body: { text: "hello", tags: ["test"] } };
+    const mockReq = { headers: {}, body: { text: "hello" } };
     const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
 
     await handler(mockReq, mockRes);
-    expect(mockCreateEntry).toHaveBeenCalledWith(mockPool, expect.objectContaining({ text: "hello", tags: ["test"] }));
+    expect(mockCreateEntry).toHaveBeenCalledWith(mockPool, expect.objectContaining({ text: "hello" }));
     expect(mockRes.status).toHaveBeenCalledWith(201);
   });
 

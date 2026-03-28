@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { deleteTemplate, getTemplate, updateTemplate } from "../api.ts";
 import { MarkdownEditor } from "../components/MarkdownEditor.tsx";
-import { TagInput } from "../components/TagInput.tsx";
 
 function slugify(input: string): string {
   return input
@@ -26,7 +25,6 @@ export function TemplateEdit() {
   const [slug, setSlug] = useState("");
   const [description, setDescription] = useState("");
   const [body, setBody] = useState("");
-  const [defaultTags, setDefaultTags] = useState<string[]>([]);
   const [sortOrder, setSortOrder] = useState(0);
 
   const load = useCallback(async () => {
@@ -39,7 +37,6 @@ export function TemplateEdit() {
       setSlug(template.slug);
       setDescription(template.description ?? "");
       setBody(template.body);
-      setDefaultTags(template.default_tags);
       setSortOrder(template.sort_order);
     } catch (err) {
       setError(String(err));
@@ -66,7 +63,6 @@ export function TemplateEdit() {
         slug: slugify(slug || name),
         description: description.trim() || null,
         body,
-        default_tags: defaultTags,
         sort_order: sortOrder,
       });
       navigate("/templates");
@@ -189,16 +185,6 @@ export function TemplateEdit() {
             Body (Markdown)
           </label>
           <MarkdownEditor value={body} onChange={setBody} />
-        </div>
-
-        <div>
-          <label
-            htmlFor="template-edit-tags"
-            className="block text-sm text-text-muted mb-1.5 font-medium"
-          >
-            Default tags
-          </label>
-          <TagInput id="template-edit-tags" tags={defaultTags} onChange={setDefaultTags} />
         </div>
 
         <div>

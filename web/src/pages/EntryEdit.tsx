@@ -4,13 +4,11 @@ import {
   deleteEntry,
   deleteEntryMedia,
   getEntry,
-  listEntryTags,
   updateEntry,
   uploadEntryMedia,
   type Entry,
 } from "../api.ts";
 import { MarkdownEditor } from "../components/MarkdownEditor.tsx";
-import { TagInput } from "../components/TagInput.tsx";
 import { MediaGallery } from "../components/MediaGallery.tsx";
 import { MediaUpload, mediaUploadKey } from "../components/MediaUpload.tsx";
 
@@ -47,8 +45,6 @@ export function EntryEdit() {
 
   const [entry, setEntry] = useState<Entry | null>(null);
   const [text, setText] = useState("");
-  const [tags, setTags] = useState<string[]>([]);
-  const [tagSuggestions, setTagSuggestions] = useState<string[]>([]);
   const [timezone, setTimezone] = useState("");
   const [createdAtLocal, setCreatedAtLocal] = useState("");
   const [version, setVersion] = useState(0);
@@ -72,7 +68,6 @@ export function EntryEdit() {
       const data = await getEntry(uuid);
       setEntry(data);
       setText(data.text || "");
-      setTags(data.tags || []);
       setTimezone(data.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
       setCreatedAtLocal(isoToLocalDateTime(data.created_at));
       setVersion(data.version);
@@ -87,12 +82,6 @@ export function EntryEdit() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  useEffect(() => {
-    listEntryTags()
-      .then((result) => setTagSuggestions(result.map((t) => t.name)))
-      .catch(() => {});
-  }, []);
 
   const dayOneMetadata = useMemo(() => {
     if (!entry || entry.source !== "dayone") return null;
@@ -122,7 +111,6 @@ export function EntryEdit() {
     try {
       const updated = await updateEntry(uuid, {
         text: text.trim(),
-        tags,
         timezone,
         created_at: localDateTimeToIso(createdAtLocal),
         expected_version: version,
@@ -289,13 +277,6 @@ export function EntryEdit() {
               {timezone || "Set timezone"}
             </button>
           )}
-        </div>
-
-        <div className="px-3 sm:px-0">
-          <label htmlFor="entry-edit-tags" className="block text-sm text-text-muted mb-1.5 font-medium">
-            Tags
-          </label>
-          <TagInput id="entry-edit-tags" tags={tags} onChange={setTags} suggestions={tagSuggestions} />
         </div>
 
         {dayOneMetadata && (

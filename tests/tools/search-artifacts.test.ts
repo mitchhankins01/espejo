@@ -8,7 +8,6 @@ describe("search_artifacts spec", () => {
     });
     expect(result.query).toBe("dopamine regulation");
     expect(result.limit).toBe(10);
-    expect(result.tags_mode).toBe("any");
   });
 
   it("rejects empty query", () => {
@@ -21,13 +20,9 @@ describe("search_artifacts spec", () => {
     const result = validateToolInput("search_artifacts", {
       query: "test",
       kind: "reference",
-      tags: ["health"],
-      tags_mode: "all",
       limit: 20,
     });
     expect(result.kind).toBe("reference");
-    expect(result.tags).toEqual(["health"]);
-    expect(result.tags_mode).toBe("all");
     expect(result.limit).toBe(20);
   });
 

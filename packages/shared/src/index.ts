@@ -5,7 +5,6 @@ export type {
   MediaCounts,
   SearchResult,
   SimilarResult,
-  TagCount,
   EntryStats,
   CreateEntryInput,
   UpdateEntryInput,

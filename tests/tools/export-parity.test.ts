@@ -21,7 +21,6 @@ describe("queries.ts export parity", () => {
       "getEntriesByDateRange",
       "getEntriesOnThisDay",
       "findSimilarEntries",
-      "listTags",
       "getEntryStats",
       "upsertDailyMetric",
       "getWeightByDate",
@@ -84,8 +83,6 @@ describe("queries.ts export parity", () => {
       "getOuraTrendMetricForRange",
       "getOuraSleepDetailForRange",
       "getOuraTemperatureData",
-      "normalizeTags",
-      "listArtifactTags",
       "listArtifactTitles",
       "resolveArtifactTitleToId",
       "syncExplicitLinks",
@@ -142,7 +139,7 @@ describe("queries.ts export parity", () => {
 // Keep this in sync — update when intentionally adding/removing exports
 function expected_count(): number {
   // Current runtime export count (functions + constants, not types/interfaces)
-  return 110;
+  return 107;
 }
 
 describe("oura/analysis.ts export parity", () => {

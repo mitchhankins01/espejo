@@ -22,7 +22,6 @@ export function registerTodoRoutes(app: Express, deps: RouteDeps): void {
     status: todoStatusSchema.optional(),
     next_step: z.string().max(500).nullable().optional(),
     body: z.string().optional(),
-    tags: z.array(z.string()).optional(),
     urgent: z.boolean().optional(),
     important: z.boolean().optional(),
     parent_id: z.string().optional(),
@@ -32,7 +31,6 @@ export function registerTodoRoutes(app: Express, deps: RouteDeps): void {
     status: todoStatusSchema.optional(),
     next_step: z.string().max(500).nullable().optional(),
     body: z.string().optional(),
-    tags: z.array(z.string()).optional(),
     urgent: z.boolean().optional(),
     important: z.boolean().optional(),
   });

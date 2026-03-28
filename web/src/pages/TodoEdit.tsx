@@ -12,7 +12,6 @@ import {
 } from "../api.ts";
 import { StatusSelect } from "../components/StatusSelect.tsx";
 import { MarkdownEditor } from "../components/MarkdownEditor.tsx";
-import { TagInput } from "../components/TagInput.tsx";
 
 export function TodoEdit() {
   const { id } = useParams<{ id: string }>();
@@ -25,7 +24,6 @@ export function TodoEdit() {
   const [status, setStatus] = useState("active");
   const [nextStep, setNextStep] = useState("");
   const [body, setBody] = useState("");
-  const [tags, setTags] = useState<string[]>([]);
   const [urgent, setUrgent] = useState(false);
   const [important, setImportant] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -44,7 +42,6 @@ export function TodoEdit() {
       setStatus(item.status);
       setNextStep(item.next_step ?? "");
       setBody(item.body);
-      setTags(item.tags);
       setUrgent(item.urgent);
       setImportant(item.important);
     } catch (err) {
@@ -69,7 +66,6 @@ export function TodoEdit() {
         status: status as "active" | "waiting" | "done" | "someday",
         next_step: nextStep.trim() ? nextStep.trim() : null,
         body: body.trim(),
-        tags,
         urgent,
         important,
       });
@@ -289,16 +285,6 @@ export function TodoEdit() {
             Body (Markdown)
           </label>
           <MarkdownEditor value={body} onChange={setBody} />
-        </div>
-
-        <div>
-          <label
-            htmlFor="todo-edit-tags"
-            className="block text-sm text-text-muted mb-1.5 font-medium"
-          >
-            Tags
-          </label>
-          <TagInput id="todo-edit-tags" tags={tags} onChange={setTags} />
         </div>
 
         {/* Children / subtasks section (only for root-level todos) */}

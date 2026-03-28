@@ -13,7 +13,6 @@ describe("create_todo spec", () => {
       status: "waiting",
       next_step: "Do something",
       body: "Details",
-      tags: ["admin"],
       urgent: true,
       important: true,
       parent_id: "abc-123",

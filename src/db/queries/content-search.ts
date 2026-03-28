@@ -1,7 +1,6 @@
 import type pg from "pg";
 
 import type { ArtifactKind } from "./artifacts.js";
-import { normalizeTags } from "./artifacts.js";
 
 // ============================================================================
 // Unified search types
@@ -29,10 +28,8 @@ export async function searchContent(
     date_from?: string;
     date_to?: string;
     city?: string;
-    entry_tags?: string[];
     artifact_kind?: ArtifactKind;
     artifact_source?: string;
-    artifact_tags?: string[];
   },
   limit: number
 ): Promise<UnifiedSearchResultRow[]> {
@@ -63,13 +60,6 @@ export async function searchContent(
       entryIdx++;
       entryClauses.push(`e.city ILIKE $${entryIdx}`);
       entryParams.push(filters.city);
-    }
-    if (filters.entry_tags && filters.entry_tags.length > 0) {
-      entryIdx++;
-      entryClauses.push(
-        `EXISTS (SELECT 1 FROM entry_tags et JOIN tags t ON t.id = et.tag_id WHERE et.entry_id = e.id AND t.name = ANY($${entryIdx}::text[]))`
-      );
-      entryParams.push(filters.entry_tags);
     }
     const entryFilterWhere = entryClauses.length > 0 ? "AND " + entryClauses.join(" AND ") : "";
 
@@ -141,13 +131,6 @@ export async function searchContent(
       artIdx++;
       artClauses.push(`a.source = $${artIdx}`);
       artParams.push(filters.artifact_source);
-    }
-    if (filters.artifact_tags && filters.artifact_tags.length > 0) {
-      artIdx++;
-      artClauses.push(
-        `EXISTS (SELECT 1 FROM artifact_tags at2 JOIN tags t ON t.id = at2.tag_id WHERE at2.artifact_id = a.id AND t.name = ANY($${artIdx}::text[]))`
-      );
-      artParams.push(normalizeTags(filters.artifact_tags));
     }
     const artFilterWhere = artClauses.length > 0 ? "AND " + artClauses.join(" AND ") : "";
 

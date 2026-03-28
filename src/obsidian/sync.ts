@@ -9,7 +9,6 @@ import {
   softDeleteMissingObsidianArtifacts,
 } from "../db/queries.js";
 import {
-  upsertArtifactTags,
   syncExplicitLinks,
 } from "../db/queries/artifacts.js";
 import { createClient, listAllObjects, getObjectContent } from "../storage/r2.js";
@@ -130,13 +129,6 @@ export async function runObsidianSync(
             status: parsed.status,
             contentHash: item.etag,
           });
-
-          // Sync tags (delete + reinsert)
-          await pool.query(
-            `DELETE FROM artifact_tags WHERE artifact_id = $1`,
-            [id]
-          );
-          await upsertArtifactTags(pool, id, parsed.tags);
 
           upsertedArtifacts.push({ id, key: item.key, wikiLinks: parsed.wikiLinks, title: parsed.title, body: parsed.body, kind: parsed.kind });
           filesSynced++;

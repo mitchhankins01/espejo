@@ -9,7 +9,6 @@ import {
   countArtifacts,
   searchArtifacts,
   searchArtifactsKeyword,
-  listArtifactTags,
   listArtifactTitles,
   resolveArtifactTitleToId,
   syncExplicitLinks,
@@ -77,10 +76,6 @@ export function registerArtifactRoutes(app: Express, deps: RouteDeps): void {
       const kind = req.query.kind ? artifactKindSchema.parse(req.query.kind) : undefined;
       /* v8 ignore next */
       const source = req.query.source ? artifactSourceSchema.parse(req.query.source) : undefined;
-      /* v8 ignore next */
-      const tags = req.query.tags ? String(req.query.tags).split(",").filter(Boolean) : undefined;
-      /* v8 ignore next */
-      const tagsMode = (req.query.tags_mode === "all" ? "all" : "any") as "any" | "all";
       const semantic = req.query.semantic === undefined
         ? true
         : String(req.query.semantic).toLowerCase() === "true";
@@ -93,33 +88,19 @@ export function registerArtifactRoutes(app: Express, deps: RouteDeps): void {
         const results = semantic
           ? await (async () => {
             const embedding = await generateEmbedding(q);
-            return searchArtifacts(pool, embedding, q, { kind, source, tags, tags_mode: tagsMode }, limit);
+            return searchArtifacts(pool, embedding, q, { kind, source }, limit);
           })()
-          : await searchArtifactsKeyword(pool, q, { kind, source, tags, tags_mode: tagsMode }, limit);
+          : await searchArtifactsKeyword(pool, q, { kind, source }, limit);
         res.json(results);
       } else {
         const [results, total] = await Promise.all([
-          listArtifacts(pool, { kind, source, tags, tags_mode: tagsMode, limit, offset }),
-          countArtifacts(pool, { kind, source, tags, tags_mode: tagsMode }),
+          listArtifacts(pool, { kind, source, limit, offset }),
+          countArtifacts(pool, { kind, source }),
         ]);
         res.json({ items: results, total });
       }
     } catch (err) {
       console.error("Artifact list/search error:", err);
-      res.status(500).json({ error: String(err) });
-    }
-  });
-
-  // GET /api/artifacts/tags — list tags used on artifacts with counts
-  app.get("/api/artifacts/tags", async (req, res) => {
-    /* v8 ignore next */
-    if (!requireBearerAuth(req, res, secret)) return;
-
-    try {
-      const tags = await listArtifactTags(pool);
-      res.json(tags);
-    } catch (err) {
-      console.error("Artifact tags error:", err);
       res.status(500).json({ error: String(err) });
     }
   });
@@ -149,13 +130,12 @@ export function registerArtifactRoutes(app: Express, deps: RouteDeps): void {
         id: artifact.id,
         title: artifact.title,
         kind: artifact.kind,
-        tags: artifact.tags,
       }));
 
       const edges: Array<{
         source: string;
         target: string;
-        type: "semantic" | "explicit" | "tag" | "source";
+        type: "semantic" | "explicit" | "source";
         weight?: number;
       }> = [];
 
@@ -174,23 +154,6 @@ export function registerArtifactRoutes(app: Express, deps: RouteDeps): void {
           target: link.target_id,
           type: "explicit",
         });
-      }
-
-      const tagEdgeKeys = new Set<string>();
-      for (let i = 0; i < graph.artifacts.length; i++) {
-        for (let j = i + 1; j < graph.artifacts.length; j++) {
-          const a = graph.artifacts[i];
-          const b = graph.artifacts[j];
-          const hasSharedTag = a.tags.some((tag) => b.tags.includes(tag));
-          /* v8 ignore next -- mixed tag/non-tag pairs are data-dependent */
-          if (!hasSharedTag) continue;
-
-          const key = `${a.id}|${b.id}|tag`;
-          /* v8 ignore next */
-          if (tagEdgeKeys.has(key)) continue;
-          tagEdgeKeys.add(key);
-          edges.push({ source: a.id, target: b.id, type: "tag" });
-        }
       }
 
       const sourceEdgeKeys = new Set<string>();
@@ -260,7 +223,6 @@ export function registerArtifactRoutes(app: Express, deps: RouteDeps): void {
     kind: artifactKindSchema,
     title: z.string().min(1).max(300),
     body: z.string().min(1),
-    tags: z.array(z.string()).optional(),
     source_entry_uuids: z.array(z.string()).optional(),
   });
 
@@ -289,7 +251,6 @@ export function registerArtifactRoutes(app: Express, deps: RouteDeps): void {
     kind: artifactKindSchema.optional(),
     title: z.string().min(1).max(300).optional(),
     body: z.string().min(1).optional(),
-    tags: z.array(z.string()).optional(),
     source_entry_uuids: z.array(z.string()).optional(),
     expected_version: z.number().int().min(1),
   });

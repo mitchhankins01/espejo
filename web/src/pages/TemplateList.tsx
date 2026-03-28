@@ -84,18 +84,6 @@ export function TemplateList() {
                     {template.description}
                   </p>
                 )}
-                {template.default_tags.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {template.default_tags.map((tag) => (
-                      <span
-                        key={tag}
-                        className="px-2 py-0.5 rounded-full text-[11px] bg-pine-500/10 text-pine-700 dark:text-pine-300"
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                )}
               </Link>
               <div className="flex items-center gap-2 shrink-0">
                 <Link

@@ -7,7 +7,6 @@ import { handleGetEntry } from "./tools/get-entry.js";
 import { handleGetEntriesByDate } from "./tools/get-entries-by-date.js";
 import { handleOnThisDay } from "./tools/on-this-day.js";
 import { handleFindSimilar } from "./tools/find-similar.js";
-import { handleListTags } from "./tools/list-tags.js";
 import { handleEntryStats } from "./tools/entry-stats.js";
 import { handleGetOuraSummary } from "./tools/get-oura-summary.js";
 import { handleGetOuraWeekly } from "./tools/get-oura-weekly.js";
@@ -43,7 +42,6 @@ export const toolHandlers: Record<string, ToolHandler> = {
   get_entries_by_date: handleGetEntriesByDate,
   on_this_day: handleOnThisDay,
   find_similar: handleFindSimilar,
-  list_tags: handleListTags,
   entry_stats: handleEntryStats,
   get_oura_summary: handleGetOuraSummary,
   get_oura_weekly: handleGetOuraWeekly,

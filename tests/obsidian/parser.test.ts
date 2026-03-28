@@ -3,11 +3,10 @@ import { describe, it, expect } from "vitest";
 import { parseObsidianNote } from "../../src/obsidian/parser.js";
 
 describe("parseObsidianNote", () => {
-  it("parses frontmatter with kind and tags", () => {
+  it("parses frontmatter with kind", () => {
     const content = "---\nkind: insight\ntags: [self-reflection, health]\n---\n# My Insight\n\nSome body text.";
     const result = parseObsidianNote(content, "test.md");
     expect(result.kind).toBe("insight");
-    expect(result.tags).toEqual(["health", "self-reflection"]);
     expect(result.title).toBe("My Insight");
     expect(result.body).toBe("Some body text.");
   });
@@ -16,7 +15,6 @@ describe("parseObsidianNote", () => {
     const content = "---\n\nkind: reference\n\ntags: [books]\n\n---\n# Book Notes\n\nGood book.";
     const result = parseObsidianNote(content, "test.md");
     expect(result.kind).toBe("reference");
-    expect(result.tags).toEqual(["books"]);
     expect(result.title).toBe("Book Notes");
   });
 
@@ -24,7 +22,6 @@ describe("parseObsidianNote", () => {
     const content = "Just some text with a [[link]].";
     const result = parseObsidianNote(content, "My Note.md");
     expect(result.kind).toBe("note");
-    expect(result.tags).toEqual([]);
     expect(result.title).toBe("My Note");
     expect(result.body).toBe("Just some text with a [[link]].");
   });
@@ -33,12 +30,6 @@ describe("parseObsidianNote", () => {
     const content = "---\nkind: recipe\n---\n# Cooking\n\nSome recipe.";
     const result = parseObsidianNote(content, "test.md");
     expect(result.kind).toBe("note");
-  });
-
-  it("handles tags as single string", () => {
-    const content = "---\ntags: health\n---\n# Title\n\nBody.";
-    const result = parseObsidianNote(content, "test.md");
-    expect(result.tags).toEqual(["health"]);
   });
 
   it("falls back to filename stem when no heading", () => {
@@ -81,7 +72,7 @@ describe("parseObsidianNote", () => {
   });
 
   it("handles project kind", () => {
-    const content = "---\nkind: project\ntags: [active]\n---\n# My Project\n\nDetails here.";
+    const content = "---\nkind: project\n---\n# My Project\n\nDetails here.";
     const result = parseObsidianNote(content, "test.md");
     expect(result.kind).toBe("project");
   });

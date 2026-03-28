@@ -21,7 +21,6 @@ async function getReviewTemplate(
     return `---
 kind: review
 status: approved
-tags: []
 ---
 # {{title}}
 

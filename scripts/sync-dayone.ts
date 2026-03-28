@@ -127,11 +127,6 @@ interface EntryRow {
   ZSUNSETDATE: number | null;
 }
 
-interface TagRow {
-  entryId: number;
-  tagName: string;
-}
-
 interface AttachmentRow {
   ZENTRY: number;
   ZTYPE: string | null;
@@ -187,41 +182,6 @@ function elapsed(start: bigint): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-function quoteSqliteIdentifier(name: string): string {
-  if (!/^[A-Za-z0-9_]+$/.test(name)) {
-    throw new Error(`Unsafe SQLite identifier: ${name}`);
-  }
-  return `"${name}"`;
-}
-
-function resolveEntryTagJoin(
-  sqlite: Database.Database
-): { table: string; entryCol: string; tagCol: string } {
-  const tables = sqlite
-    .prepare(
-      `SELECT name
-       FROM sqlite_master
-       WHERE type = 'table'
-         AND name LIKE 'Z\\_%TAGS' ESCAPE '\\'`
-    )
-    .all() as Array<{ name: string }>;
-
-  for (const t of tables) {
-    const cols = sqlite
-      .prepare(`PRAGMA table_info(${quoteSqliteIdentifier(t.name)})`)
-      .all() as Array<{ name: string }>;
-    const entryCol = cols.find((c) => /ENTRIES$/.test(c.name))?.name;
-    const tagCol = cols.find((c) => /TAGS\d*$/.test(c.name))?.name;
-    if (entryCol && tagCol && !/EXCLUDE/i.test(tagCol)) {
-      return { table: t.name, entryCol, tagCol };
-    }
-  }
-
-  throw new Error(
-    "Unable to resolve Day One tag schema: could not find an entry-tags join table"
-  );
-}
-
 async function syncDayOne(): Promise<void> {
   const t0 = process.hrtime.bigint();
   const sqlitePath = getSqlitePath();
@@ -266,24 +226,6 @@ async function syncDayOne(): Promise<void> {
       console.log("Nothing to sync.");
       return;
     }
-  }
-
-  // Read all entry-tag relationships (schema differs across Day One versions)
-  const tagJoin = resolveEntryTagJoin(sqlite);
-  const tagRows = sqlite
-    .prepare(
-      `SELECT jt.${quoteSqliteIdentifier(tagJoin.entryCol)} AS entryId, t.ZNAME AS tagName
-     FROM ${quoteSqliteIdentifier(tagJoin.table)} jt
-     JOIN ZTAG t ON t.Z_PK = jt.${quoteSqliteIdentifier(tagJoin.tagCol)}`
-    )
-    .all() as TagRow[];
-
-  // Group tags by entry Z_PK
-  const tagsByEntry = new Map<number, string[]>();
-  for (const row of tagRows) {
-    const existing = tagsByEntry.get(row.entryId) || [];
-    existing.push(row.tagName);
-    tagsByEntry.set(row.entryId, existing);
   }
 
   // Read all attachments (including ZHASDATA for local file check)
@@ -345,7 +287,6 @@ async function syncDayOne(): Promise<void> {
       const batchStats = await syncBatch(
         pool,
         batch,
-        tagsByEntry,
         attachmentsByEntry,
         r2Client,
         dayOneDir
@@ -384,7 +325,6 @@ async function syncDayOne(): Promise<void> {
 async function syncBatch(
   pool: pg.Pool,
   batch: EntryRow[],
-  tagsByEntry: Map<number, string[]>,
   attachmentsByEntry: Map<number, AttachmentRow[]>,
   r2Client: S3Client | null,
   dayOneDir: string
@@ -500,62 +440,13 @@ async function syncBatch(
     }
     const entryIds = entryResult.rows.map((r) => r.id as number);
 
-    // --- 3. Batch delete old tag associations (1 query) ---
-    await client.query(
-      `DELETE FROM entry_tags WHERE entry_id = ANY($1::int[])`,
-      [entryIds]
-    );
-
-    // --- 4. Batch upsert tags + entry_tags (3 queries) ---
-    const allTagNames = new Set<string>();
-    for (const entry of batch) {
-      const tags = tagsByEntry.get(entry.Z_PK) || [];
-      for (const t of tags) allTagNames.add(t.toLowerCase());
-    }
-
-    if (allTagNames.size > 0) {
-      const tagArr = Array.from(allTagNames);
-      await client.query(
-        `INSERT INTO tags (name) SELECT unnest($1::text[]) ON CONFLICT (name) DO NOTHING`,
-        [tagArr]
-      );
-      const tagResult = await client.query(
-        `SELECT id, name FROM tags WHERE name = ANY($1::text[])`,
-        [tagArr]
-      );
-      const tagIdMap = new Map<string, number>();
-      for (const row of tagResult.rows) {
-        tagIdMap.set(row.name as string, row.id as number);
-      }
-
-      const etEntryIds: number[] = [];
-      const etTagIds: number[] = [];
-      for (const entry of batch) {
-        const entryId = idMap.get(entry.ZUUID)!;
-        const tags = tagsByEntry.get(entry.Z_PK) || [];
-        for (const tag of tags) {
-          etEntryIds.push(entryId);
-          etTagIds.push(tagIdMap.get(tag.toLowerCase())!);
-        }
-      }
-
-      if (etEntryIds.length > 0) {
-        await client.query(
-          `INSERT INTO entry_tags (entry_id, tag_id)
-           SELECT * FROM unnest($1::int[], $2::int[])
-           ON CONFLICT DO NOTHING`,
-          [etEntryIds, etTagIds]
-        );
-      }
-    }
-
-    // --- 5. Batch delete old media (1 query) ---
+    // --- 3. Batch delete old media (1 query) ---
     await client.query(
       `DELETE FROM media WHERE entry_id = ANY($1::int[])`,
       [entryIds]
     );
 
-    // --- 6. Collect + batch insert media (1 query) ---
+    // --- 4. Collect + batch insert media (1 query) ---
     const med = {
       entryIds: [] as number[],
       types: [] as string[],

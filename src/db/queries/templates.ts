@@ -11,13 +11,12 @@ export interface TemplateRow {
   description: string | null;
   body: string;
   system_prompt: string | null;
-  default_tags: string[];
   sort_order: number;
   created_at: Date;
   updated_at: Date;
 }
 
-const TEMPLATE_COLUMNS = `id, slug, name, description, body, system_prompt, default_tags, sort_order, created_at, updated_at`;
+const TEMPLATE_COLUMNS = `id, slug, name, description, body, system_prompt, sort_order, created_at, updated_at`;
 
 function toTemplateRow(row: Record<string, unknown>): TemplateRow {
   return {
@@ -27,8 +26,7 @@ function toTemplateRow(row: Record<string, unknown>): TemplateRow {
     description: (row.description as string | null) ?? null,
     body: row.body as string,
     system_prompt: (row.system_prompt as string | null) ?? null,
-    /* v8 ignore next 2 */
-    default_tags: (row.default_tags as string[]) ?? [],
+    /* v8 ignore next */
     sort_order: (row.sort_order as number) ?? 0,
     created_at: row.created_at as Date,
     updated_at: row.updated_at as Date,
@@ -77,13 +75,12 @@ export async function createTemplate(
     description?: string;
     body?: string;
     system_prompt?: string | null;
-    default_tags?: string[];
     sort_order?: number;
   }
 ): Promise<TemplateRow> {
   const result = await pool.query(
-    `INSERT INTO entry_templates (slug, name, description, body, system_prompt, default_tags, sort_order)
-     VALUES ($1, $2, $3, $4, $5, $6::text[], $7)
+    `INSERT INTO entry_templates (slug, name, description, body, system_prompt, sort_order)
+     VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING ${TEMPLATE_COLUMNS}`,
     [
       data.slug,
@@ -91,7 +88,6 @@ export async function createTemplate(
       data.description ?? null,
       data.body ?? "",
       data.system_prompt ?? null,
-      data.default_tags ?? [],
       data.sort_order ?? 0,
     ]
   );
@@ -107,7 +103,6 @@ export async function updateTemplate(
     description?: string;
     body?: string;
     system_prompt?: string | null;
-    default_tags?: string[];
     sort_order?: number;
   }
 ): Promise<TemplateRow | null> {
@@ -139,11 +134,6 @@ export async function updateTemplate(
     paramIdx++;
     setClauses.push(`system_prompt = $${paramIdx}`);
     params.push(data.system_prompt);
-  }
-  if (data.default_tags !== undefined) {
-    paramIdx++;
-    setClauses.push(`default_tags = $${paramIdx}::text[]`);
-    params.push(data.default_tags);
   }
   if (data.sort_order !== undefined) {
     paramIdx++;

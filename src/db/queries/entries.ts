@@ -1,8 +1,6 @@
 import crypto from "crypto";
 import type pg from "pg";
 
-import { normalizeTags } from "./artifacts.js";
-
 // ============================================================================
 // Result types
 // ============================================================================
@@ -31,7 +29,6 @@ export interface EntryRow {
   humidity: number | null;
   source: "dayone" | "web" | "telegram" | "mcp";
   version: number;
-  tags: string[];
   photo_count: number;
   video_count: number;
   audio_count: number;
@@ -44,11 +41,6 @@ export type SearchResultRow = EntryRow & {
   has_semantic: boolean;
   has_fulltext: boolean;
 };
-
-export interface TagCountRow {
-  name: string;
-  count: number;
-}
 
 export type SimilarResultRow = EntryRow & {
   similarity_score: number;
@@ -74,7 +66,6 @@ export interface EntryStatsRow {
 export interface SearchFilters {
   date_from?: string;
   date_to?: string;
-  tags?: string[];
   city?: string;
 }
 
@@ -102,7 +93,6 @@ function mapEntryRow(row: Record<string, unknown>): EntryRow {
     /* v8 ignore next 2 -- defensive: DB defaults always provide these */
     source: (row.source as EntryRow["source"]) ?? "dayone",
     version: (row.version as number) ?? 1,
-    tags: (row.tags as string[]) || [] /* v8 ignore next -- defensive: SQL coalesces to '{}' */,
     photo_count: row.photo_count as number,
     video_count: row.video_count as number,
     audio_count: row.audio_count as number,
@@ -150,17 +140,6 @@ export async function searchEntries(
     filterClauses.push(`e.city ILIKE $${paramIdx}`);
     filterParams.push(filters.city);
   }
-  if (filters.tags && filters.tags.length > 0) {
-    paramIdx++;
-    filterClauses.push(
-      `EXISTS (
-        SELECT 1 FROM entry_tags et
-        JOIN tags t ON t.id = et.tag_id
-        WHERE et.entry_id = e.id AND t.name = ANY($${paramIdx}::text[])
-      )`
-    );
-    filterParams.push(filters.tags);
-  }
 
   const filterWhere =
     filterClauses.length > 0 ? "AND " + filterClauses.join(" AND ") : "";
@@ -191,10 +170,6 @@ export async function searchEntries(
       COALESCE(1.0 / (60 + s.rank_s), 0) + COALESCE(1.0 / (60 + f.rank_f), 0) AS rrf_score,
       s.id IS NOT NULL AS has_semantic,
       f.id IS NOT NULL AS has_fulltext,
-      COALESCE(
-        (SELECT array_agg(t.name) FROM entry_tags et JOIN tags t ON t.id = et.tag_id WHERE et.entry_id = e.id),
-        '{}'::text[]
-      ) AS tags,
       (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'photo') AS photo_count,
       (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'video') AS video_count,
       (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'audio') AS audio_count,
@@ -228,7 +203,7 @@ export async function searchEntries(
 }
 
 /**
- * Get a single entry by UUID with full metadata, tags, and media counts.
+ * Get a single entry by UUID with full metadata and media counts.
  */
 export async function getEntryByUuid(
   pool: pg.Pool,
@@ -237,10 +212,6 @@ export async function getEntryByUuid(
   const result = await pool.query(
     `SELECT
       e.*,
-      COALESCE(
-        (SELECT array_agg(t.name) FROM entry_tags et JOIN tags t ON t.id = et.tag_id WHERE et.entry_id = e.id),
-        '{}'::text[]
-      ) AS tags,
       (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'photo') AS photo_count,
       (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'video') AS video_count,
       (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'audio') AS audio_count,
@@ -277,7 +248,6 @@ export async function getEntryByUuid(
     /* v8 ignore next 2 -- defensive: DB defaults always provide these */
     source: row.source ?? "dayone",
     version: row.version ?? 1,
-    tags: /* v8 ignore next -- defensive: SQL coalesces to '{}' */ row.tags || [],
     photo_count: row.photo_count,
     video_count: row.video_count,
     audio_count: row.audio_count,
@@ -298,10 +268,6 @@ export async function getEntriesByDateRange(
   const result = await pool.query(
     `SELECT
       e.*,
-      COALESCE(
-        (SELECT array_agg(t.name) FROM entry_tags et JOIN tags t ON t.id = et.tag_id WHERE et.entry_id = e.id),
-        '{}'::text[]
-      ) AS tags,
       (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'photo') AS photo_count,
       (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'video') AS video_count,
       (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'audio') AS audio_count,
@@ -329,10 +295,6 @@ export async function getEntriesOnThisDay(
   const result = await pool.query(
     `SELECT
       e.*,
-      COALESCE(
-        (SELECT array_agg(t.name) FROM entry_tags et JOIN tags t ON t.id = et.tag_id WHERE et.entry_id = e.id),
-        '{}'::text[]
-      ) AS tags,
       (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'photo') AS photo_count,
       (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'video') AS video_count,
       (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'audio') AS audio_count,
@@ -363,10 +325,6 @@ export async function findSimilarEntries(
     SELECT
       e.*,
       1 - (e.embedding <=> s.embedding) AS similarity_score,
-      COALESCE(
-        (SELECT array_agg(t.name) FROM entry_tags et JOIN tags t ON t.id = et.tag_id WHERE et.entry_id = e.id),
-        '{}'::text[]
-      ) AS tags,
       (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'photo') AS photo_count,
       (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'video') AS video_count,
       (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'audio') AS audio_count,
@@ -389,21 +347,6 @@ export async function findSimilarEntries(
     ...mapEntryRow(row),
     similarity_score: parseFloat(row.similarity_score),
   }));
-}
-
-/**
- * List all tags with usage counts, ordered by frequency.
- */
-export async function listTags(pool: pg.Pool): Promise<TagCountRow[]> {
-  const result = await pool.query(
-    `SELECT t.name, COUNT(et.entry_id)::int AS count
-     FROM tags t
-     JOIN entry_tags et ON et.tag_id = t.id
-     GROUP BY t.id, t.name
-     ORDER BY count DESC, t.name ASC`
-  );
-
-  return result.rows;
 }
 
 /**
@@ -565,10 +508,6 @@ export async function searchEntriesForPicker(
 
 const ENTRY_SELECT = `
   e.*,
-  COALESCE(
-    (SELECT array_agg(t.name) FROM entry_tags et JOIN tags t ON t.id = et.tag_id WHERE et.entry_id = e.id),
-    '{}'::text[]
-  ) AS tags,
   (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'photo') AS photo_count,
   (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'video') AS video_count,
   (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'audio') AS audio_count,
@@ -583,7 +522,6 @@ export type EntrySource = "dayone" | "web" | "telegram" | "mcp";
 
 export interface CreateEntryData {
   text: string;
-  tags?: string[];
   timezone?: string;
   created_at?: string;
   city?: string;
@@ -599,16 +537,14 @@ export async function createEntry(
   data: CreateEntryData
 ): Promise<EntryRow> {
   const uuid = crypto.randomUUID();
-  const tags = normalizeTags(data.tags ?? []);
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
 
-    const result = await client.query(
+    await client.query(
       `INSERT INTO entries (uuid, text, timezone, created_at, city, country, place_name, latitude, longitude, source, version)
-       VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5, $6, $7, $8, $9, $10, 1)
-       RETURNING id, uuid`,
+       VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5, $6, $7, $8, $9, $10, 1)`,
       [
         uuid,
         data.text,
@@ -622,10 +558,6 @@ export async function createEntry(
         data.source ?? "web",
       ]
     );
-
-    const entryId = result.rows[0].id as number;
-
-    await upsertEntryTags(client, entryId, tags);
 
     await client.query("COMMIT");
 
@@ -646,7 +578,6 @@ export async function createEntry(
 
 export interface UpdateEntryData {
   text?: string;
-  tags?: string[];
   timezone?: string;
   created_at?: string;
   city?: string;
@@ -736,16 +667,6 @@ export async function updateEntry(
       return exists.rows.length === 0 ? null : "version_conflict";
     }
 
-    const entryId = result.rows[0].id as number;
-
-    // Update tags if provided
-    if (data.tags !== undefined) {
-      await client.query(`DELETE FROM entry_tags WHERE entry_id = $1`, [
-        entryId,
-      ]);
-      await upsertEntryTags(client, entryId, normalizeTags(data.tags));
-    }
-
     await client.query("COMMIT");
 
     // Fetch full row
@@ -777,7 +698,6 @@ export interface ListEntriesFilters {
   offset?: number;
   from?: string;
   to?: string;
-  tag?: string;
   source?: string;
   q?: string;
 }
@@ -799,13 +719,6 @@ export async function listEntries(
     paramIdx++;
     whereClauses.push(`e.created_at < ($${paramIdx}::date + interval '1 day')`);
     whereParams.push(filters.to);
-  }
-  if (filters.tag) {
-    paramIdx++;
-    whereClauses.push(
-      `EXISTS (SELECT 1 FROM entry_tags et2 JOIN tags t2 ON t2.id = et2.tag_id WHERE et2.entry_id = e.id AND t2.name = $${paramIdx})`
-    );
-    whereParams.push(filters.tag.toLowerCase());
   }
   if (filters.source) {
     paramIdx++;
@@ -854,22 +767,3 @@ export async function listEntries(
   };
 }
 
-async function upsertEntryTags(
-  client: pg.Pool | pg.PoolClient,
-  entryId: number,
-  tags: string[]
-): Promise<void> {
-  if (tags.length === 0) return;
-  for (const tag of tags) {
-    await client.query(
-      `INSERT INTO tags (name) VALUES ($1) ON CONFLICT (name) DO NOTHING`,
-      [tag]
-    );
-    await client.query(
-      `INSERT INTO entry_tags (entry_id, tag_id)
-       SELECT $1, id FROM tags WHERE name = $2
-       ON CONFLICT DO NOTHING`,
-      [entryId, tag]
-    );
-  }
-}

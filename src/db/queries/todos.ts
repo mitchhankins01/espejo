@@ -1,7 +1,5 @@
 import type pg from "pg";
 
-import { normalizeTags } from "./artifacts.js";
-
 // ============================================================================
 // Todo types
 // ============================================================================
@@ -14,7 +12,6 @@ export interface TodoRow {
   status: TodoStatus;
   next_step: string | null;
   body: string;
-  tags: string[];
   urgent: boolean;
   important: boolean;
   is_focus: boolean;
@@ -41,7 +38,7 @@ export interface ListTodosFilters {
 // Private helpers
 // ============================================================================
 
-const TODO_COLUMNS = `id, title, status, next_step, body, tags, urgent, important, is_focus, parent_id, sort_order, completed_at, created_at, updated_at`;
+const TODO_COLUMNS = `id, title, status, next_step, body, urgent, important, is_focus, parent_id, sort_order, completed_at, created_at, updated_at`;
 
 function toTodoRow(row: pg.QueryResultRow): TodoRow {
   return {
@@ -50,8 +47,6 @@ function toTodoRow(row: pg.QueryResultRow): TodoRow {
     status: row.status as TodoStatus,
     next_step: (row.next_step as string | null) ?? null,
     body: row.body as string,
-    /* v8 ignore next -- defensive fallback for malformed rows */
-    tags: (row.tags as string[]) ?? [],
     urgent: row.urgent as boolean,
     important: row.important as boolean,
     is_focus: row.is_focus as boolean,
@@ -200,7 +195,6 @@ export async function createTodo(
     status?: TodoStatus;
     next_step?: string | null;
     body?: string;
-    tags?: string[];
     urgent?: boolean;
     important?: boolean;
     parent_id?: string;
@@ -220,17 +214,15 @@ export async function createTodo(
     }
   }
 
-  const tags = normalizeTags(data.tags ?? []);
   const result = await pool.query(
-    `INSERT INTO todos (title, status, next_step, body, tags, urgent, important, parent_id)
-     VALUES ($1, $2, $3, $4, $5::text[], $6, $7, $8)
+    `INSERT INTO todos (title, status, next_step, body, urgent, important, parent_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING ${TODO_COLUMNS}`,
     [
       data.title,
       data.status ?? "active",
       data.next_step ?? null,
       data.body ?? "",
-      tags,
       data.urgent ?? false,
       data.important ?? false,
       data.parent_id ?? null,
@@ -247,7 +239,6 @@ export async function updateTodo(
     status?: TodoStatus;
     next_step?: string | null;
     body?: string;
-    tags?: string[];
     urgent?: boolean;
     important?: boolean;
   }
@@ -281,11 +272,6 @@ export async function updateTodo(
     paramIdx++;
     setClauses.push(`body = $${paramIdx}`);
     params.push(data.body);
-  }
-  if (data.tags !== undefined) {
-    paramIdx++;
-    setClauses.push(`tags = $${paramIdx}::text[]`);
-    params.push(normalizeTags(data.tags));
   }
   if (data.urgent !== undefined) {
     paramIdx++;

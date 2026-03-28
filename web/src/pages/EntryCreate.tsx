@@ -3,12 +3,10 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   createEntry,
   getTemplate,
-  listEntryTags,
   uploadEntryMedia,
   type EntryTemplate,
 } from "../api.ts";
 import { MarkdownEditor } from "../components/MarkdownEditor.tsx";
-import { TagInput } from "../components/TagInput.tsx";
 import { TemplatePicker } from "../components/TemplatePicker.tsx";
 import { MediaUpload, mediaUploadKey } from "../components/MediaUpload.tsx";
 
@@ -49,8 +47,6 @@ export function EntryCreate() {
     templateFromQuery
   );
   const [text, setText] = useState("");
-  const [tags, setTags] = useState<string[]>([]);
-  const [tagSuggestions, setTagSuggestions] = useState<string[]>([]);
   const [timezone, setTimezone] = useState(
     Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
   );
@@ -68,24 +64,16 @@ export function EntryCreate() {
       .then((template) => {
         setSelectedTemplateId(template.id);
         setText(template.body);
-        setTags(template.default_tags);
       })
       .catch(() => {
         setSelectedTemplateId(null);
       });
   }, [templateFromQuery]);
 
-  useEffect(() => {
-    listEntryTags()
-      .then((result) => setTagSuggestions(result.map((t) => t.name)))
-      .catch(() => {});
-  }, []);
-
   function applyTemplate(template: EntryTemplate | null): void {
     setSelectedTemplateId(template?.id ?? null);
     if (!template) return;
     setText(template.body);
-    setTags(template.default_tags);
   }
 
   async function handleSave(): Promise<void> {
@@ -101,7 +89,6 @@ export function EntryCreate() {
         text: text.trim(),
         timezone,
         created_at: localDateTimeToIso(createdAtLocal),
-        tags: tags.length > 0 ? tags : undefined,
       });
 
       for (const file of files) {
@@ -189,16 +176,6 @@ export function EntryCreate() {
               {timezone || "Set timezone"}
             </button>
           )}
-        </div>
-
-        <div className="px-3 sm:px-0">
-          <label
-            htmlFor="entry-create-tags"
-            className="block text-sm text-text-muted mb-1.5 font-medium"
-          >
-            Tags
-          </label>
-          <TagInput id="entry-create-tags" tags={tags} onChange={setTags} suggestions={tagSuggestions} />
         </div>
 
         <div className="px-3 sm:px-0">

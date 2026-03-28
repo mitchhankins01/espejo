@@ -9,7 +9,6 @@ const { mockRegisterTool, mockRegisterPrompt, mockHandlers } = vi.hoisted(() => 
     handleGetEntriesByDate: vi.fn(),
     handleOnThisDay: vi.fn(),
     handleFindSimilar: vi.fn(),
-    handleListTags: vi.fn(),
     handleEntryStats: vi.fn(),
     handleGetArtifact: vi.fn(),
     handleListArtifacts: vi.fn(),
@@ -44,9 +43,6 @@ vi.mock("../../src/tools/on-this-day.js", () => ({
 }));
 vi.mock("../../src/tools/find-similar.js", () => ({
   handleFindSimilar: mockHandlers.handleFindSimilar,
-}));
-vi.mock("../../src/tools/list-tags.js", () => ({
-  handleListTags: mockHandlers.handleListTags,
 }));
 vi.mock("../../src/tools/entry-stats.js", () => ({
   handleEntryStats: mockHandlers.handleEntryStats,
@@ -127,13 +123,13 @@ describe("createServer", () => {
   });
 
   it("handles non-Error throws with fallback message", async () => {
-    mockHandlers.handleListTags.mockRejectedValue("string error");
+    mockHandlers.handleEntryStats.mockRejectedValue("string error");
     createServer({} as any, "1.0.0");
 
-    const listTagsCall = mockRegisterTool.mock.calls.find(
-      (call) => call[0] === "list_tags"
+    const entryStatsCall = mockRegisterTool.mock.calls.find(
+      (call) => call[0] === "entry_stats"
     );
-    const handler = listTagsCall![2];
+    const handler = entryStatsCall![2];
     const result = await handler({});
 
     expect(result.isError).toBe(true);

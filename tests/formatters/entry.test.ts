@@ -20,7 +20,6 @@ function makeEntry(overrides: Partial<EntryRow> = {}): EntryRow {
     temperature: null,
     weather_conditions: null,
     humidity: null,
-    tags: [],
     photo_count: 0,
     video_count: 0,
     audio_count: 0,
@@ -41,13 +40,6 @@ describe("formatEntry", () => {
       makeEntry({ city: "Barcelona", country: "Spain" })
     );
     expect(result).toContain("Barcelona, Spain");
-  });
-
-  it("includes tags when present", () => {
-    const result = formatEntry(
-      makeEntry({ tags: ["morning-review", "work"] })
-    );
-    expect(result).toContain("morning-review, work");
   });
 
   it("includes weather info", () => {
@@ -159,7 +151,6 @@ describe("toEntryResult", () => {
       uuid: "TEST-UUID",
       created_at: "2024-03-15T09:30:00.000Z",
       text: "This is a test entry with some content.",
-      tags: [],
       media_counts: { photos: 0, videos: 0, audios: 0 },
       word_count: 8,
     });

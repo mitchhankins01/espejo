@@ -6,14 +6,12 @@ import {
   getArtifact,
   updateArtifact,
   deleteArtifact,
-  listArtifactTags,
   getRelatedArtifacts,
   listArtifactTitles,
   type Artifact,
   type RelatedArtifacts,
 } from "../api.ts";
 import { KindSelect } from "../components/KindSelect.tsx";
-import { TagInput } from "../components/TagInput.tsx";
 import { SourcePicker } from "../components/SourcePicker.tsx";
 import { MarkdownEditor } from "../components/MarkdownEditor.tsx";
 import { ARTIFACT_BADGE_COLORS } from "../constants/artifacts.ts";
@@ -36,20 +34,12 @@ export function ArtifactEdit() {
   const [kind, setKind] = useState("");
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
-  const [tags, setTags] = useState<string[]>([]);
   const [sources, setSources] = useState<string[]>([]);
   const [version, setVersion] = useState(0);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [tagSuggestions, setTagSuggestions] = useState<string[]>([]);
   const [mode, setMode] = useState<EditMode>("edit");
   const [titleToId, setTitleToId] = useState<Map<string, string>>(new Map());
-
-  useEffect(() => {
-    listArtifactTags()
-      .then((t) => setTagSuggestions(t.map((x) => x.name)))
-      .catch(() => {});
-  }, []);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -71,7 +61,6 @@ export function ArtifactEdit() {
       setKind(a.kind);
       setTitle(a.title);
       setBody(a.body);
-      setTags(a.tags);
       setSources(a.source_entry_uuids);
       setVersion(a.version);
 
@@ -118,7 +107,6 @@ export function ArtifactEdit() {
         kind,
         title: title.trim(),
         body: body.trim(),
-        tags,
         source_entry_uuids: sources,
         expected_version: version,
       });
@@ -299,21 +287,6 @@ export function ArtifactEdit() {
               </Markdown>
             </div>
           )}
-        </div>
-
-        <div>
-          <label
-            htmlFor="edit-tags"
-            className="block text-sm text-text-muted mb-1.5 font-medium"
-          >
-            Tags
-          </label>
-          <TagInput
-            id="edit-tags"
-            tags={tags}
-            onChange={setTags}
-            suggestions={tagSuggestions}
-          />
         </div>
 
         <div>

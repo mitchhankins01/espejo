@@ -13,7 +13,6 @@ export async function handleCreateTodo(
     status: params.status,
     next_step: params.next_step,
     body: params.body,
-    tags: params.tags,
     urgent: params.urgent,
     important: params.important,
     parent_id: params.parent_id,

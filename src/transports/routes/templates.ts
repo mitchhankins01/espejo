@@ -58,7 +58,6 @@ export function registerTemplateRoutes(app: Express, deps: RouteDeps): void {
         description: z.string().optional(),
         body: z.string().optional(),
         system_prompt: z.string().max(10_000).nullable().optional(),
-        default_tags: z.array(z.string()).optional(),
         sort_order: z.number().int().optional(),
       });
       const data = schema.parse(req.body);
@@ -86,7 +85,6 @@ export function registerTemplateRoutes(app: Express, deps: RouteDeps): void {
         description: z.string().optional(),
         body: z.string().optional(),
         system_prompt: z.string().max(10_000).nullable().optional(),
-        default_tags: z.array(z.string()).optional(),
         sort_order: z.number().int().optional(),
       });
       const data = schema.parse(req.body);
