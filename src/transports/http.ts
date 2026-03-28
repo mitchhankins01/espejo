@@ -37,6 +37,15 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
       if (result.entries > 0 || result.artifacts > 0) {
         console.log(`[embed] Embedded ${result.entries} entries, ${result.artifacts} artifacts`);
       }
+      if (result.skipped.length > 0 && config.telegram.botToken && config.telegram.allowedChatId) {
+        const lines = result.skipped.map(
+          (s) => `• ${s.type} "${s.title}" (${s.chars} chars, id: ${s.id})`
+        );
+        await sendTelegramMessage(
+          config.telegram.allowedChatId,
+          `⚠️ Skipped ${result.skipped.length} item(s) too large to embed:\n${lines.join("\n")}`
+        );
+      }
     } catch (err) {
       notifyError("Embed pending", err);
     }

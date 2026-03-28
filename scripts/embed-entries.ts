@@ -163,11 +163,22 @@ async function embedEntries(force: boolean): Promise<void> {
 
       if (batch.rows.length === 0) break;
 
-      const texts = batch.rows.map((row) => {
+      const embeddable = batch.rows.filter((row) => {
         const full = `${row.title as string}\n\n${row.body as string}`;
-        return full.length > MAX_CHARS ? full.slice(0, MAX_CHARS) : full;
+        if (full.length > MAX_CHARS) {
+          console.warn(`  ��️ Skipping artifact "${row.title}" (${full.length} chars > ${MAX_CHARS} limit)`);
+          return false;
+        }
+        return true;
       });
-      const ids = batch.rows.map((row) => row.id as string);
+      if (embeddable.length === 0) {
+        artProcessed += batch.rows.length;
+        continue;
+      }
+      const texts = embeddable.map(
+        (row) => `${row.title as string}\n\n${row.body as string}`
+      );
+      const ids = embeddable.map((row) => row.id as string);
 
       try {
         const apiStart = process.hrtime.bigint();

@@ -23,23 +23,19 @@ describe("embedPending", () => {
 
     const result = await embedPending(mockPool);
 
-    expect(result).toEqual({ entries: 0, artifacts: 0 });
+    expect(result).toEqual({ entries: 0, artifacts: 0, skipped: [] });
   });
 
   it("embeds entries missing embeddings", async () => {
     mockPool.query
-      // First call: fetch entries batch
       .mockResolvedValueOnce({
         rows: [
           { id: 1, text: "Hello world" },
           { id: 2, text: "Another entry" },
         ],
       })
-      // Second call: UPDATE entries
       .mockResolvedValueOnce({ rowCount: 2 })
-      // Third call: fetch entries batch (empty = done)
       .mockResolvedValueOnce({ rows: [] })
-      // Fourth call: fetch artifacts batch (empty)
       .mockResolvedValueOnce({ rows: [] });
 
     mockEmbeddings.generateEmbeddingsBatch.mockResolvedValue([
@@ -50,6 +46,7 @@ describe("embedPending", () => {
     const result = await embedPending(mockPool);
 
     expect(result.entries).toBe(2);
+    expect(result.skipped).toEqual([]);
     expect(mockEmbeddings.generateEmbeddingsBatch).toHaveBeenCalledWith([
       "Hello world",
       "Another entry",
@@ -58,15 +55,11 @@ describe("embedPending", () => {
 
   it("embeds artifacts missing embeddings", async () => {
     mockPool.query
-      // Entries: empty
       .mockResolvedValueOnce({ rows: [] })
-      // Artifacts: one batch
       .mockResolvedValueOnce({
         rows: [{ id: "art-001", title: "Title", body: "Body text" }],
       })
-      // UPDATE artifacts
       .mockResolvedValueOnce({ rowCount: 1 })
-      // Artifacts: empty = done
       .mockResolvedValueOnce({ rows: [] });
 
     mockEmbeddings.generateEmbeddingsBatch.mockResolvedValue([[0.5, 0.6]]);
@@ -79,39 +72,77 @@ describe("embedPending", () => {
     ]);
   });
 
-  it("truncates oversized texts", async () => {
+  it("skips oversized entries and reports them", async () => {
     const longText = "A".repeat(30000);
     mockPool.query
       .mockResolvedValueOnce({
         rows: [{ id: 1, text: longText }],
       })
-      .mockResolvedValueOnce({ rowCount: 1 })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] });
+      // Entire batch skipped → breaks loop
+      .mockResolvedValueOnce({ rows: [] }); // artifacts
+
+    const result = await embedPending(mockPool);
+
+    expect(result.entries).toBe(0);
+    expect(result.skipped).toHaveLength(1);
+    expect(result.skipped[0]).toMatchObject({
+      type: "entry",
+      id: 1,
+      chars: 30000,
+    });
+    expect(mockEmbeddings.generateEmbeddingsBatch).not.toHaveBeenCalled();
+  });
+
+  it("skips oversized artifacts and reports them", async () => {
+    mockPool.query
+      .mockResolvedValueOnce({ rows: [] }) // entries
+      .mockResolvedValueOnce({
+        rows: [{ id: "art-001", title: "Big Review", body: "B".repeat(30000) }],
+      })
+      .mockResolvedValueOnce({ rows: [] }); // artifacts done after skip
+
+    const result = await embedPending(mockPool);
+
+    expect(result.artifacts).toBe(0);
+    expect(result.skipped).toHaveLength(1);
+    expect(result.skipped[0]).toMatchObject({
+      type: "artifact",
+      id: "art-001",
+      title: "Big Review",
+    });
+  });
+
+  it("embeds normal items and skips oversized in same batch", async () => {
+    mockPool.query
+      .mockResolvedValueOnce({ rows: [] }) // entries
+      .mockResolvedValueOnce({
+        rows: [
+          { id: "art-001", title: "Small", body: "short body" },
+          { id: "art-002", title: "Huge", body: "C".repeat(30000) },
+        ],
+      })
+      .mockResolvedValueOnce({ rowCount: 1 }) // UPDATE
+      .mockResolvedValueOnce({ rows: [] }); // artifacts done
 
     mockEmbeddings.generateEmbeddingsBatch.mockResolvedValue([[0.1, 0.2]]);
 
-    await embedPending(mockPool);
+    const result = await embedPending(mockPool);
 
-    const calledWith = mockEmbeddings.generateEmbeddingsBatch.mock.calls[0][0][0] as string;
-    expect(calledWith.length).toBe(25000);
+    expect(result.artifacts).toBe(1);
+    expect(result.skipped).toHaveLength(1);
+    expect(result.skipped[0].title).toBe("Huge");
+    expect(mockEmbeddings.generateEmbeddingsBatch).toHaveBeenCalledWith([
+      "Small\n\nshort body",
+    ]);
   });
 
   it("processes multiple batches", async () => {
     mockPool.query
-      // Entries batch 1
-      .mockResolvedValueOnce({
-        rows: [{ id: 1, text: "First" }],
-      })
+      .mockResolvedValueOnce({ rows: [{ id: 1, text: "First" }] })
       .mockResolvedValueOnce({ rowCount: 1 })
-      // Entries batch 2
-      .mockResolvedValueOnce({
-        rows: [{ id: 2, text: "Second" }],
-      })
+      .mockResolvedValueOnce({ rows: [{ id: 2, text: "Second" }] })
       .mockResolvedValueOnce({ rowCount: 1 })
-      // Entries done
       .mockResolvedValueOnce({ rows: [] })
-      // Artifacts done
       .mockResolvedValueOnce({ rows: [] });
 
     mockEmbeddings.generateEmbeddingsBatch.mockResolvedValue([[0.1, 0.2]]);
