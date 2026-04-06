@@ -1430,15 +1430,18 @@ describe("findArtifactByKindAndTitle", () => {
 
 describe("getRecentReviewArtifacts", () => {
   it("returns review artifacts within date range", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+
     await createArtifact(pool, {
       kind: "review",
-      title: "2026-03-28 — Evening Checkin",
-      body: "March 28 review",
+      title: `${today} — Evening Checkin`,
+      body: "Today's review",
       source: "mcp",
       status: "pending",
     });
 
-    const results = await getRecentReviewArtifacts(pool, "2026-03-27", "2026-03-29");
+    const results = await getRecentReviewArtifacts(pool, today, tomorrow);
     expect(results.length).toBeGreaterThan(0);
     expect(results.every((r) => r.kind === "review")).toBe(true);
   });
@@ -1449,13 +1452,16 @@ describe("getRecentReviewArtifacts", () => {
   });
 
   it("excludes non-review artifacts", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+
     await createArtifact(pool, {
       kind: "note",
       title: "Not a review",
       body: "body",
     });
 
-    const results = await getRecentReviewArtifacts(pool, "2026-03-27", "2026-03-29");
+    const results = await getRecentReviewArtifacts(pool, today, tomorrow);
     expect(results.every((r) => r.kind === "review")).toBe(true);
   });
 });
