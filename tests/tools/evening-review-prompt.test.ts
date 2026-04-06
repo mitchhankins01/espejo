@@ -82,7 +82,6 @@ function makeReview(overrides: Partial<ArtifactRow> = {}): ArtifactRow {
     title: "2026-03-27 — Evening Checkin",
     body: "**System state**: escalera green, boundaries yellow, attachment green",
     has_embedding: true,
-    status: "pending",
     source: "mcp",
     source_path: null,
     deleted_at: null,

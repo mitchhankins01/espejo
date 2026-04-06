@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockR2 = vi.hoisted(() => {
-  const tpl = "---\nkind: review\nstatus: approved\ntags: []\n---\n# {{title}}\n\n{{body}}\n";
+  const tpl = "---\nkind: review\ntags: []\n---\n# {{title}}\n\n{{body}}\n";
   return {
     MOCK_TEMPLATE: tpl,
     createClient: vi.fn().mockReturnValue({}),

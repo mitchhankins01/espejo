@@ -144,7 +144,6 @@ export async function searchContent(
         FROM knowledge_artifacts a, params p
         WHERE a.embedding IS NOT NULL
           AND a.deleted_at IS NULL
-          AND a.status = 'approved'
         ${artFilterWhere}
         ORDER BY a.embedding <=> p.query_embedding
         LIMIT 20
@@ -155,7 +154,6 @@ export async function searchContent(
         FROM knowledge_artifacts a, params p
         WHERE a.tsv @@ p.ts_query
           AND a.deleted_at IS NULL
-          AND a.status = 'approved'
         ${artFilterWhere}
         LIMIT 20
       )

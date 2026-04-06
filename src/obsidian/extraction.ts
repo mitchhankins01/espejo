@@ -112,7 +112,6 @@ function insightToMarkdown(
 
   return `---
 kind: insight
-status: pending
 ---
 ${insight.body}
 
@@ -253,7 +252,7 @@ export async function extractAndNotifyReviews(
       return `📝 <b>${escapeHtml(r.reviewTitle)}</b>\n${insightList}`;
     });
 
-  const message = `🔍 <b>Review extraction</b> — ${totalInsights} pending insight(s):\n\n${lines.join("\n\n")}\n\nApprove in Obsidian: change <code>status: pending</code> → <code>status: approved</code>`;
+  const message = `🔍 <b>Review extraction</b> — ${totalInsights} new insight(s):\n\n${lines.join("\n\n")}`;
 
   await sendTelegramMessage(config.telegram.allowedChatId, message);
 }

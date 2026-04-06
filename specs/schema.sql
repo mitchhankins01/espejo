@@ -388,7 +388,6 @@ CREATE INDEX IF NOT EXISTS idx_oura_workouts_day ON oura_workouts(day DESC);
 CREATE TABLE IF NOT EXISTS knowledge_artifacts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     kind TEXT NOT NULL CHECK (kind IN ('insight', 'reference', 'note', 'project', 'review')),
-    status TEXT NOT NULL DEFAULT 'approved' CHECK (status IN ('pending', 'approved')),
     title TEXT NOT NULL CHECK (char_length(title) BETWEEN 1 AND 300),
     body TEXT NOT NULL CHECK (char_length(body) > 0),
     tags TEXT[] NOT NULL DEFAULT '{}',

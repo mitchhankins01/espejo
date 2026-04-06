@@ -126,7 +126,6 @@ export async function runObsidianSync(
             title: parsed.title,
             body: parsed.body,
             kind: parsed.kind,
-            status: parsed.status,
             contentHash: item.etag,
           });
 

@@ -1367,21 +1367,19 @@ describe("createArtifact", () => {
     expect(art.source_entry_uuids).toEqual([]);
   });
 
-  it("creates artifact with custom source and status", async () => {
+  it("creates artifact with custom source", async () => {
     const art = await createArtifact(pool, {
       kind: "review",
       title: "2026-03-28 — Evening Checkin",
       body: "Evening review body",
       source: "mcp",
-      status: "pending",
     });
 
     expect(art.source).toBe("mcp");
-    expect(art.status).toBe("pending");
     expect(art.kind).toBe("review");
   });
 
-  it("uses DB defaults when source/status not provided", async () => {
+  it("uses DB defaults when source not provided", async () => {
     const art = await createArtifact(pool, {
       kind: "note",
       title: "Default source test",
@@ -1389,7 +1387,6 @@ describe("createArtifact", () => {
     });
 
     expect(art.source).toBe("web");
-    expect(art.status).toBe("approved");
   });
 });
 
@@ -1400,7 +1397,6 @@ describe("findArtifactByKindAndTitle", () => {
       title: "Find me review",
       body: "body content",
       source: "mcp",
-      status: "pending",
     });
 
     const found = await findArtifactByKindAndTitle(pool, "review", "Find me review");
@@ -1438,7 +1434,6 @@ describe("getRecentReviewArtifacts", () => {
       title: `${today} — Evening Checkin`,
       body: "Today's review",
       source: "mcp",
-      status: "pending",
     });
 
     const results = await getRecentReviewArtifacts(pool, today, tomorrow);

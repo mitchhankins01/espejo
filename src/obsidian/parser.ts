@@ -16,18 +16,12 @@ const VALID_KINDS: readonly string[] = [
   "review",
 ];
 
-const VALID_STATUSES: readonly string[] = ["pending", "approved"];
-
 const frontmatterSchema = z
   .object({
     kind: z
       .string()
       .transform((k) => (VALID_KINDS.includes(k) ? k : "note"))
       .default("note"),
-    status: z
-      .string()
-      .transform((s) => (VALID_STATUSES.includes(s) ? s : "approved"))
-      .default("approved"),
   })
   .passthrough();
 
@@ -35,7 +29,6 @@ export interface ParsedNote {
   title: string;
   body: string;
   kind: ArtifactKind;
-  status: string;
   wikiLinks: string[];
 }
 
@@ -51,9 +44,6 @@ export function parseObsidianNote(
 
   const fm = frontmatterSchema.safeParse(data);
   const kind = (fm.success ? fm.data.kind : "note") as ArtifactKind;
-  // Reviews are always approved — status: pending is only for extracted insights
-  const rawStatus = fm.success ? fm.data.status : "approved";
-  const status = kind === "review" ? "approved" : rawStatus;
 
   const title = extractTitle(markdownBody) ?? filenameStem(filename);
   const body = stripFirstHeading(markdownBody).trim() || title;
@@ -63,7 +53,6 @@ export function parseObsidianNote(
     title: title.slice(0, 300),
     body,
     kind,
-    status,
     wikiLinks,
   };
 }

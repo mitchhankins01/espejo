@@ -1211,6 +1211,12 @@ const migrations: Migration[] = [
       ALTER TABLE entry_templates DROP COLUMN IF EXISTS default_tags;
     `,
   },
+  {
+    name: "036-drop-artifact-status",
+    getSql: () => `
+      ALTER TABLE knowledge_artifacts DROP COLUMN IF EXISTS status;
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

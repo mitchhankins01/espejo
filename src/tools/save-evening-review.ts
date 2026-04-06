@@ -20,7 +20,6 @@ async function getReviewTemplate(
     // Fallback if template doesn't exist
     return `---
 kind: review
-status: approved
 ---
 # {{title}}
 
