@@ -13,7 +13,6 @@ import {
 } from "../db/queries/artifacts.js";
 import { createClient, listAllObjects, getObjectContent } from "../storage/r2.js";
 import { notifyError } from "../telegram/notify.js";
-import { assessAndNotifyAtomicity } from "./atomicity.js";
 import { extractAndNotifyReviews } from "./extraction.js";
 import { parseObsidianNote } from "./parser.js";
 
@@ -173,16 +172,8 @@ export async function runObsidianSync(
       }
     }
 
-    // 9. Post-sync: atomicity assessment (fire-and-forget, skip pending insights)
+    // 9. Post-sync: extract insights from newly synced reviews (fire-and-forget)
     const approvedArtifacts = upsertedArtifacts.filter((a) => !a.key.startsWith("Pending/"));
-    console.log(`[obsidian-sync] Post-sync: ${upsertedArtifacts.length} upserted, ${approvedArtifacts.length} approved (non-Pending)`);
-    if (approvedArtifacts.length > 0) {
-      void assessAndNotifyAtomicity(
-        approvedArtifacts.map((a) => ({ title: a.title, body: a.body, kind: a.kind }))
-      ).catch((err) => notifyError("Obsidian atomicity", err));
-    }
-
-    // 10. Post-sync: extract insights from newly synced reviews (fire-and-forget)
     const newReviews = approvedArtifacts
       .filter((a) => a.kind === "review")
       .map((a) => ({ title: a.title, body: a.body }));
