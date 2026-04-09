@@ -149,12 +149,12 @@ export const toolSpecs = {
           "Natural language or keyword search query. Searches both semantically (meaning) and lexically (exact words)."
         ),
       date_from: dateString
-        .optional()
+        .nullable().optional()
         .describe("Filter entries from this date, inclusive"),
       date_to: dateString
-        .optional()
+        .nullable().optional()
         .describe("Filter entries up to this date, inclusive"),
-      city: z.string().optional().describe("Filter by city name"),
+      city: z.string().nullable().optional().describe("Filter by city name"),
       limit: limitParam(10, 50),
     }),
     examples: [
@@ -203,7 +203,7 @@ export const toolSpecs = {
     params: z.object({
       date_from: dateString.describe("Start of date range, inclusive"),
       date_to: dateString
-        .optional()
+        .nullable().optional()
         .describe("End of date range, inclusive; defaults to today"),
       limit: limitParam(20, 50),
     }),
@@ -285,10 +285,10 @@ export const toolSpecs = {
       "Optionally filter to a date range.",
     params: z.object({
       date_from: dateString
-        .optional()
+        .nullable().optional()
         .describe("Start of date range for stats calculation"),
       date_to: dateString
-        .optional()
+        .nullable().optional()
         .describe("End of date range for stats calculation"),
     }),
     examples: [
@@ -308,7 +308,7 @@ export const toolSpecs = {
     annotations: READ_ONLY,
     description: "Get a single-day Oura biometric snapshot including sleep, readiness, activity, HRV, steps, stress, and workouts.",
     params: z.object({
-      date: dateString.optional().describe("Optional date in YYYY-MM-DD; defaults to today"),
+      date: dateString.nullable().optional().describe("Optional date in YYYY-MM-DD; defaults to today"),
     }),
     examples: [{ input: {}, behavior: "Returns today's Oura summary" }],
   },
@@ -317,7 +317,7 @@ export const toolSpecs = {
     annotations: READ_ONLY,
     description: "Get a 7-day Oura overview with daily scores, stress, efficiency, and aggregate stats.",
     params: z.object({
-      end_date: dateString.optional().describe("Week end date (inclusive); defaults to today"),
+      end_date: dateString.nullable().optional().describe("Week end date (inclusive); defaults to today"),
     }),
     examples: [{ input: {}, behavior: "Returns the last 7 days of Oura data" }],
   },
@@ -387,8 +387,8 @@ export const toolSpecs = {
     description:
       "List knowledge artifacts with optional filtering by kind. Ordered by most recently updated.",
     params: z.object({
-      kind: z.enum(["insight", "reference", "note", "project", "review"]).optional().describe("Filter by artifact kind"),
-      source: z.enum(["web", "obsidian", "mcp", "telegram"]).optional().describe("Filter by source"),
+      kind: z.enum(["insight", "reference", "note", "project", "review"]).nullable().optional().describe("Filter by artifact kind"),
+      source: z.enum(["web", "obsidian", "mcp", "telegram"]).nullable().optional().describe("Filter by source"),
       limit: limitParam(20, 100),
       offset: z.number().int().min(0).default(0).describe("Pagination offset"),
     }),
@@ -408,8 +408,8 @@ export const toolSpecs = {
       "Same RRF approach as search_entries but scoped to artifacts only.",
     params: z.object({
       query: z.string().min(1).describe("Search query"),
-      kind: z.enum(["insight", "reference", "note", "project", "review"]).optional().describe("Filter by artifact kind"),
-      source: z.enum(["web", "obsidian", "mcp", "telegram"]).optional().describe("Filter by source"),
+      kind: z.enum(["insight", "reference", "note", "project", "review"]).nullable().optional().describe("Filter by artifact kind"),
+      source: z.enum(["web", "obsidian", "mcp", "telegram"]).nullable().optional().describe("Filter by source"),
       limit: limitParam(10, 50),
     }),
     examples: [
@@ -428,14 +428,14 @@ export const toolSpecs = {
       "Returns results with a content_type discriminator. Use this when you want to search across all content types.",
     params: z.object({
       query: z.string().min(1).describe("Search query"),
-      content_types: z.array(z.enum(["journal_entry", "knowledge_artifact"])).optional()
+      content_types: z.array(z.enum(["journal_entry", "knowledge_artifact"])).nullable().optional()
         .describe("Content types to include (default: both)"),
-      date_from: dateString.optional().describe("Filter entries from this date"),
-      date_to: dateString.optional().describe("Filter entries up to this date"),
-      city: z.string().optional().describe("Filter entries by city"),
-      artifact_kind: z.enum(["insight", "reference", "note", "project", "review"]).optional()
+      date_from: dateString.nullable().optional().describe("Filter entries from this date"),
+      date_to: dateString.nullable().optional().describe("Filter entries up to this date"),
+      city: z.string().nullable().optional().describe("Filter entries by city"),
+      artifact_kind: z.enum(["insight", "reference", "note", "project", "review"]).nullable().optional()
         .describe("Filter artifacts by kind"),
-      artifact_source: z.enum(["web", "obsidian", "mcp", "telegram"]).optional()
+      artifact_source: z.enum(["web", "obsidian", "mcp", "telegram"]).nullable().optional()
         .describe("Filter artifacts by source"),
       limit: limitParam(10, 50),
     }),
@@ -459,13 +459,13 @@ export const toolSpecs = {
     params: z.object({
       content: z.string().min(1).max(200).describe("Memory content to store"),
       kind: memoryKindParam,
-      confidence: z.number().min(0).max(1).optional().describe("Optional confidence score (default: 0.8)"),
-      evidence: z.string().optional().describe("Why this should be remembered"),
-      entry_uuids: z.array(z.string()).optional().describe("Related journal entry UUIDs"),
+      confidence: z.number().min(0).max(1).nullable().optional().describe("Optional confidence score (default: 0.8)"),
+      evidence: z.string().nullable().optional().describe("Why this should be remembered"),
+      entry_uuids: z.array(z.string()).nullable().optional().describe("Related journal entry UUIDs"),
       temporal: z.object({
-        date: dateString.optional(),
-        relevance: z.enum(["upcoming", "ongoing"]).optional(),
-      }).optional().describe("Optional temporal metadata for future-relevant memories"),
+        date: dateString.nullable().optional(),
+        relevance: z.enum(["upcoming", "ongoing"]).nullable().optional(),
+      }).nullable().optional().describe("Optional temporal metadata for future-relevant memories"),
     }),
     examples: [
       {
@@ -486,7 +486,7 @@ export const toolSpecs = {
       "Extract and store up to 5 memory patterns from a conversation transcript using memory-v2 quality gates.",
     params: z.object({
       messages: z.string().min(1).describe("Conversation transcript"),
-      context: z.string().optional().describe("Optional extraction context hint"),
+      context: z.string().nullable().optional().describe("Optional extraction context hint"),
     }),
     examples: [
       {
@@ -506,7 +506,7 @@ export const toolSpecs = {
       "Search memory patterns using hybrid semantic + text retrieval with memory-aware ranking.",
     params: z.object({
       query: z.string().min(1).describe("Memory search query"),
-      kinds: z.array(memoryKindParam).optional().describe("Optional kind filters"),
+      kinds: z.array(memoryKindParam).nullable().optional().describe("Optional kind filters"),
       limit: limitParam(10, 20),
     }),
     examples: [
@@ -524,7 +524,7 @@ export const toolSpecs = {
       "Memory maintenance utility: review stats, stale memories, or run consolidation on overlapping patterns.",
     params: z.object({
       action: z.enum(["consolidate", "review_stale", "stats"]),
-      kind: memoryKindParam.optional().describe("Optional kind scope"),
+      kind: memoryKindParam.nullable().optional().describe("Optional kind scope"),
     }),
     examples: [
       {
@@ -545,12 +545,12 @@ export const toolSpecs = {
       "List todos with filtering by status, Eisenhower quadrant (urgent/important), parent, or focus. " +
       "Supports include_children to load subtasks inline.",
     params: z.object({
-      status: z.enum(["active", "waiting", "done", "someday"]).optional().describe("Filter by status"),
-      urgent: z.boolean().optional().describe("Filter by urgency"),
-      important: z.boolean().optional().describe("Filter by importance"),
-      parent_id: z.string().optional().describe("Filter by parent ID, or 'root' for top-level only"),
-      focus_only: z.boolean().optional().describe("Only return the current focus todo"),
-      include_children: z.boolean().optional().describe("Include child todos inline"),
+      status: z.enum(["active", "waiting", "done", "someday"]).nullable().optional().describe("Filter by status"),
+      urgent: z.boolean().nullable().optional().describe("Filter by urgency"),
+      important: z.boolean().nullable().optional().describe("Filter by importance"),
+      parent_id: z.string().nullable().optional().describe("Filter by parent ID, or 'root' for top-level only"),
+      focus_only: z.boolean().nullable().optional().describe("Only return the current focus todo"),
+      include_children: z.boolean().nullable().optional().describe("Include child todos inline"),
       limit: limitParam(20, 100),
       offset: z.number().int().min(0).default(0).describe("Pagination offset"),
     }),
@@ -578,12 +578,12 @@ export const toolSpecs = {
       "Max 2 levels deep (parent must be root-level).",
     params: z.object({
       title: z.string().min(1).max(300).describe("Todo title"),
-      status: z.enum(["active", "waiting", "done", "someday"]).optional().describe("Status (default: active)"),
-      next_step: z.string().max(500).optional().describe("Current action step"),
-      body: z.string().optional().describe("Markdown notes/context"),
-      urgent: z.boolean().optional().describe("Is urgent (Eisenhower)"),
-      important: z.boolean().optional().describe("Is important (Eisenhower)"),
-      parent_id: z.string().optional().describe("Parent todo ID for subtasks"),
+      status: z.enum(["active", "waiting", "done", "someday"]).nullable().optional().describe("Status (default: active)"),
+      next_step: z.string().max(500).nullable().optional().describe("Current action step"),
+      body: z.string().nullable().optional().describe("Markdown notes/context"),
+      urgent: z.boolean().nullable().optional().describe("Is urgent (Eisenhower)"),
+      important: z.boolean().nullable().optional().describe("Is important (Eisenhower)"),
+      parent_id: z.string().nullable().optional().describe("Parent todo ID for subtasks"),
     }),
     examples: [
       {
@@ -604,12 +604,12 @@ export const toolSpecs = {
       "Update a todo's fields. Auto-sets completed_at when status → done, clears it otherwise.",
     params: z.object({
       id: z.string().min(1).describe("Todo ID"),
-      title: z.string().min(1).max(300).optional().describe("New title"),
-      status: z.enum(["active", "waiting", "done", "someday"]).optional().describe("New status"),
+      title: z.string().min(1).max(300).nullable().optional().describe("New title"),
+      status: z.enum(["active", "waiting", "done", "someday"]).nullable().optional().describe("New status"),
       next_step: z.string().max(500).nullable().optional().describe("New next step (null to clear)"),
-      body: z.string().optional().describe("New body"),
-      urgent: z.boolean().optional().describe("Update urgency"),
-      important: z.boolean().optional().describe("Update importance"),
+      body: z.string().nullable().optional().describe("New body"),
+      urgent: z.boolean().nullable().optional().describe("Update urgency"),
+      important: z.boolean().nullable().optional().describe("Update importance"),
     }),
     examples: [
       {
@@ -641,7 +641,7 @@ export const toolSpecs = {
     annotations: WRITE_IDEMPOTENT,
     description: "Manually trigger Obsidian vault sync from R2. Optionally sync a single file by path.",
     params: z.object({
-      file_path: z.string().optional().describe("Sync only this vault-relative file path"),
+      file_path: z.string().nullable().optional().describe("Sync only this vault-relative file path"),
     }),
     examples: [
       { input: {}, behavior: "Full vault sync, returns summary of files synced/deleted/errors" },
@@ -665,8 +665,8 @@ export const toolSpecs = {
       "Set or clear 'The One Thing' focus. Only one todo can be focus at a time. " +
       "Call with id to set, or with clear=true to unset.",
     params: z.object({
-      id: z.string().optional().describe("Todo ID to set as focus"),
-      clear: z.boolean().optional().describe("Set to true to clear focus without setting a new one"),
+      id: z.string().nullable().optional().describe("Todo ID to set as focus"),
+      clear: z.boolean().nullable().optional().describe("Set to true to clear focus without setting a new one"),
     }),
     examples: [
       {
@@ -689,7 +689,7 @@ export const toolSpecs = {
       "Generates an embedding for semantic search after saving.",
     params: z.object({
       text: z.string().min(1).describe("The final evening review markdown text"),
-      date: dateString.optional().describe(
+      date: dateString.nullable().optional().describe(
         "Date for the review title (YYYY-MM-DD). Defaults to today. " +
         "Use yesterday's date if the session started before midnight but it's now past midnight."
       ),
@@ -791,14 +791,50 @@ export function toAnthropicToolDefinition(name: ToolName): {
 }
 
 /**
+ * Recursively strip null values from an input object (null keys are omitted).
+ * MCP clients send null for omitted optional params, but zod .optional()
+ * rejects null. The schemas accept null via .nullable() for SDK validation,
+ * but we strip nulls here so handlers receive clean T | undefined types.
+ */
+function stripNulls(input: unknown): unknown {
+  if (input === null || input === undefined) return undefined;
+  if (Array.isArray(input)) return input.map(stripNulls);
+  if (typeof input === "object") {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(
+      input as Record<string, unknown>
+    )) {
+      if (value !== null) {
+        result[key] =
+          typeof value === "object" ? stripNulls(value) : value;
+      }
+    }
+    return result;
+  }
+  return input;
+}
+
+/** Recursively strip null from a type at all levels. */
+type DeepStripNull<T> = T extends null
+  ? never
+  : T extends (infer U)[]
+    ? DeepStripNull<U>[]
+    : T extends object
+      ? { [K in keyof T]: DeepStripNull<T[K]> }
+      : T;
+
+/**
  * Validate tool input at runtime using the spec's zod schema.
+ * Strips null values before parsing so handlers receive clean T | undefined types.
  * Throws ZodError with actionable messages if validation fails.
  */
 export function validateToolInput<T extends ToolName>(
   name: T,
   input: unknown
-): ToolParams<T> {
-  return toolSpecs[name].params.parse(input) as ToolParams<T>;
+): DeepStripNull<ToolParams<T>> {
+  return toolSpecs[name].params.parse(stripNulls(input)) as DeepStripNull<
+    ToolParams<T>
+  >;
 }
 
 // ============================================================================
@@ -824,6 +860,11 @@ function zodToJsonSchema(schema: z.ZodTypeAny): Record<string, unknown> {
 
   // Unwrap ZodOptional
   if (schema instanceof z.ZodOptional) {
+    return zodToJsonSchema(schema._def.innerType);
+  }
+
+  // Unwrap ZodNullable
+  if (schema instanceof z.ZodNullable) {
     return zodToJsonSchema(schema._def.innerType);
   }
 

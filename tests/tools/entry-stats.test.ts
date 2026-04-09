@@ -22,4 +22,13 @@ describe("entry_stats spec", () => {
       validateToolInput("entry_stats", { date_from: "January 2024" })
     ).toThrow();
   });
+
+  it("accepts null for optional params (MCP clients send null for omitted fields)", () => {
+    const result = validateToolInput("entry_stats", {
+      date_from: null,
+      date_to: null,
+    });
+    expect(result.date_from).toBeUndefined();
+    expect(result.date_to).toBeUndefined();
+  });
 });

@@ -61,9 +61,54 @@ describe("search_entries spec", () => {
     ).toThrow();
   });
 
+  it("accepts null for optional string, date, and city params", () => {
+    const result = validateToolInput("search_entries", {
+      query: "test",
+      date_from: null,
+      date_to: null,
+      city: null,
+    });
+    expect(result.query).toBe("test");
+    expect(result.date_from).toBeUndefined();
+    expect(result.date_to).toBeUndefined();
+    expect(result.city).toBeUndefined();
+  });
+
   it("has correct tool name and description", () => {
     expect(toolSpecs.search_entries.name).toBe("search_entries");
     expect(toolSpecs.search_entries.description).toContain("Hybrid");
     expect(toolSpecs.search_entries.description).toContain("Reciprocal Rank Fusion");
+  });
+});
+
+describe("null handling across param types", () => {
+  it("strips null from optional boolean and enum params", () => {
+    const result = validateToolInput("list_todos", {
+      status: null,
+      urgent: null,
+      important: null,
+      focus_only: null,
+    });
+    expect(result.status).toBeUndefined();
+    expect(result.urgent).toBeUndefined();
+    expect(result.important).toBeUndefined();
+    expect(result.focus_only).toBeUndefined();
+  });
+
+  it("strips null from optional array params", () => {
+    const result = validateToolInput("recall", {
+      query: "test",
+      kinds: null,
+    });
+    expect(result.kinds).toBeUndefined();
+  });
+
+  it("strips null from optional nested object params", () => {
+    const result = validateToolInput("remember", {
+      content: "test memory",
+      kind: "identity",
+      temporal: null,
+    });
+    expect(result.temporal).toBeUndefined();
   });
 });
