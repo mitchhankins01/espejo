@@ -137,9 +137,10 @@ describe("extractInsightsFromReview — dedup", () => {
       title: "Original idea",
     });
 
-    // Verify frontmatter contains duplicate_of
+    // Verify frontmatter contains duplicate_of and title
     const writtenMarkdown = mockR2.putObjectContent.mock.calls[0][3] as string;
     expect(writtenMarkdown).toContain("duplicate_of: existing-uuid-123");
+    expect(writtenMarkdown).toContain('duplicate_of_title: "Original idea"');
   });
 
   it("detects intra-batch duplicates (second candidate matches first)", async () => {

@@ -120,6 +120,7 @@ function insightToMarkdown(
   const frontmatterLines = ["kind: insight"];
   if (insight.duplicateOf) {
     frontmatterLines.push(`duplicate_of: ${insight.duplicateOf.id}`);
+    frontmatterLines.push(`duplicate_of_title: "${insight.duplicateOf.title.replace(/"/g, '\\"')}"`);
   }
 
   return `---
