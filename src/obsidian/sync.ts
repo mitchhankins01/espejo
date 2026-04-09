@@ -126,6 +126,7 @@ export async function runObsidianSync(
             body: parsed.body,
             kind: parsed.kind,
             contentHash: item.etag,
+            duplicateOf: parsed.duplicateOf,
           });
 
           upsertedArtifacts.push({ id, key: item.key, wikiLinks: parsed.wikiLinks, title: parsed.title, body: parsed.body, kind: parsed.kind });

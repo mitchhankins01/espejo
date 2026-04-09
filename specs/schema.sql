@@ -399,6 +399,7 @@ CREATE TABLE IF NOT EXISTS knowledge_artifacts (
     source_path TEXT,
     content_hash TEXT,
     source TEXT NOT NULL DEFAULT 'web' CHECK (source IN ('web', 'obsidian', 'mcp', 'telegram')),
+    duplicate_of UUID REFERENCES knowledge_artifacts(id) ON DELETE SET NULL,
     deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

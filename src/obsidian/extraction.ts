@@ -3,8 +3,8 @@ import type pg from "pg";
 import { z } from "zod";
 
 import { config } from "../config.js";
-import { searchArtifacts } from "../db/queries/artifacts.js";
-import { generateEmbedding } from "../db/embeddings.js";
+import { searchArtifacts, findDuplicateInsightByEmbedding } from "../db/queries/artifacts.js";
+import { generateEmbedding, generateEmbeddingsBatch } from "../db/embeddings.js";
 import { createClient, putObjectContent } from "../storage/r2.js";
 import { sendTelegramMessage } from "../telegram/client.js";
 
@@ -14,6 +14,7 @@ import { sendTelegramMessage } from "../telegram/client.js";
 
 const EXTRACTION_MODEL = "claude-opus-4-6";
 const VAULT_BUCKET = "artifacts";
+const DEDUP_SIMILARITY_THRESHOLD = 0.92;
 
 const extractedInsightSchema = z.object({
   title: z.string(),
@@ -26,11 +27,17 @@ const extractionResponseSchema = z.object({
   insights: z.array(extractedInsightSchema),
 });
 
+export interface InsightDuplicateMatch {
+  id: string;
+  title: string;
+}
+
 export interface ExtractedInsight {
   title: string;
   body: string;
   linkedTo: string[];
   addToProject?: string | null;
+  duplicateOf?: InsightDuplicateMatch;
 }
 
 export interface ExtractionResult {
@@ -110,14 +117,33 @@ function insightToMarkdown(
     ...dedupedLinks.map((t) => `[[${t}]]`),
   ];
 
+  const frontmatterLines = ["kind: insight"];
+  if (insight.duplicateOf) {
+    frontmatterLines.push(`duplicate_of: ${insight.duplicateOf.id}`);
+  }
+
   return `---
-kind: insight
+${frontmatterLines.join("\n")}
 ---
 ${insight.body}
 
 ## Sources
 ${links.join("\n")}
 `;
+}
+
+/** Compute cosine similarity between two embedding vectors */
+function cosineSimilarity(a: number[], b: number[]): number {
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  const denom = Math.sqrt(normA) * Math.sqrt(normB);
+  return denom === 0 ? 0 : dot / denom;
 }
 
 /** Sanitize a title for use as a filename */
@@ -184,6 +210,53 @@ export async function extractInsightsFromReview(
 
     if (result.insights.length === 0) return result;
 
+    // Dedup: batch-embed all candidates, then check DB + intra-batch
+    let embeddings: number[][] | null = null;
+    try {
+      const texts = result.insights.map((i) => `${i.title}\n\n${i.body}`);
+      embeddings = await generateEmbeddingsBatch(texts);
+    } catch (err) {
+      // Fail-open: if embedding fails, skip dedup and write all as new
+      console.log(`[extraction] Embedding failed, skipping dedup: ${err instanceof Error ? err.message : "unknown"}`);
+    }
+
+    if (embeddings) {
+      const processedEmbeddings: number[][] = [];
+      for (let i = 0; i < result.insights.length; i++) {
+        const embedding = embeddings[i];
+
+        // Check against existing insights in DB
+        try {
+          const dbMatch = await findDuplicateInsightByEmbedding(
+            pool,
+            embedding,
+            DEDUP_SIMILARITY_THRESHOLD
+          );
+          if (dbMatch) {
+            result.insights[i].duplicateOf = { id: dbMatch.id, title: dbMatch.title };
+          }
+        } catch (err) {
+          console.log(`[extraction] DB dedup check failed for "${result.insights[i].title}": ${err instanceof Error ? err.message : "unknown"}`);
+        }
+
+        // Check against earlier candidates in this batch (intra-batch dedup)
+        if (!result.insights[i].duplicateOf) {
+          for (let j = 0; j < processedEmbeddings.length; j++) {
+            const sim = cosineSimilarity(embedding, processedEmbeddings[j]);
+            if (sim >= DEDUP_SIMILARITY_THRESHOLD) {
+              result.insights[i].duplicateOf = {
+                id: "batch",
+                title: result.insights[j].title,
+              };
+              break;
+            }
+          }
+        }
+
+        processedEmbeddings.push(embedding);
+      }
+    }
+
     // Write insight files to R2
     const r2Client = createClient();
     for (const insight of result.insights) {
@@ -243,16 +316,29 @@ export async function extractAndNotifyReviews(
 
   if (!config.telegram.botToken || !config.telegram.allowedChatId) return;
 
+  const allInsights = allResults.flatMap((r) => r.insights);
+  const newCount = allInsights.filter((i) => !i.duplicateOf).length;
+  const dupCount = allInsights.filter((i) => i.duplicateOf).length;
+
   const lines = allResults
     .filter((r) => r.insights.length > 0)
     .map((r) => {
       const insightList = r.insights
-        .map((i) => `  • ${escapeHtml(i.title)}`)
+        .map((i) =>
+          i.duplicateOf
+            ? `  🔁 ${escapeHtml(i.title)} <i>(duplicate of "${escapeHtml(i.duplicateOf.title)}")</i>`
+            : `  💡 ${escapeHtml(i.title)}`
+        )
         .join("\n");
       return `📝 <b>${escapeHtml(r.reviewTitle)}</b>\n${insightList}`;
     });
 
-  const message = `🔍 <b>Review extraction</b> — ${totalInsights} new insight(s):\n\n${lines.join("\n\n")}`;
+  const summary = [
+    newCount > 0 ? `${newCount} new` : null,
+    dupCount > 0 ? `${dupCount} duplicate` : null,
+  ].filter(Boolean).join(", ");
+
+  const message = `🔍 <b>Review extraction</b> — ${summary}:\n\n${lines.join("\n\n")}`;
 
   await sendTelegramMessage(config.telegram.allowedChatId, message);
 }

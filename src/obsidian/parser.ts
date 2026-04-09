@@ -22,6 +22,7 @@ const frontmatterSchema = z
       .string()
       .transform((k) => (VALID_KINDS.includes(k) ? k : "note"))
       .default("note"),
+    duplicate_of: z.string().uuid().optional(),
   })
   .passthrough();
 
@@ -30,6 +31,7 @@ export interface ParsedNote {
   body: string;
   kind: ArtifactKind;
   wikiLinks: string[];
+  duplicateOf?: string;
 }
 
 /**
@@ -44,6 +46,7 @@ export function parseObsidianNote(
 
   const fm = frontmatterSchema.safeParse(data);
   const kind = (fm.success ? fm.data.kind : "note") as ArtifactKind;
+  const duplicateOf = fm.success ? fm.data.duplicate_of : undefined;
 
   const title = extractTitle(markdownBody) ?? filenameStem(filename);
   const body = stripFirstHeading(markdownBody).trim() || title;
@@ -54,6 +57,7 @@ export function parseObsidianNote(
     body,
     kind,
     wikiLinks,
+    ...(duplicateOf ? { duplicateOf } : {}),
   };
 }
 

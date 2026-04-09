@@ -1217,6 +1217,13 @@ const migrations: Migration[] = [
       ALTER TABLE knowledge_artifacts DROP COLUMN IF EXISTS status;
     `,
   },
+  {
+    name: "037-artifact-duplicate-of",
+    getSql: () => `
+      ALTER TABLE knowledge_artifacts
+        ADD COLUMN IF NOT EXISTS duplicate_of UUID REFERENCES knowledge_artifacts(id) ON DELETE SET NULL;
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

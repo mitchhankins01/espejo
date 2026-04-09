@@ -98,21 +98,23 @@ export async function upsertObsidianArtifact(
     body: string;
     kind: string;
     contentHash: string;
+    duplicateOf?: string;
   }
 ): Promise<string> {
   const result = await pool.query<{ id: string }>(
-    `INSERT INTO knowledge_artifacts (source_path, title, body, kind, source, content_hash)
-     VALUES ($1, $2, $3, $4, 'obsidian', $5)
+    `INSERT INTO knowledge_artifacts (source_path, title, body, kind, source, content_hash, duplicate_of)
+     VALUES ($1, $2, $3, $4, 'obsidian', $5, $6)
      ON CONFLICT (source_path) WHERE source_path IS NOT NULL
      DO UPDATE SET
        title = EXCLUDED.title,
        body = EXCLUDED.body,
        kind = EXCLUDED.kind,
        content_hash = EXCLUDED.content_hash,
+       duplicate_of = EXCLUDED.duplicate_of,
        embedding = NULL,
        deleted_at = NULL
      RETURNING id`,
-    [data.sourcePath, data.title, data.body, data.kind, data.contentHash]
+    [data.sourcePath, data.title, data.body, data.kind, data.contentHash, data.duplicateOf ?? null]
   );
   return result.rows[0].id;
 }
