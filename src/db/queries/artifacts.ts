@@ -322,46 +322,6 @@ export async function findSimilarArtifacts(
   }));
 }
 
-export interface DuplicateInsightMatch {
-  id: string;
-  title: string;
-  similarity: number;
-}
-
-/**
- * Find the closest existing insight by raw embedding vector.
- * Used for post-extraction dedup: returns the top match above the threshold,
- * or null if no duplicate exists.
- */
-export async function findDuplicateInsightByEmbedding(
-  pool: pg.Pool,
-  embedding: number[],
-  minSimilarity: number
-): Promise<DuplicateInsightMatch | null> {
-  const embeddingStr = `[${embedding.join(",")}]`;
-  const result = await pool.query(
-    `SELECT id, title, 1 - (embedding <=> $1::vector) AS similarity
-     FROM knowledge_artifacts
-     WHERE kind = 'insight'
-       AND embedding IS NOT NULL
-       AND deleted_at IS NULL
-       AND duplicate_of IS NULL
-       AND 1 - (embedding <=> $1::vector) >= $2
-     ORDER BY embedding <=> $1::vector
-     LIMIT 1`,
-    [embeddingStr, minSimilarity]
-  );
-
-  if (result.rows.length === 0) return null;
-
-  const row = result.rows[0];
-  return {
-    id: row.id as string,
-    title: row.title as string,
-    similarity: parseFloat(String(row.similarity)),
-  };
-}
-
 export async function createArtifact(
   pool: pg.Pool,
   data: {

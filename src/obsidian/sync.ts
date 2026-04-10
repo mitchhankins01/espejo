@@ -46,8 +46,6 @@ export interface ObsidianSyncResult {
   linksResolved: number;
   errors: Array<{ file: string; error: string }>;
   durationMs: number;
-  /** Reviews ready for insight extraction (run after embedPending) */
-  pendingReviews: Array<{ title: string; body: string }>;
 }
 
 // ============================================================================
@@ -128,7 +126,6 @@ export async function runObsidianSync(
             body: parsed.body,
             kind: parsed.kind,
             contentHash: item.etag,
-            duplicateOf: parsed.duplicateOf,
           });
 
           upsertedArtifacts.push({ id, key: item.key, wikiLinks: parsed.wikiLinks, title: parsed.title, body: parsed.body, kind: parsed.kind });
@@ -175,15 +172,19 @@ export async function runObsidianSync(
       }
     }
 
-    // 9. Collect reviews for extraction (caller runs this after embedPending)
+    // 9. Post-sync: extract insights from newly synced reviews (fire-and-forget)
     const approvedArtifacts = upsertedArtifacts.filter((a) => !a.key.startsWith("Pending/"));
-    const pendingReviews = approvedArtifacts
+    const newReviews = approvedArtifacts
       .filter((a) => a.kind === "review")
       .map((a) => ({ title: a.title, body: a.body }));
-    console.log(`[obsidian-sync] Reviews for extraction: ${pendingReviews.map((r) => r.title).join(", ") || "(none)"}`);
+    console.log(`[obsidian-sync] Reviews for extraction: ${newReviews.map((r) => r.title).join(", ") || "(none)"}`);
+    if (newReviews.length > 0) {
+      void extractAndNotifyReviews(pool, newReviews)
+        .catch((err) => notifyError("Review extraction", err));
+    }
 
     await completeObsidianSyncRun(pool, runId, "success", filesSynced, filesDeleted, linksResolved, errors);
-    return { runId, filesSynced, filesDeleted, linksResolved, errors, durationMs: Date.now() - t0, pendingReviews };
+    return { runId, filesSynced, filesDeleted, linksResolved, errors, durationMs: Date.now() - t0 };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown Obsidian sync error";
     await completeObsidianSyncRun(pool, runId, "error", filesSynced, filesDeleted, linksResolved, [
@@ -206,14 +207,10 @@ async function syncAndNotify(
   onAfterSync?: () => Promise<void>
 ): Promise<void> {
   try {
-    const result = await runObsidianSync(pool);
-    /* v8 ignore next 7 -- background callback is runtime-only */
+    await runObsidianSync(pool);
+    /* v8 ignore next 3 -- background callback is runtime-only */
     if (onAfterSync) {
       await onAfterSync();
-    }
-    // Extract insights AFTER embedPending so existing insights have embeddings for dedup
-    if (result && result.pendingReviews.length > 0) {
-      await extractAndNotifyReviews(pool, result.pendingReviews);
     }
   /* v8 ignore next 3 -- background sync: errors already recorded in obsidian_sync_runs */
   } catch (err) {

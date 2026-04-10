@@ -62,7 +62,6 @@ import {
   getExplicitLinks,
   getExplicitBacklinks,
   findSimilarArtifacts,
-  findDuplicateInsightByEmbedding,
   getArtifactGraph,
   searchContent,
   searchEntriesForPicker,
@@ -2023,105 +2022,6 @@ describe("artifact title + link queries", () => {
     for (let i = 1; i < similar.length; i++) {
       expect(similar[i].similarity).toBeLessThanOrEqual(similar[i - 1].similarity);
     }
-  });
-
-  // Helper: generate a unique embedding not colliding with seeded data
-  function uniqueEmbedding(seed: number): number[] {
-    const vec: number[] = [];
-    for (let i = 0; i < 1536; i++) {
-      vec.push(Math.sin(seed * 0.1 + i * 0.01) * 0.5 + Math.cos(seed * 0.3 + i * 0.02) * 0.3);
-    }
-    const mag = Math.sqrt(vec.reduce((sum, v) => sum + v * v, 0));
-    return vec.map((v) => v / mag);
-  }
-
-  it("findDuplicateInsightByEmbedding returns match above threshold", async () => {
-    const emb = uniqueEmbedding(5555);
-    const existing = await createArtifact(pool, {
-      kind: "insight",
-      title: "Dedup Target Insight",
-      body: "Original body for dedup",
-    });
-
-    const embeddingStr = `[${emb.join(",")}]`;
-    await pool.query(
-      `UPDATE knowledge_artifacts SET embedding = $2::vector WHERE id = $1`,
-      [existing.id, embeddingStr]
-    );
-
-    // Query with the exact same embedding — should match
-    const match = await findDuplicateInsightByEmbedding(pool, emb, 0.9);
-    expect(match).not.toBeNull();
-    expect(match!.id).toBe(existing.id);
-    expect(match!.title).toBe("Dedup Target Insight");
-    expect(match!.similarity).toBeGreaterThanOrEqual(0.9);
-  });
-
-  it("findDuplicateInsightByEmbedding returns null when no match above threshold", async () => {
-    const emb1 = uniqueEmbedding(6666);
-    const emb2 = uniqueEmbedding(7777);
-    const existing = await createArtifact(pool, {
-      kind: "insight",
-      title: "Unrelated Dedup Insight",
-      body: "Different topic entirely",
-    });
-
-    const embeddingStr = `[${emb1.join(",")}]`;
-    await pool.query(
-      `UPDATE knowledge_artifacts SET embedding = $2::vector WHERE id = $1`,
-      [existing.id, embeddingStr]
-    );
-
-    // Query with a different embedding at a very high threshold
-    const match = await findDuplicateInsightByEmbedding(pool, emb2, 0.99);
-    expect(match).toBeNull();
-  });
-
-  it("findDuplicateInsightByEmbedding ignores non-insight artifacts", async () => {
-    const emb = uniqueEmbedding(8888);
-    const reference = await createArtifact(pool, {
-      kind: "reference",
-      title: "A Reference For Dedup Test",
-      body: "Reference body content",
-    });
-
-    const embeddingStr = `[${emb.join(",")}]`;
-    await pool.query(
-      `UPDATE knowledge_artifacts SET embedding = $2::vector WHERE id = $1`,
-      [reference.id, embeddingStr]
-    );
-
-    // Same embedding but kind='reference' — should not match
-    const match = await findDuplicateInsightByEmbedding(pool, emb, 0.9);
-    expect(match).toBeNull();
-  });
-
-  it("findDuplicateInsightByEmbedding ignores existing duplicates", async () => {
-    const emb = uniqueEmbedding(9999);
-    const original = await createArtifact(pool, {
-      kind: "insight",
-      title: "Original For Dedup Ignore",
-      body: "Original body",
-    });
-    const duplicate = await createArtifact(pool, {
-      kind: "insight",
-      title: "Duplicate For Dedup Ignore",
-      body: "Duplicate body",
-    });
-
-    const embeddingStr = `[${emb.join(",")}]`;
-    await pool.query(
-      `UPDATE knowledge_artifacts SET embedding = $2::vector WHERE id = $1`,
-      [duplicate.id, embeddingStr]
-    );
-    await pool.query(
-      `UPDATE knowledge_artifacts SET duplicate_of = $2 WHERE id = $1`,
-      [duplicate.id, original.id]
-    );
-
-    // Should not return the duplicate as a match (it already has duplicate_of set)
-    const match = await findDuplicateInsightByEmbedding(pool, emb, 0.9);
-    expect(match).toBeNull();
   });
 
   it("getArtifactGraph returns semantic, explicit, and shared-source edges", async () => {
