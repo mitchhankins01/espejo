@@ -328,6 +328,17 @@ Do not implement these (they're planned future work, not part of the current bui
 
 See `specs/*.md` files marked `[Stub]` or `[Planned]` for upcoming features.
 
+## Obsidian Artifacts (Local Vault)
+
+`Artifacts/` is a symlink to `~/Documents/Artifacts` — Mitch's Obsidian vault containing knowledge notes, writing, and reference material. It is gitignored.
+
+When the user asks about "artifacts", "notes", "Obsidian", or wants to look something up in their vault, read/search files under `Artifacts/` on the filesystem. This is separate from the DB-backed knowledge artifacts in `src/db/queries/artifacts.ts` — those are structured records in Postgres. The Obsidian vault is plain markdown files on disk.
+
+Common requests:
+- "Look at my note on X" → `Glob` / `Grep` under `Artifacts/`
+- "Search my Obsidian for Y" → `Grep` under `Artifacts/`
+- "What artifacts do I have about Z" → could mean either; ask if ambiguous, but default to filesystem if the context is about notes/writing
+
 ## Deep Docs
 
 - [Testing](docs/testing.md) — test tiers, isolation, fixtures, coverage, assertions
