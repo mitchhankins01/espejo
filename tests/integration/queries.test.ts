@@ -267,7 +267,7 @@ describe("getEntriesByDateRange", () => {
 describe("getEntriesOnThisDay", () => {
   it("finds entries across years for June 15", async () => {
     // ENTRY-003 is 2024-06-15, ENTRY-004 is 2023-06-15
-    const entries = await getEntriesOnThisDay(pool, 6, 15);
+    const entries = await getEntriesOnThisDay(pool, 6, 15, "UTC");
 
     expect(entries.length).toBe(2);
     const years = entries.map((e) => new Date(e.created_at).getFullYear());
@@ -276,7 +276,7 @@ describe("getEntriesOnThisDay", () => {
   });
 
   it("returns entries in chronological order", async () => {
-    const entries = await getEntriesOnThisDay(pool, 6, 15);
+    const entries = await getEntriesOnThisDay(pool, 6, 15, "UTC");
 
     for (let i = 1; i < entries.length; i++) {
       expect(new Date(entries[i].created_at).getTime()).toBeGreaterThanOrEqual(
@@ -286,7 +286,7 @@ describe("getEntriesOnThisDay", () => {
   });
 
   it("returns empty for dates with no entries", async () => {
-    const entries = await getEntriesOnThisDay(pool, 2, 29);
+    const entries = await getEntriesOnThisDay(pool, 2, 29, "UTC");
     expect(entries).toEqual([]);
   });
 });
@@ -415,7 +415,7 @@ describe("daily_metrics enrichment", () => {
 
   it("includes weight_kg in on_this_day results", async () => {
     // June 15 has entries and weight fixture data
-    const entries = await getEntriesOnThisDay(pool, 6, 15);
+    const entries = await getEntriesOnThisDay(pool, 6, 15, "UTC");
 
     expect(entries.length).toBe(2);
     // 2024-06-15 has weight data, 2023-06-15 does not

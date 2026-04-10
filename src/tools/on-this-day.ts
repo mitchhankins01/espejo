@@ -1,5 +1,6 @@
 import type pg from "pg";
 import { validateToolInput } from "../../specs/tools.spec.js";
+import { config } from "../config.js";
 import { getEntriesOnThisDay } from "../db/queries.js";
 import { toEntryResult } from "../formatters/mappers.js";
 
@@ -13,7 +14,7 @@ export async function handleOnThisDay(
   const month = parseInt(monthStr, 10);
   const day = parseInt(dayStr, 10);
 
-  const entries = await getEntriesOnThisDay(pool, month, day);
+  const entries = await getEntriesOnThisDay(pool, month, day, config.timezone);
 
   if (entries.length === 0) {
     return `No entries found for ${params.month_day} across any year.`;

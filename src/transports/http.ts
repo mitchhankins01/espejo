@@ -11,6 +11,7 @@ import { runMemoryConsolidation } from "../memory/consolidation.js";
 import { registerOAuthRoutes, isValidOAuthToken } from "./oauth.js";
 import { startOuraSyncTimer } from "../oura/sync.js";
 import { startObsidianSyncTimer } from "../obsidian/sync.js";
+import { startOnThisDayTimer } from "../notifications/on-this-day.js";
 import { embedPending } from "../db/embed-pending.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerMetricsRoutes } from "./routes/metrics.js";
@@ -74,6 +75,7 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
   /* v8 ignore stop */
   startOuraSyncTimer(pool, runAfterSync);
   startObsidianSyncTimer(pool, runEmbedPending);
+  startOnThisDayTimer(pool);
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
 

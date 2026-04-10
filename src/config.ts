@@ -123,6 +123,10 @@ export const config = {
     syncIntervalMinutes: ouraSyncIntervalMinutes,
     syncLookbackDays: ouraSyncLookbackDays,
   },
+  onThisDay: {
+    enabled: !!process.env.TELEGRAM_BOT_TOKEN,
+    targetHour: parseIntegerEnv("ON_THIS_DAY_HOUR", 8, 0),
+  },
   timezone: process.env.TIMEZONE || "Europe/Madrid",
   apiRates: {
     "claude-sonnet-4-6": { input: 3.0, output: 15.0 },

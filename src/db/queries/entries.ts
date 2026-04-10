@@ -290,7 +290,8 @@ export async function getEntriesByDateRange(
 export async function getEntriesOnThisDay(
   pool: pg.Pool,
   month: number,
-  day: number
+  day: number,
+  timezone: string
 ): Promise<EntryRow[]> {
   const result = await pool.query(
     `SELECT
@@ -301,10 +302,10 @@ export async function getEntriesOnThisDay(
       dm.weight_kg
     FROM entries e
     LEFT JOIN daily_metrics dm ON dm.date = e.created_at::date
-    WHERE EXTRACT(MONTH FROM e.created_at) = $1
-      AND EXTRACT(DAY FROM e.created_at) = $2
+    WHERE EXTRACT(MONTH FROM e.created_at AT TIME ZONE $3) = $1
+      AND EXTRACT(DAY FROM e.created_at AT TIME ZONE $3) = $2
     ORDER BY e.created_at ASC`,
-    [month, day]
+    [month, day, timezone]
   );
 
   return result.rows.map(mapEntryRow);
