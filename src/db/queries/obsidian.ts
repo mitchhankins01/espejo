@@ -117,7 +117,7 @@ export async function upsertObsidianArtifact(
        kind = EXCLUDED.kind,
        content_hash = EXCLUDED.content_hash,
        duplicate_of = EXCLUDED.duplicate_of,
-       embedding = COALESCE(EXCLUDED.embedding, NULL),
+       embedding = COALESCE(EXCLUDED.embedding, knowledge_artifacts.embedding),
        deleted_at = NULL
      RETURNING id`,
     [data.sourcePath, data.title, data.body, data.kind, data.contentHash, data.duplicateOf ?? null, embeddingVal]
