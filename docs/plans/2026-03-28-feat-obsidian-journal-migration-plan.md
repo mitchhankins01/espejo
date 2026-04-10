@@ -3,6 +3,7 @@ title: "feat: Migrate journaling from Day One to Obsidian"
 type: feat
 status: active
 date: 2026-03-28
+updated: 2026-04-10
 origin: docs/brainstorms/2026-03-28-obsidian-migration-brainstorm.md
 ---
 
@@ -22,41 +23,11 @@ PG + pgvector remains the search backend. Obsidian becomes the authoring surface
 
 (see brainstorm: `docs/brainstorms/2026-03-28-obsidian-migration-brainstorm.md`)
 
-## Decisions Requiring User Input
+## Decisions (Resolved)
 
-These decisions shape the plan. Defaults are provided but should be confirmed before implementation.
-
-### D1: What happens to web/Telegram/MCP entry creation?
-
-After migration, entries created via the web UI (`/journal/new`), Telegram bot, or MCP tools won't appear in Obsidian unless we add a PG → R2 write-back.
-
-**Options:**
-- **(a) Obsidian-only authoring** — Disable web/Telegram/MCP entry creation. Simplest. All entries flow through Obsidian.
-- **(b) Write-back to R2** — When an entry is created via web/Telegram/MCP, also write a `.md` file to R2. The Obsidian sync then recognizes it. Adds complexity.
-- **(c) Accept the split** — Non-Obsidian entries exist in PG but not in the vault. They work for search but can't be wiki-linked. Simplest technically, but fragments the journal.
-
-**Default assumption:** (a) — Obsidian is the sole authoring surface. Web UI becomes read-only for entries. Telegram agent creates entries via a different mechanism (could write to R2 directly, or be addressed later).
-
-### D2: Conflict resolution for dual-edited entries
-
-If a user edits an Obsidian-sourced entry in the web UI, and the Obsidian file is also edited before the next sync cycle, the sync will overwrite the web edit.
-
-**Options:**
-- **(a) Obsidian always wins** — Simplest. Web UI shows a warning on Obsidian-sourced entries.
-- **(b) Lock Obsidian-sourced entries from web edits** — Safest. Web UI is read-only for `source = 'obsidian'` entries.
-- **(c) Version-based merge** — Most complex. Compare versions and reject stale updates.
-
-**Default assumption:** (b) — Lock Obsidian-sourced entries from web edits. Display them read-only with an "Edit in Obsidian" note.
-
-### D3: Soft-delete scope
-
-Adding `deleted_at` to entries enables soft-delete for Obsidian-sourced entries (file removed from vault → soft-delete in PG). But this requires filtering `WHERE deleted_at IS NULL` across all entry queries.
-
-**Options:**
-- **(a) All entries use soft-delete** — Consistent but high surface area (~10 queries + tests).
-- **(b) Only Obsidian-sourced entries use soft-delete** — Lower scope but mixed semantics.
-
-**Default assumption:** (a) — All entries use soft-delete. Consistent behavior, and the query changes are mechanical.
+- **D1: Obsidian-only authoring.** Obsidian is the sole authoring surface for journal entries. The web UI is being deprecated. Telegram does not create entries. No write-back needed.
+- **D2: No conflict resolution needed.** With no web UI or Telegram entry creation, Obsidian is the only writer. No conflicts possible.
+- **D3: All entries use soft-delete.** Consistent behavior across all sources. The query changes are mechanical.
 
 ## Proposed Solution
 
@@ -110,6 +81,7 @@ Media uses MD5-based filenames in a shared `Attachments/` folder (Obsidian's def
 ---
 uuid: ABE997F429E748D096E2A259B6C382D4
 created_at: 2025-11-15T08:30:00+01:00
+updated_at: 2025-12-15T08:34:00+01:00
 ---
 
 Woke up feeling depleted...
@@ -175,10 +147,9 @@ Add `WHERE deleted_at IS NULL` filtering to all entry queries.
   - `listEntries`
   - `getEntryByUuid` (should still return soft-deleted entries with a flag, for direct access)
 - `src/db/queries/content-search.ts` — Cross-type search entry branch
-- `src/db/queries/observability.ts` — Activity log queries if they reference entries
 - `tests/` — Update test assertions for soft-delete filtering
 
-**Pattern** (follow existing artifact queries):
+**Pattern** (follow existing artifact soft-delete queries in `src/db/queries/artifacts.ts`):
 ```typescript
 // Before
 WHERE entries.text @@ query
@@ -317,27 +288,32 @@ function softDeleteMissingObsidianEntries(pool, activeSourcePaths: string[]): Pr
 
 ---
 
-### Phase 5: DayOne Sync Retirement
+### Phase 5: Cleanup & Retirement
 
-Guard and eventually remove the DayOne sync pipeline.
+Guard and eventually remove the DayOne sync pipeline. Remove entry creation routes (Obsidian is sole authoring surface).
 
 **Immediate (with Phase 4 deploy):**
 - Add a guard to `scripts/sync-dayone.ts`: skip entries where PG row has `source = 'obsidian'` (prevents overwriting Obsidian edits with stale DayOne data)
 - The existing `ON CONFLICT (uuid) DO UPDATE ... WHERE entries.source = 'dayone'` guard already handles this — verify it works
+- Remove entry creation/editing REST API routes from `src/transports/routes/entries.ts` (keep read-only routes)
+- Remove entry creation MCP tools if any exist
 
 **After validation period (~2 weeks):**
 - Remove `scripts/sync-dayone.ts` (or archive it)
 - Remove `better-sqlite3` dependency
 - Remove DayOne-specific text normalization from codebase (or keep in entry formatter if still needed)
+- Remove web UI entry pages (`EntryCreate.tsx`, `EntryEdit.tsx`) — web UI is being deprecated
 - Update CLAUDE.md to remove DayOne references
 
 **Files changed:**
 - `scripts/sync-dayone.ts` — Add source guard, then delete
+- `src/transports/routes/entries.ts` — Remove POST/PUT/PATCH/DELETE routes
 - `package.json` — Remove `better-sqlite3` dependency
 - `CLAUDE.md` — Update sync documentation
 
 **Success criteria:**
 - [ ] DayOne sync does not overwrite Obsidian-sourced entries
+- [ ] Entry creation/editing routes removed
 - [ ] After validation: script removed, dependency removed
 
 ---
@@ -364,23 +340,6 @@ Not code changes — Obsidian mobile configuration.
 - [ ] Entry syncs to R2 within minutes via Obsidian Sync
 - [ ] Server picks up new entry on next 30-minute sync cycle
 
----
-
-### Phase 7: Web UI Updates
-
-Lock Obsidian-sourced entries to read-only in the web UI (per D2 decision).
-
-**Files changed:**
-- `web/src/pages/EntryEdit.tsx` — Show read-only view with "Edit in Obsidian" note for `source = 'obsidian'` entries
-- `web/src/pages/EntryList.tsx` — Visual indicator for entry source (Obsidian vs web vs Telegram)
-- `web/src/pages/EntryCreate.tsx` — Disable or remove if D1 = Obsidian-only authoring
-- `src/transports/routes/entries.ts` — Reject PUT/PATCH for `source = 'obsidian'` entries (403)
-
-**Success criteria:**
-- [ ] Obsidian-sourced entries display as read-only in web UI
-- [ ] API rejects edits to Obsidian-sourced entries
-- [ ] Entry source is visible in list view
-
 ## System-Wide Impact
 
 ### Interaction Graph
@@ -402,9 +361,8 @@ Entry deletion: File removed from vault → Obsidian Sync removes from R2 → `r
 
 ### API Surface Parity
 
-- Entry REST API (`src/transports/routes/entries.ts`): needs source guard on PUT/PATCH
 - MCP tools: `search`, `get-entry`, `get-entries-by-date`, `on-this-day`, `find-similar`, `entry-stats` — all need `deleted_at IS NULL` filtering (Phase 2)
-- Web API (`web/src/api.ts`): entry types need `source_path` and `deleted_at` fields
+- Entry REST API (`src/transports/routes/entries.ts`): entry creation/editing routes can be removed (Obsidian is sole authoring surface). Read-only routes remain for any consumers.
 
 ## Acceptance Criteria
 
@@ -415,7 +373,6 @@ Entry deletion: File removed from vault → Obsidian Sync removes from R2 → `r
 - [ ] New entries created in Obsidian sync to PG within 30 minutes
 - [ ] Edited entries update in PG with re-embedding
 - [ ] Deleted entries soft-deleted in PG
-- [ ] Obsidian-sourced entries read-only in web UI
 - [ ] Morning notification → Obsidian → template → write → synced to PG
 
 ### Non-Functional
@@ -440,7 +397,7 @@ Entry deletion: File removed from vault → Obsidian Sync removes from R2 → `r
 - **Vault subfolder structure**: Flat `Journal/` or `Journal/2025/11/`? Flat is simpler and what Daily Notes produces by default. Recommend flat.
 - **Templater `created_at` vs filename date**: Recommend frontmatter `created_at` as source of truth (more precise — includes time). Filename is for human readability.
 - **R2 media bucket cleanup**: The `espejo-media` bucket has existing media. After backfill copies to `Attachments/` in the vault bucket, the media bucket is redundant. Clean up later — not blocking.
-- **Telegram entry creation post-migration**: If D1 = Obsidian-only, Telegram agent could write `.md` files to R2 directly instead of inserting into PG. Defer to a follow-up.
+- ~~**Telegram entry creation post-migration**~~: Resolved — Telegram does not create entries. Obsidian is the sole authoring surface.
 
 ## Sources & References
 

@@ -42,6 +42,7 @@
     "deploy:smoke": "tsx scripts/deploy-smoke.ts",
     "check:all": "pnpm -w check && pnpm --filter @espejo/web check",
     "sync:oura": "tsx scripts/sync-oura.ts",
+    "backup:prod": "source .env.production.local && pg_dump \"$DATABASE_URL\" --format=custom --file=backup_$(date +%Y%m%d).dump",
     "spec:plan": "bash scripts/spec-plan.sh"
   },
   "dependencies": {
