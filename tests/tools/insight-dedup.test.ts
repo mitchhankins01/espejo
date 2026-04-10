@@ -9,6 +9,10 @@ const mockArtifactQueries = vi.hoisted(() => ({
   findDuplicateInsightByEmbedding: vi.fn().mockResolvedValue(null),
 }));
 
+const mockObsidianQueries = vi.hoisted(() => ({
+  upsertObsidianArtifact: vi.fn().mockResolvedValue("new-artifact-id"),
+}));
+
 const mockEmbeddings = vi.hoisted(() => ({
   generateEmbedding: vi.fn().mockResolvedValue(new Array(1536).fill(0)),
   generateEmbeddingsBatch: vi.fn(),
@@ -43,6 +47,7 @@ const mockConfig = vi.hoisted(() => ({
 }));
 
 vi.mock("../../src/db/queries/artifacts.js", () => mockArtifactQueries);
+vi.mock("../../src/db/queries/obsidian.js", () => mockObsidianQueries);
 vi.mock("../../src/db/embeddings.js", () => mockEmbeddings);
 vi.mock("../../src/storage/r2.js", () => mockR2);
 vi.mock("../../src/telegram/client.js", () => mockTelegram);
@@ -193,6 +198,55 @@ describe("extractInsightsFromReview — dedup", () => {
     expect(result.insights[0].duplicateOf).toBeUndefined(); // DB failed, no dedup
     expect(result.insights[1].duplicateOf).toEqual({ id: "dup-id", title: "Existing" });
     expect(result.filesWritten).toHaveLength(2); // Both still written
+  });
+
+  it("upserts insights to DB with embeddings for future dedup", async () => {
+    setupLlmResponse([{ title: "Persistable idea", body: "Store this embedding." }]);
+    const emb = makeEmbedding(1);
+    mockEmbeddings.generateEmbeddingsBatch.mockResolvedValue([emb]);
+
+    await extractInsightsFromReview(mockPool, "Review", "Body");
+
+    expect(mockObsidianQueries.upsertObsidianArtifact).toHaveBeenCalledOnce();
+    const call = mockObsidianQueries.upsertObsidianArtifact.mock.calls[0];
+    expect(call[1]).toMatchObject({
+      title: "Persistable idea",
+      body: "Store this embedding.",
+      kind: "insight",
+      embedding: emb,
+    });
+  });
+
+  it("upserts duplicate insight with duplicate_of from DB match", async () => {
+    setupLlmResponse([{ title: "Duplicate idea", body: "Already exists." }]);
+    const emb = makeEmbedding(1);
+    mockEmbeddings.generateEmbeddingsBatch.mockResolvedValue([emb]);
+    mockArtifactQueries.findDuplicateInsightByEmbedding.mockResolvedValue({
+      id: "orig-uuid",
+      title: "Original",
+      similarity: 0.95,
+    });
+
+    await extractInsightsFromReview(mockPool, "Review", "Body");
+
+    const call = mockObsidianQueries.upsertObsidianArtifact.mock.calls[0];
+    expect(call[1].duplicateOf).toBe("orig-uuid");
+  });
+
+  it("does not set duplicateOf for intra-batch duplicates in DB upsert", async () => {
+    setupLlmResponse([
+      { title: "First", body: "A." },
+      { title: "Second similar", body: "Also A." },
+    ]);
+    const emb1 = makeEmbedding(42);
+    const emb2 = makeNearDuplicate(42, 1, 0.001);
+    mockEmbeddings.generateEmbeddingsBatch.mockResolvedValue([emb1, emb2]);
+
+    await extractInsightsFromReview(mockPool, "Review", "Body");
+
+    // Intra-batch duplicate should NOT have duplicateOf in DB (id="batch" is filtered)
+    const secondCall = mockObsidianQueries.upsertObsidianArtifact.mock.calls[1];
+    expect(secondCall[1].duplicateOf).toBeUndefined();
   });
 
   it("returns empty insights when LLM finds nothing to extract", async () => {

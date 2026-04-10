@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { config } from "../config.js";
 import { searchArtifacts, findDuplicateInsightByEmbedding } from "../db/queries/artifacts.js";
+import { upsertObsidianArtifact } from "../db/queries/obsidian.js";
 import { generateEmbedding, generateEmbeddingsBatch } from "../db/embeddings.js";
 import { createClient, putObjectContent } from "../storage/r2.js";
 import { sendTelegramMessage } from "../telegram/client.js";
@@ -258,9 +259,10 @@ export async function extractInsightsFromReview(
       }
     }
 
-    // Write insight files to R2
+    // Write insight files to R2 and upsert to DB with embeddings for dedup
     const r2Client = createClient();
-    for (const insight of result.insights) {
+    for (let i = 0; i < result.insights.length; i++) {
+      const insight = result.insights[i];
       try {
         const markdown = insightToMarkdown(insight, reviewTitle);
         const filename = `${titleToFilename(insight.title)}.md`;
@@ -268,6 +270,22 @@ export async function extractInsightsFromReview(
 
         await putObjectContent(r2Client, VAULT_BUCKET, key, markdown);
         result.filesWritten.push(key);
+
+        // Upsert to DB immediately so future dedup checks can find this insight
+        const embedding = embeddings?.[i] ?? undefined;
+        try {
+          await upsertObsidianArtifact(pool, {
+            sourcePath: key,
+            title: insight.title,
+            body: insight.body,
+            kind: "insight",
+            contentHash: "",
+            duplicateOf: insight.duplicateOf?.id === "batch" ? undefined : insight.duplicateOf?.id,
+            embedding,
+          });
+        } catch (dbErr) {
+          console.log(`[extraction] DB upsert failed for "${insight.title}": ${dbErr instanceof Error ? dbErr.message : "unknown"}`);
+        }
       } catch (err) {
         result.errors.push(
           `Failed to write ${insight.title}: ${err instanceof Error ? err.message : "unknown"}`

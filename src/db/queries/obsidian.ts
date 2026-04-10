@@ -89,7 +89,9 @@ export async function getObsidianArtifacts(
   }));
 }
 
-/** Upsert an obsidian-sourced artifact. Returns the artifact ID. */
+/** Upsert an obsidian-sourced artifact. Returns the artifact ID.
+ *  When `embedding` is provided it is stored directly; otherwise the column
+ *  is NULLed so the background embed job picks it up. */
 export async function upsertObsidianArtifact(
   pool: pg.Pool,
   data: {
@@ -99,11 +101,15 @@ export async function upsertObsidianArtifact(
     kind: string;
     contentHash: string;
     duplicateOf?: string;
+    embedding?: number[];
   }
 ): Promise<string> {
+  const embeddingVal = data.embedding
+    ? `[${data.embedding.join(",")}]`
+    : null;
   const result = await pool.query<{ id: string }>(
-    `INSERT INTO knowledge_artifacts (source_path, title, body, kind, source, content_hash, duplicate_of)
-     VALUES ($1, $2, $3, $4, 'obsidian', $5, $6)
+    `INSERT INTO knowledge_artifacts (source_path, title, body, kind, source, content_hash, duplicate_of, embedding)
+     VALUES ($1, $2, $3, $4, 'obsidian', $5, $6, $7::vector)
      ON CONFLICT (source_path) WHERE source_path IS NOT NULL
      DO UPDATE SET
        title = EXCLUDED.title,
@@ -111,10 +117,10 @@ export async function upsertObsidianArtifact(
        kind = EXCLUDED.kind,
        content_hash = EXCLUDED.content_hash,
        duplicate_of = EXCLUDED.duplicate_of,
-       embedding = NULL,
+       embedding = COALESCE(EXCLUDED.embedding, NULL),
        deleted_at = NULL
      RETURNING id`,
-    [data.sourcePath, data.title, data.body, data.kind, data.contentHash, data.duplicateOf ?? null]
+    [data.sourcePath, data.title, data.body, data.kind, data.contentHash, data.duplicateOf ?? null, embeddingVal]
   );
   return result.rows[0].id;
 }
