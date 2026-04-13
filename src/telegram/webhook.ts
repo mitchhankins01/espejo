@@ -99,12 +99,6 @@ function buildActivityDetailMarkup(
   };
 }
 
-function truncatePreview(text: string, maxChars: number): string {
-  const compact = text.replace(/\s+/g, " ").trim();
-  if (compact.length <= maxChars) return compact;
-  return `${compact.slice(0, maxChars - 3)}...`;
-}
-
 function formatActivityDetailMessage(params: {
   log: ActivityLogRow;
   hintedMemoryCount: number;
@@ -133,15 +127,6 @@ function formatActivityDetailMessage(params: {
 
   if (params.log.cost_usd != null) {
     lines.push(`  cost: $${params.log.cost_usd.toFixed(3)}`);
-  }
-
-  if (params.log.memories.length > 0) {
-    lines.push("", "Top memories:");
-    for (const [index, memory] of params.log.memories.slice(0, 3).entries()) {
-      lines.push(
-        `  ${index + 1}. [${memory.kind}] ${truncatePreview(memory.content, 120)}`
-      );
-    }
   }
 
   if (params.log.tool_calls.length > 0) {

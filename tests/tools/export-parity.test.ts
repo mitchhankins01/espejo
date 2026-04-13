@@ -33,32 +33,6 @@ describe("queries.ts export parity", () => {
       "markMessagesCompacted",
       "purgeCompactedMessages",
       "getLastCompactionTime",
-      "insertPattern",
-      "reinforcePattern",
-      "deprecatePattern",
-      "updatePatternStatus",
-      "findSimilarPatterns",
-      "searchPatterns",
-      "textSearchPatterns",
-      "searchPatternsHybrid",
-      "getLanguagePreferencePatterns",
-      "getTopPatterns",
-      "pruneExpiredEventPatterns",
-      "countStaleEventPatterns",
-      "getPatternStats",
-      "getStalePatterns",
-      "findSimilarPatternPairs",
-      "enforceActivePatternCap",
-      "insertPatternObservation",
-      "insertPatternRelation",
-      "insertPatternAlias",
-      "linkPatternToEntry",
-      "logApiUsage",
-      "getUsageSummary",
-      "getTotalApiCostSince",
-      "getLastCostNotificationTime",
-      "insertCostNotification",
-      "logMemoryRetrieval",
       "insertActivityLog",
       "getActivityLog",
       "getRecentActivityLogs",
@@ -100,14 +74,6 @@ describe("queries.ts export parity", () => {
       "searchContent",
       "getArtifactGraph",
       "searchEntriesForPicker",
-      "listTodos",
-      "getTodoById",
-      "createTodo",
-      "updateTodo",
-      "completeTodo",
-      "setTodoFocus",
-      "getFocusTodo",
-      "deleteTodo",
       "createEntry",
       "updateEntry",
       "deleteEntry",
@@ -139,7 +105,7 @@ describe("queries.ts export parity", () => {
 // Keep this in sync — update when intentionally adding/removing exports
 function expected_count(): number {
   // Current runtime export count (functions + constants, not types/interfaces)
-  return 107;
+  return 73;
 }
 
 describe("oura/analysis.ts export parity", () => {

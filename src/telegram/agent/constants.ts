@@ -37,19 +37,12 @@ export function getLlmModel(provider: "anthropic" | "openai"): string {
 
 export const MAX_TOOL_CALLS = 15;
 export const WALL_CLOCK_TIMEOUT_MS = 120_000;
-export const PATTERN_TOKEN_BUDGET = 2000; // ~8000 chars
 export const CHARS_PER_TOKEN = 4;
 export const TOOL_RESULT_MAX_CHARS = 500;
 export const SEARCH_RESULT_ENTRY_MAX_CHARS = 100;
 export const COMPACTION_TOKEN_BUDGET = 12_000;
 export const MIN_MESSAGES_FOR_FORCE_COMPACT = 4;
 export const RECENT_MESSAGES_LIMIT = 50;
-export const MIN_RETRIEVAL_CHARS = 30;
-export const COST_NOTIFICATION_INTERVAL_HOURS = 12;
-export const RETRIEVAL_BASE_MIN_SIMILARITY = 0.35;
-export const RETRIEVAL_SHORT_QUERY_MIN_SIMILARITY = 0.42;
-export const RETRIEVAL_SCORE_FLOOR_DEFAULT = 0.2;
-export const RETRIEVAL_SCORE_FLOOR_SHORT_QUERY = 0.35;
 
 // ---------------------------------------------------------------------------
 // Shared utilities

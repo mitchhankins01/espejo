@@ -1,7 +1,5 @@
 import OpenAI from "openai";
 import { config } from "../config.js";
-import { pool } from "../db/client.js";
-import { logApiUsage } from "../db/queries.js";
 
 const TELEGRAM_API = "https://api.telegram.org";
 const MAX_TEXT_DOC_BYTES = 10 * 1024 * 1024; // 10MB
@@ -21,15 +19,6 @@ function getOpenAI(): OpenAI {
     openaiClient = new OpenAI({ apiKey: config.openai.apiKey });
   }
   return openaiClient;
-}
-
-function computeCost(
-  model: string,
-  inputTokens: number,
-  outputTokens: number
-): number {
-  const rates = config.apiRates?.[model] ?? { input: 0, output: 0 };
-  return (inputTokens / 1_000_000) * rates.input + (outputTokens / 1_000_000) * rates.output;
 }
 
 async function fetchTelegramFile(fileId: string): Promise<{ buffer: Buffer; filePath: string }> {
@@ -69,7 +58,6 @@ async function extractTextFromImageBuffer(
   buffer: Buffer,
   caption: string
 ): Promise<string> {
-  const startMs = Date.now();
   const prompt = caption
     ? `Extract all readable text from this image. Caption/context: ${caption}`
     : "Extract all readable text from this image.";
@@ -93,19 +81,6 @@ async function extractTextFromImageBuffer(
     max_tokens: 1200,
   });
 
-  const latencyMs = Date.now() - startMs;
-  const inputTokens = response.usage?.prompt_tokens ?? 0;
-  const outputTokens = response.usage?.completion_tokens ?? 0;
-  await logApiUsage(pool, {
-    provider: "openai",
-    model: "gpt-4.1",
-    purpose: "vision_ocr",
-    inputTokens,
-    outputTokens,
-    costUsd: computeCost("gpt-4.1", inputTokens, outputTokens),
-    latencyMs,
-  });
-
   const text = response.choices[0]?.message?.content ?? "";
   return text.trim();
 }
@@ -119,7 +94,6 @@ async function extractTextFromPdfBuffer(
     return "PDF is too large for inline OCR. Please send a smaller PDF.";
   }
 
-  const startMs = Date.now();
   const prompt = caption
     ? `Extract all readable text from this PDF document. Caption/context: ${caption}`
     : "Extract all readable text from this PDF document.";
@@ -144,19 +118,6 @@ async function extractTextFromPdfBuffer(
       },
     ],
     max_output_tokens: 4000,
-  });
-
-  const latencyMs = Date.now() - startMs;
-  const inputTokens = response.usage?.input_tokens ?? 0;
-  const outputTokens = response.usage?.output_tokens ?? 0;
-  await logApiUsage(pool, {
-    provider: "openai",
-    model: config.openai.chatModel,
-    purpose: "pdf_ocr",
-    inputTokens,
-    outputTokens,
-    costUsd: computeCost(config.openai.chatModel, inputTokens, outputTokens),
-    latencyMs,
   });
 
   return response.output_text.trim();

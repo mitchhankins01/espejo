@@ -148,14 +148,6 @@ const {
   mockGetArtifactGraph: vi.fn(),
   mockSearchContent: vi.fn(),
   mockSearchEntriesForPicker: vi.fn(),
-  mockListTodos: vi.fn(),
-  mockGetTodoById: vi.fn(),
-  mockCreateTodo: vi.fn(),
-  mockUpdateTodo: vi.fn(),
-  mockDeleteTodo: vi.fn(),
-  mockCompleteTodo: vi.fn(),
-  mockSetTodoFocus: vi.fn(),
-  mockGetFocusTodo: vi.fn(),
   mockGenerateEmbedding: vi.fn(),
   mockListObservableTables: vi.fn(),
   mockListObservableTableRows: vi.fn(),
@@ -210,14 +202,6 @@ vi.mock("../../src/db/queries.js", () => ({
   getArtifactGraph: mockGetArtifactGraph,
   searchContent: mockSearchContent,
   searchEntriesForPicker: mockSearchEntriesForPicker,
-  listTodos: mockListTodos,
-  getTodoById: mockGetTodoById,
-  createTodo: mockCreateTodo,
-  updateTodo: mockUpdateTodo,
-  deleteTodo: mockDeleteTodo,
-  completeTodo: mockCompleteTodo,
-  setTodoFocus: mockSetTodoFocus,
-  getFocusTodo: mockGetFocusTodo,
   listObservableTables: mockListObservableTables,
   listObservableTableRows: mockListObservableTableRows,
   listRecentDbChanges: mockListRecentDbChanges,
@@ -265,21 +249,13 @@ describe("startHttpServer", () => {
     mockGetExplicitBacklinks.mockReset();
     mockGetArtifactGraph.mockReset();
     mockSearchArtifactsKeyword.mockReset();
-    mockListTodos.mockReset();
-    mockGetTodoById.mockReset();
-    mockCreateTodo.mockReset();
-    mockUpdateTodo.mockReset();
-    mockDeleteTodo.mockReset();
-    mockCompleteTodo.mockReset();
-    mockSetTodoFocus.mockReset();
-    mockGetFocusTodo.mockReset();
     mockListObservableTables.mockReset();
     mockListObservableTableRows.mockReset();
     mockListRecentDbChanges.mockReset();
     mockIsObservableDbTableName.mockReset();
     mockIsObservableDbTableName.mockImplementation(
       (table: string) =>
-        table === "todos" ||
+        table === "chat_messages" ||
         table === "activity_logs" ||
         table === "knowledge_artifacts"
     );
@@ -1401,7 +1377,7 @@ describe("startHttpServer", () => {
   it("/api/db/tables returns metadata", async () => {
     const rows = [
       {
-        name: "todos",
+        name: "knowledge_artifacts",
         row_count: 2,
         last_changed_at: new Date("2026-03-01T12:00:00Z"),
         default_sort_column: "updated_at",
@@ -1477,7 +1453,7 @@ describe("startHttpServer", () => {
 
     const badFromReq = {
       headers: {},
-      params: { table: "todos" },
+      params: { table: "knowledge_artifacts" },
       query: { from: "2026-03-01" },
     };
     const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
@@ -1486,7 +1462,7 @@ describe("startHttpServer", () => {
 
     const badOrderReq = {
       headers: {},
-      params: { table: "todos" },
+      params: { table: "knowledge_artifacts" },
       query: { order: "sideways" },
     };
     await handler(badOrderReq, mockRes);
@@ -1495,7 +1471,7 @@ describe("startHttpServer", () => {
 
   it("/api/db/tables/:table/rows returns row data", async () => {
     mockListObservableTableRows.mockResolvedValue({
-      items: [{ id: "todo-1", title: "Write tests" }],
+      items: [{ id: "art-1", title: "Write tests" }],
       total: 1,
       columns: [{ name: "id", type: "uuid", hidden: false }],
     });
@@ -1507,7 +1483,7 @@ describe("startHttpServer", () => {
     const handler = call![1];
     const mockReq = {
       headers: {},
-      params: { table: "todos" },
+      params: { table: "knowledge_artifacts" },
       query: {
         limit: "25",
         offset: "10",
@@ -1520,7 +1496,7 @@ describe("startHttpServer", () => {
 
     await handler(mockReq, mockRes);
 
-    expect(mockListObservableTableRows).toHaveBeenCalledWith(mockPool, "todos", {
+    expect(mockListObservableTableRows).toHaveBeenCalledWith(mockPool, "knowledge_artifacts", {
       limit: 25,
       offset: 10,
       sort: "updated_at",
@@ -1546,7 +1522,7 @@ describe("startHttpServer", () => {
       (c: any[]) => c[0] === "/api/db/tables/:table/rows"
     );
     const handler = call![1];
-    const mockReq = { headers: {}, params: { table: "todos" }, query: {} };
+    const mockReq = { headers: {}, params: { table: "knowledge_artifacts" }, query: {} };
     const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
 
     await handler(mockReq, mockRes);
@@ -2284,398 +2260,7 @@ describe("startHttpServer", () => {
     expect(mockRes.status).toHaveBeenCalledWith(500);
   });
 
-  it("GET /api/todos returns paginated todo list", async () => {
-    const items = [
-      {
-        id: "todo-1",
-        title: "Task",
-        status: "active",
-        next_step: null,
-        body: "",
-        urgent: false,
-        important: false,
-        is_focus: false,
-        parent_id: null,
-        sort_order: 0,
-        completed_at: null,
-      },
-    ];
-    mockListTodos.mockResolvedValue({ rows: items, count: 1 });
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/todos");
-    const handler = call![1];
-    const mockReq = { headers: {}, query: { status: "active", urgent: "true", important: "false", parent_id: "root", limit: "5", offset: "10" } };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockListTodos).toHaveBeenCalledWith(mockPool, {
-      status: "active",
-      urgent: true,
-      important: false,
-      parent_id: "root",
-      focus_only: undefined,
-      include_children: undefined,
-      limit: 5,
-      offset: 10,
-    });
-    expect(mockRes.json).toHaveBeenCalledWith({ items, total: 1 });
-  });
-
-  it("GET /api/todos/:id returns 404 for missing todo", async () => {
-    mockGetTodoById.mockResolvedValue(null);
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/todos/:id");
-    const handler = call![1];
-    const mockReq = { headers: {}, params: { id: "todo-1" } };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockRes.status).toHaveBeenCalledWith(404);
-  });
-
-  it("GET /api/todos returns 500 on query error", async () => {
-    mockListTodos.mockRejectedValue(new Error("db error"));
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/todos");
-    const handler = call![1];
-    const mockReq = { headers: {}, query: {} };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockRes.status).toHaveBeenCalledWith(500);
-  });
-
-  it("GET /api/todos/:id returns a todo", async () => {
-    const todo = {
-      id: "todo-1",
-      title: "Task",
-      status: "active",
-      next_step: null,
-      body: "",
-    };
-    mockGetTodoById.mockResolvedValue(todo);
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/todos/:id");
-    const handler = call![1];
-    const mockReq = { headers: {}, params: { id: "todo-1" } };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockRes.json).toHaveBeenCalledWith(todo);
-  });
-
-  it("GET /api/todos/:id returns 500 on error", async () => {
-    mockGetTodoById.mockRejectedValue(new Error("db error"));
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/todos/:id");
-    const handler = call![1];
-    const mockReq = { headers: {}, params: { id: "todo-1" } };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockRes.status).toHaveBeenCalledWith(500);
-  });
-
-  it("POST /api/todos creates a todo", async () => {
-    const todo = {
-      id: "todo-1",
-      title: "Task",
-      status: "active",
-      next_step: null,
-      body: "",
-    };
-    mockCreateTodo.mockResolvedValue(todo);
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/todos");
-    const handler = call![1];
-    const mockReq = { headers: {}, body: { title: "Task" } };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockRes.status).toHaveBeenCalledWith(201);
-    expect(mockRes.json).toHaveBeenCalledWith(todo);
-  });
-
-  it("POST /api/todos returns 500 on error", async () => {
-    mockCreateTodo.mockRejectedValue(new Error("db error"));
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/todos");
-    const handler = call![1];
-    const mockReq = { headers: {}, body: { title: "Task" } };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockRes.status).toHaveBeenCalledWith(500);
-  });
-
-  it("POST /api/todos rejects invalid body", async () => {
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/todos");
-    const handler = call![1];
-    const mockReq = { headers: {}, body: { title: "" } };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockRes.status).toHaveBeenCalledWith(400);
-  });
-
-  it("PUT /api/todos/:id updates a todo", async () => {
-    const todo = {
-      id: "todo-1",
-      title: "Updated",
-      status: "done",
-      next_step: null,
-      body: "",
-    };
-    mockUpdateTodo.mockResolvedValue(todo);
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/todos/:id");
-    const handler = call![1];
-    const mockReq = {
-      headers: {},
-      params: { id: "todo-1" },
-      body: { status: "done" },
-    };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockRes.json).toHaveBeenCalledWith(todo);
-  });
-
-  it("PUT /api/todos/:id returns 404 when missing", async () => {
-    mockUpdateTodo.mockResolvedValue(null);
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/todos/:id");
-    const handler = call![1];
-    const mockReq = { headers: {}, params: { id: "todo-1" }, body: { title: "X" } };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockRes.status).toHaveBeenCalledWith(404);
-  });
-
-  it("PUT /api/todos/:id rejects invalid body", async () => {
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/todos/:id");
-    const handler = call![1];
-    const mockReq = { headers: {}, params: { id: "todo-1" }, body: { title: "" } };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockRes.status).toHaveBeenCalledWith(400);
-  });
-
-  it("PUT /api/todos/:id returns 500 on error", async () => {
-    mockUpdateTodo.mockRejectedValue(new Error("db error"));
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.put.mock.calls.find((c: any[]) => c[0] === "/api/todos/:id");
-    const handler = call![1];
-    const mockReq = { headers: {}, params: { id: "todo-1" }, body: { title: "X" } };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockRes.status).toHaveBeenCalledWith(500);
-  });
-
-  it("DELETE /api/todos/:id deletes a todo", async () => {
-    mockDeleteTodo.mockResolvedValue(true);
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.delete.mock.calls.find((c: any[]) => c[0] === "/api/todos/:id");
-    const handler = call![1];
-    const mockReq = { headers: {}, params: { id: "todo-1" } };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockRes.json).toHaveBeenCalledWith({ status: "deleted" });
-  });
-
-  it("DELETE /api/todos/:id returns 404 for missing todo", async () => {
-    mockDeleteTodo.mockResolvedValue(false);
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.delete.mock.calls.find((c: any[]) => c[0] === "/api/todos/:id");
-    const handler = call![1];
-    const mockReq = { headers: {}, params: { id: "todo-1" } };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockRes.status).toHaveBeenCalledWith(404);
-  });
-
-  it("DELETE /api/todos/:id returns 500 on error", async () => {
-    mockDeleteTodo.mockRejectedValue(new Error("db error"));
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.delete.mock.calls.find((c: any[]) => c[0] === "/api/todos/:id");
-    const handler = call![1];
-    const mockReq = { headers: {}, params: { id: "todo-1" } };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockRes.status).toHaveBeenCalledWith(500);
-  });
-
-  it("POST /api/todos/:id/complete completes a todo", async () => {
-    const todo = { id: "todo-1", title: "Task", status: "done", completed_at: "2026-01-01T00:00:00Z" };
-    mockCompleteTodo.mockResolvedValue(todo);
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/todos/:id/complete");
-    const handler = call![1];
-    const mockReq = { headers: {}, params: { id: "todo-1" } };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockCompleteTodo).toHaveBeenCalledWith(mockPool, "todo-1");
-    expect(mockRes.json).toHaveBeenCalledWith(todo);
-  });
-
-  it("POST /api/todos/:id/complete returns 404 for missing todo", async () => {
-    mockCompleteTodo.mockResolvedValue(null);
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/todos/:id/complete");
-    const handler = call![1];
-    const mockReq = { headers: {}, params: { id: "todo-1" } };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockRes.status).toHaveBeenCalledWith(404);
-  });
-
-  it("POST /api/todos/:id/complete returns 500 on error", async () => {
-    mockCompleteTodo.mockRejectedValue(new Error("db error"));
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/todos/:id/complete");
-    const handler = call![1];
-    const mockReq = { headers: {}, params: { id: "todo-1" } };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockRes.status).toHaveBeenCalledWith(500);
-  });
-
-  it("POST /api/todos/focus sets focus", async () => {
-    const todo = { id: "todo-1", title: "Task", is_focus: true };
-    mockSetTodoFocus.mockResolvedValue(todo);
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/todos/focus");
-    const handler = call![1];
-    const mockReq = { headers: {}, body: { id: "todo-1" } };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockSetTodoFocus).toHaveBeenCalledWith(mockPool, "todo-1");
-    expect(mockRes.json).toHaveBeenCalledWith(todo);
-  });
-
-  it("POST /api/todos/focus clears focus", async () => {
-    mockSetTodoFocus.mockResolvedValue(null);
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/todos/focus");
-    const handler = call![1];
-    const mockReq = { headers: {}, body: { clear: true } };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockRes.json).toHaveBeenCalledWith({ status: "cleared" });
-  });
-
-  it("POST /api/todos/focus returns 400 when no id or clear", async () => {
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/todos/focus");
-    const handler = call![1];
-    const mockReq = { headers: {}, body: {} };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockRes.status).toHaveBeenCalledWith(400);
-  });
-
-  it("POST /api/todos/focus returns 404 for missing todo", async () => {
-    mockSetTodoFocus.mockResolvedValue(null);
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/todos/focus");
-    const handler = call![1];
-    const mockReq = { headers: {}, body: { id: "missing-id" } };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockRes.status).toHaveBeenCalledWith(404);
-  });
-
-  it("POST /api/todos/focus returns 500 on error", async () => {
-    mockSetTodoFocus.mockRejectedValue(new Error("db error"));
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.post.mock.calls.find((c: any[]) => c[0] === "/api/todos/focus");
-    const handler = call![1];
-    const mockReq = { headers: {}, body: { id: "todo-1" } };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockRes.status).toHaveBeenCalledWith(500);
-  });
-
-  it("GET /api/todos/focus returns current focus todo", async () => {
-    const todo = { id: "todo-1", title: "Task", is_focus: true };
-    mockGetFocusTodo.mockResolvedValue(todo);
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/todos/focus");
-    const handler = call![1];
-    const mockReq = { headers: {} };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockRes.json).toHaveBeenCalledWith(todo);
-  });
-
-  it("GET /api/todos/focus returns null when no focus set", async () => {
-    mockGetFocusTodo.mockResolvedValue(null);
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/todos/focus");
-    const handler = call![1];
-    const mockReq = { headers: {} };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockRes.json).toHaveBeenCalledWith(null);
-  });
-
-  it("GET /api/todos/focus returns 500 on error", async () => {
-    mockGetFocusTodo.mockRejectedValue(new Error("db error"));
-    await startHttpServer((() => ({ connect: vi.fn() })) as any);
-
-    const call = mockApp.get.mock.calls.find((c: any[]) => c[0] === "/api/todos/focus");
-    const handler = call![1];
-    const mockReq = { headers: {} };
-    const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await handler(mockReq, mockRes);
-    expect(mockRes.status).toHaveBeenCalledWith(500);
-  });
-
-  // ====================================================================
+                                                      // ====================================================================
   // Journal Entries CRUD
   // ====================================================================
 

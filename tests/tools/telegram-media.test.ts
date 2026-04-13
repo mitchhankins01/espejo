@@ -1,11 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const {
-  mockLogApiUsage,
   mockChatCreate,
   mockResponsesCreate,
 } = vi.hoisted(() => ({
-  mockLogApiUsage: vi.fn(),
   mockChatCreate: vi.fn(),
   mockResponsesCreate: vi.fn(),
 }));
@@ -14,9 +12,6 @@ vi.mock("../../src/config.js", () => ({
   config: {
     telegram: { botToken: "123:ABC" },
     openai: { apiKey: "sk-test", chatModel: "gpt-5-mini" },
-    apiRates: {
-      "gpt-4.1": { input: 2, output: 8 },
-    },
   },
 }));
 
@@ -24,9 +19,7 @@ vi.mock("../../src/db/client.js", () => ({
   pool: {},
 }));
 
-vi.mock("../../src/db/queries.js", () => ({
-  logApiUsage: mockLogApiUsage,
-}));
+vi.mock("../../src/db/queries.js", () => ({}));
 
 vi.mock("openai", () => ({
   default: vi.fn().mockImplementation(() => ({
@@ -47,7 +40,6 @@ let fetchSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   fetchSpy = vi.spyOn(globalThis, "fetch");
-  mockLogApiUsage.mockReset();
   mockChatCreate.mockReset();
   mockResponsesCreate.mockReset();
 });
@@ -81,14 +73,6 @@ describe("extractTextFromDocument", () => {
         model: "gpt-4.1",
       })
     );
-    expect(mockLogApiUsage).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        purpose: "vision_ocr",
-      })
-    );
-    const usageArgs = mockLogApiUsage.mock.calls[0]?.[1];
-    expect(usageArgs.costUsd).toBeGreaterThan(0);
   });
 
   it("passes caption context into image OCR prompt", async () => {
@@ -158,13 +142,6 @@ describe("extractTextFromDocument", () => {
         ]),
       })
     );
-    expect(mockLogApiUsage).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        provider: "openai",
-        purpose: "pdf_ocr",
-      })
-    );
   });
 
   it("extracts full PDF text without caption context", async () => {
@@ -228,13 +205,6 @@ describe("extractTextFromDocument", () => {
       caption: "",
     });
 
-    expect(mockLogApiUsage).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        inputTokens: 0,
-        outputTokens: 0,
-      })
-    );
   });
 
   it("returns text directly for plain text documents", async () => {
@@ -324,13 +294,6 @@ describe("extractTextFromDocument", () => {
 
     const result = await extractTextFromImage("img-3", "");
     expect(result).toBe("");
-    expect(mockLogApiUsage).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        inputTokens: 0,
-        outputTokens: 0,
-      })
-    );
   });
 
   it("returns error when Telegram file path lookup fails", async () => {

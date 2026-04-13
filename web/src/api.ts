@@ -106,25 +106,6 @@ export interface EntryTemplate {
   updated_at: string;
 }
 
-export type TodoStatus = "active" | "waiting" | "done" | "someday";
-
-export interface Todo {
-  id: string;
-  title: string;
-  status: TodoStatus;
-  next_step: string | null;
-  body: string;
-  urgent: boolean;
-  important: boolean;
-  is_focus: boolean;
-  parent_id: string | null;
-  sort_order: number;
-  completed_at: string | null;
-  created_at: string;
-  updated_at: string;
-  children?: Todo[];
-}
-
 export interface WeightEntry {
   date: string;
   weight_kg: number;
@@ -147,10 +128,8 @@ export interface WeightPatterns {
 export type ObservableDbTableName =
   | "knowledge_artifacts"
   | "artifact_links"
-  | "todos"
   | "activity_logs"
   | "chat_messages"
-  | "patterns"
   | "daily_metrics";
 
 export interface DbTableMeta {
@@ -460,91 +439,6 @@ export function deleteTemplate(id: string): Promise<{ status: "deleted" }> {
   return apiFetch(`/api/templates/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
-}
-
-export function listTodos(params?: {
-  status?: TodoStatus;
-  urgent?: boolean;
-  important?: boolean;
-  parent_id?: string;
-  focus_only?: boolean;
-  include_children?: boolean;
-  limit?: number;
-  offset?: number;
-}): Promise<{ items: Todo[]; total: number }> {
-  const qs = new URLSearchParams();
-  if (params?.status) qs.set("status", params.status);
-  if (params?.urgent !== undefined) qs.set("urgent", String(params.urgent));
-  if (params?.important !== undefined) qs.set("important", String(params.important));
-  if (params?.parent_id) qs.set("parent_id", params.parent_id);
-  if (params?.focus_only) qs.set("focus_only", "true");
-  if (params?.include_children) qs.set("include_children", "true");
-  if (params?.limit) qs.set("limit", String(params.limit));
-  if (params?.offset) qs.set("offset", String(params.offset));
-  const query = qs.toString();
-  return apiFetch(`/api/todos${query ? `?${query}` : ""}`);
-}
-
-export function getTodo(id: string): Promise<Todo> {
-  return apiFetch(`/api/todos/${id}`);
-}
-
-export function createTodo(data: {
-  title: string;
-  status?: TodoStatus;
-  next_step?: string | null;
-  body?: string;
-  urgent?: boolean;
-  important?: boolean;
-  parent_id?: string;
-}): Promise<Todo> {
-  return apiFetch("/api/todos", {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
-}
-
-export function updateTodo(
-  id: string,
-  data: {
-    title?: string;
-    status?: TodoStatus;
-    next_step?: string | null;
-    body?: string;
-    urgent?: boolean;
-    important?: boolean;
-  }
-): Promise<Todo> {
-  return apiFetch(`/api/todos/${id}`, {
-    method: "PUT",
-    body: JSON.stringify(data),
-  });
-}
-
-export function deleteTodo(id: string): Promise<void> {
-  return apiFetch(`/api/todos/${id}`, { method: "DELETE" });
-}
-
-export function completeTodo(id: string): Promise<Todo> {
-  return apiFetch(`/api/todos/${id}/complete`, { method: "POST" });
-}
-
-export function setFocus(id: string): Promise<Todo> {
-  return apiFetch("/api/todos/focus", {
-    method: "POST",
-    body: JSON.stringify({ id }),
-  });
-}
-
-export function clearFocus(): Promise<void> {
-  return apiFetch("/api/todos/focus", {
-    method: "POST",
-    body: JSON.stringify({ clear: true }),
-  });
-}
-
-export function getFocus(): Promise<Todo | null> {
-  return apiFetch("/api/todos/focus");
 }
 
 export function listWeights(params?: {

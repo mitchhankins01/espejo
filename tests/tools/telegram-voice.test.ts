@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const { mockLogApiUsage, mockTranscriptionCreate, mockSpeechCreate, mockToFile } = vi.hoisted(() => ({
-  mockLogApiUsage: vi.fn(),
+const { mockTranscriptionCreate, mockSpeechCreate, mockToFile } = vi.hoisted(() => ({
   mockTranscriptionCreate: vi.fn(),
   mockSpeechCreate: vi.fn(),
   mockToFile: vi.fn().mockResolvedValue({ name: "voice.ogg" }),
@@ -15,7 +14,6 @@ vi.mock("../../src/config.js", () => ({
       voiceName: "alloy",
     },
     openai: { apiKey: "sk-test" },
-    apiRates: { "whisper-1": { input: 0.006, output: 0 } },
   },
 }));
 
@@ -23,9 +21,7 @@ vi.mock("../../src/db/client.js", () => ({
   pool: {},
 }));
 
-vi.mock("../../src/db/queries.js", () => ({
-  logApiUsage: mockLogApiUsage,
-}));
+vi.mock("../../src/db/queries.js", () => ({}));
 
 vi.mock("openai", () => ({
   default: vi.fn().mockImplementation(() => ({
@@ -53,7 +49,6 @@ let errorSpy: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
   fetchSpy = vi.spyOn(globalThis, "fetch");
   errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-  mockLogApiUsage.mockReset();
   mockTranscriptionCreate.mockReset();
   mockSpeechCreate.mockReset();
   mockToFile.mockReset().mockResolvedValue({ name: "voice.ogg" });
@@ -108,17 +103,6 @@ describe("transcribeVoiceMessage", () => {
       response_format: "text",
     });
 
-    // Verify usage logging
-    expect(mockLogApiUsage).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        provider: "openai",
-        model: "whisper-1",
-        purpose: "transcription",
-        durationSeconds: 5,
-        costUsd: expect.closeTo((5 / 60) * 0.006, 5),
-      })
-    );
   });
 
   it("throws when file path is not returned", async () => {
@@ -140,48 +124,10 @@ describe("normalizeVoiceText", () => {
 });
 
 describe("synthesizeVoiceReply", () => {
-  it("calls OpenAI speech API and returns audio bytes", async () => {
-    mockSpeechCreate.mockResolvedValueOnce({
-      arrayBuffer: vi.fn().mockResolvedValue(Buffer.from("mp3-bytes")),
-    });
-
-    const audio = await synthesizeVoiceReply("<b>Hello there</b>");
-
-    expect(Buffer.isBuffer(audio)).toBe(true);
-    expect(mockSpeechCreate).toHaveBeenCalledWith({
-      model: "gpt-4o-mini-tts",
-      voice: "alloy",
-      input: "Hello there",
-      response_format: "mp3",
-    });
-    expect(mockLogApiUsage).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        provider: "openai",
-        model: "gpt-4o-mini-tts",
-        purpose: "tts",
-      })
-    );
-  });
-
-  it("throws for empty text after normalization", async () => {
+    it("throws for empty text after normalization", async () => {
     await expect(synthesizeVoiceReply("<b> </b>")).rejects.toThrow(
       "Cannot synthesize an empty voice reply."
     );
   });
 
-  it("returns audio even when usage logging fails", async () => {
-    mockSpeechCreate.mockResolvedValueOnce({
-      arrayBuffer: vi.fn().mockResolvedValue(Buffer.from("mp3-bytes")),
-    });
-    mockLogApiUsage.mockRejectedValueOnce(new Error("db down"));
-
-    const audio = await synthesizeVoiceReply("Hello");
-
-    expect(Buffer.isBuffer(audio)).toBe(true);
-    expect(errorSpy).toHaveBeenCalledWith(
-      "TTS usage logging failed:",
-      expect.any(Error)
-    );
   });
-});

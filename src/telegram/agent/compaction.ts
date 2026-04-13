@@ -4,7 +4,6 @@ import { pool } from "../../db/client.js";
 import {
   getRecentMessages,
   insertChatMessage,
-  logApiUsage,
   markMessagesCompacted,
   type ChatMessageRow,
 } from "../../db/queries.js";
@@ -18,7 +17,6 @@ import {
   getLlmProvider,
   getLlmModel,
 } from "./constants.js";
-import { computeCost } from "./costs.js";
 
 // ---------------------------------------------------------------------------
 // Compaction
@@ -49,10 +47,7 @@ async function summarizeCompactedMessages(messages: ChatMessageRow[]): Promise<s
   const prompt = `Summarize the conversation below in 3-5 short bullet points for continuity.\nFocus on open loops, commitments, and unresolved questions.\nDo not extract memory patterns.\n\nConversation:\n<untrusted>\n${summaryInput}\n</untrusted>`;
   const provider = getLlmProvider();
   const model = getLlmModel(provider);
-  const apiStartMs = Date.now();
   let text: string | null = null;
-  let inputTokens = 0;
-  let outputTokens = 0;
 
   if (provider === "openai") {
     const openai = getOpenAI();
@@ -65,8 +60,6 @@ async function summarizeCompactedMessages(messages: ChatMessageRow[]): Promise<s
       ],
     });
     text = response.choices[0]?.message?.content?.trim() ?? null;
-    inputTokens = response.usage?.prompt_tokens ?? 0;
-    outputTokens = response.usage?.completion_tokens ?? 0;
   } else {
     const anthropic = getAnthropic();
     const response = await anthropic.messages.create({
@@ -78,20 +71,7 @@ async function summarizeCompactedMessages(messages: ChatMessageRow[]): Promise<s
       (b): b is Anthropic.TextBlock => b.type === "text"
     );
     text = textBlock?.text?.trim() ?? null;
-    inputTokens = response.usage.input_tokens;
-    outputTokens = response.usage.output_tokens;
   }
-
-  const latencyMs = Date.now() - apiStartMs;
-  await logApiUsage(pool, {
-    provider,
-    model,
-    purpose: "compaction_summary",
-    inputTokens,
-    outputTokens,
-    costUsd: computeCost(model, inputTokens, outputTokens),
-    latencyMs,
-  });
 
   if (text && text.length > 0) {
     return text.slice(0, 2000);

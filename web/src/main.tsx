@@ -6,9 +6,6 @@ import { QuickSwitcher } from "./components/QuickSwitcher.tsx";
 import { ArtifactList } from "./pages/ArtifactList.tsx";
 import { ArtifactCreate } from "./pages/ArtifactCreate.tsx";
 import { ArtifactEdit } from "./pages/ArtifactEdit.tsx";
-import { TodoList } from "./pages/TodoList.tsx";
-import { TodoCreate } from "./pages/TodoCreate.tsx";
-import { TodoEdit } from "./pages/TodoEdit.tsx";
 import { Weight } from "./pages/Weight.tsx";
 import { DbObservability } from "./pages/DbObservability.tsx";
 import { EntryList } from "./pages/EntryList.tsx";
@@ -35,9 +32,6 @@ createRoot(document.getElementById("root")!).render(
           <Route path="/templates" element={<TemplateList />} />
           <Route path="/templates/new" element={<TemplateCreate />} />
           <Route path="/templates/:id" element={<TemplateEdit />} />
-          <Route path="/todos" element={<TodoList />} />
-          <Route path="/todos/new" element={<TodoCreate />} />
-          <Route path="/todos/:id" element={<TodoEdit />} />
           <Route path="/:id" element={<ArtifactEdit />} />
         </Routes>
       </AuthGate>

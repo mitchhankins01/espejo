@@ -61,20 +61,14 @@ src/
       index.ts      — Re-exports all query modules (facade).
       entries.ts    — Entry CRUD + search queries.
       artifacts.ts  — Artifact CRUD + search + graph queries.
-      todos.ts      — Todo CRUD + focus queries.
       oura.ts       — Oura biometric data queries.
-      spanish.ts    — Spanish vocabulary, reviews, progress, profiles.
-      patterns.ts   — Pattern memory CRUD + retrieval.
       chat.ts       — Chat message storage + retrieval.
-      soul.ts       — Soul state + quality signals + pulse checks.
       weights.ts    — Weight tracking queries.
-      observability.ts — Activity logs + API usage.
-      insights.ts   — Insight engine queries.
-      settings.ts   — App settings queries.
-      checkins.ts   — Proactive check-in queries.
+      observability.ts — Activity logs.
       media.ts      — Media attachment queries.
       templates.ts  — Entry template queries.
       content-search.ts — Unified cross-type search.
+      obsidian.ts   — Obsidian vault sync queries.
   tools/
     search.ts       — Hybrid RRF search. The most important tool.
     get-entry.ts    — Single entry by UUID.
@@ -82,9 +76,6 @@ src/
     on-this-day.ts  — MM-DD across all years.
     find-similar.ts — Cosine similarity from a source entry.
     entry-stats.ts  — Writing frequency and trends.
-    conjugate-verb.ts — Spanish verb conjugation lookup from reference DB.
-    log-vocabulary.ts — Track Spanish vocabulary with SRS state per chat.
-    spanish-quiz.ts — Spaced-repetition quiz: get due cards, record reviews, stats.
     get-artifact.ts — Single artifact by ID with sources and version.
     list-artifacts.ts — List/filter artifacts by kind, pagination.
     search-artifacts.ts — Hybrid RRF search over knowledge artifacts.
@@ -95,24 +86,18 @@ src/
     get-oura-analysis.ts — Multi-type analysis: sleep quality, anomalies, HRV trend, temperature, best sleep.
     oura-compare-periods.ts — Side-by-side metrics comparison between two date ranges.
     oura-correlate.ts — Pearson correlation between two health metrics.
-    list-todos.ts   — List/filter todos by status, quadrant, parent, focus.
-    create-todo.ts  — Create todo with urgency/importance/parent_id.
-    update-todo.ts  — Partial todo update, auto-sets completed_at on done.
-    complete-todo.ts — Mark todo done + clear focus.
-    set-todo-focus.ts — Set/clear "The One Thing" focus.
-  todos/
-    context.ts      — Todo context prompt builder for Telegram agent injection.
+    sync-obsidian-vault.ts — Trigger Obsidian vault sync from R2.
+    get-obsidian-sync-status.ts — Obsidian vault sync status.
+    save-evening-review.ts — Save evening review as knowledge artifact.
   telegram/
     webhook.ts      — Telegram webhook handler. Validates secret token, processes updates, routes commands.
     updates.ts      — Update deduplication, per-chat queue, fragment reassembly.
     agent.ts        — Agent orchestrator. Delegates to agent/ submodules.
     agent/          — Agent internals, split from monolithic agent.ts.
       constants.ts  — Token budgets, model defaults, retry limits.
-      context.ts    — System prompt + context building (soul, oura, todos, spanish).
+      context.ts    — System prompt + context building (oura, spanish).
       tools.ts      — Tool dispatch and result formatting.
-      costs.ts      — Per-run cost tracking and API usage logging.
-      compaction.ts — Conversation compaction and memory extraction.
-      language.ts   — Spanish coaching logic and adaptive difficulty.
+      compaction.ts — Conversation compaction.
       truncation.ts — Message truncation for context window management.
     client.ts       — Telegram Bot API client. sendMessage/sendVoice, retry, chunking.
     voice.ts        — Voice processing: Whisper transcription, TTS synthesis.
@@ -121,13 +106,6 @@ src/
     soul.ts         — Soul state snapshot, evolution, system prompt building.
     pulse.ts        — Self-healing quality loop: diagnose drift, apply soul repairs.
     network-errors.ts — Recoverable network error classification for retry logic.
-  spanish/
-    analytics.ts    — Spanish learning analytics. Pure functions: digest, trends, formatting.
-    assessment.ts   — LLM-as-judge Spanish conversation quality assessment.
-  insights/
-    engine.ts       — Background insight engine: timer, advisory lock, run loop, dedup, notify.
-    analyzers.ts    — Pure analysis functions: temporal echoes, biometric correlations, stale todos.
-    formatters.ts   — InsightCandidate → Telegram HTML notification formatting.
   oura/
     client.ts       — Oura API v2 client.
     sync.ts         — Oura sync engine: API fetch + DB upserts + advisory lock + timer.
@@ -142,6 +120,13 @@ src/
       sleep.ts      — Sleep debt, regularity, stage ratios, best conditions.
       hrv.ts        — HRV recovery patterns, rolling averages.
     types.ts        — TypeScript interfaces for stored Oura data.
+  obsidian/
+    sync.ts         — Obsidian vault sync engine: R2 fetch + DB upserts + timer.
+    parser.ts       — Markdown frontmatter parser for Obsidian notes.
+    extraction.ts   — Content extraction from Obsidian markdown.
+    wiki-links.ts   — Wiki-link parsing and resolution.
+  notifications/
+    on-this-day.ts  — "On This Day" morning reflection notification.
   utils/
     dates.ts        — Shared timezone-aware date utility (todayInTimezone).
   transports/
@@ -154,10 +139,7 @@ src/
       health.ts     — Health check endpoint.
       metrics.ts    — Legacy metrics ingestion endpoint.
       observability.ts — Observability endpoints.
-      settings.ts   — App settings endpoints.
-      spanish.ts    — Spanish dashboard + assessment endpoints.
       templates.ts  — Entry template CRUD endpoints.
-      todos.ts      — Todo CRUD + focus endpoints.
       types.ts      — Shared route type definitions.
       weights.ts    — Weight tracking endpoints.
     middleware/
@@ -183,10 +165,10 @@ specs/
   — Implemented specs:
   spanish-learning.md, telegram-chatbot-plan.md, telegram-personality-plan.md,
   self-healing-organism.md, episodic-memory.md, memory-v2.md,
-  oura-integration-plan.md, knowledge-artifacts.md, todos.md,
+  oura-integration-plan.md, knowledge-artifacts.md,
   web-app.spec.md, web-quick-switcher.md,
   web-semantic-links.md, web-graph-view.md, web-feature-rollout.md,
-  web-journaling.md, insight-engine.md
+  web-journaling.md
   — Research: ltm-research.md
   — Planned/Stub: aws-sst-migration-plan.md, chat-archive.md,
   proactive-checkins.md, project-management.md
@@ -196,12 +178,12 @@ packages/
   shared/           — @espejo/shared workspace. Shared TypeScript types between MCP server and web frontend.
 web/                — React + Vite frontend (@espejo/web workspace). Knowledge base CRUD editor.
   src/
-    main.tsx        — Entry point. Routes: /, /new, /:id, /todos, /journal, /templates, etc.
-    api.ts          — API client for artifacts, entries, templates, and todos.
+    main.tsx        — Entry point. Routes: /, /new, /:id, /journal, /templates, /weight, /db.
+    api.ts          — API client for artifacts, entries, templates, and weights.
     index.css       — Tailwind CSS v4 entry + theme vars.
     constants/      — Shared artifact constants (kinds, labels, badge class mapping).
-    pages/          — ArtifactList/Create/Edit + TodoList/Create/Edit + EntryList/Create/Edit + TemplateList/Create/Edit.
-    components/     — AuthGate, KindSelect, StatusSelect, EisenhowerMatrix, SourcePicker, MarkdownEditor, QuickSwitcher, GraphView, MediaGallery, MediaUpload, TemplatePicker.
+    pages/          — ArtifactList/Create/Edit + EntryList/Create/Edit + TemplateList/Create/Edit + Weight + DbObservability.
+    components/     — AuthGate, KindSelect, SourcePicker, MarkdownEditor, QuickSwitcher, GraphView, MediaGallery, MediaUpload, TemplatePicker.
   e2e/              — Playwright e2e tests (auth, CRUD, filters, pagination, theme).
 docs/               — Deep documentation (see Deep Docs section below).
 ```

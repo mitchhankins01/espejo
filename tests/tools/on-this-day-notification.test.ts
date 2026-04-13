@@ -7,7 +7,7 @@ import type { EntryRow } from "../../src/db/queries.js";
 
 const mockQueries = vi.hoisted(() => ({
   getEntriesOnThisDay: vi.fn(),
-  logApiUsage: vi.fn(),
+  insertActivityLog: vi.fn().mockResolvedValue({ id: 1 }),
 }));
 
 const mockConfig = vi.hoisted(() => ({
@@ -16,7 +16,6 @@ const mockConfig = vi.hoisted(() => ({
     telegram: { botToken: "tok", allowedChatId: "123" },
     anthropic: { apiKey: "key", model: "claude-sonnet-4-6" },
     timezone: "Europe/Madrid",
-    apiRates: { "claude-sonnet-4-6": { input: 3.0, output: 15.0 } },
   },
 }));
 
@@ -42,17 +41,12 @@ const mockConstants = vi.hoisted(() => ({
   getAnthropic: vi.fn(() => ({ messages: { create: mockAnthropicCreate } })),
 }));
 
-const mockCosts = vi.hoisted(() => ({
-  computeCost: vi.fn().mockReturnValue(0.003),
-}));
-
 vi.mock("../../src/db/queries.js", () => mockQueries);
 vi.mock("../../src/config.js", () => mockConfig);
 vi.mock("../../src/telegram/client.js", () => mockTelegram);
 vi.mock("../../src/telegram/notify.js", () => mockNotify);
 vi.mock("../../src/utils/dates.js", () => mockDates);
 vi.mock("../../src/telegram/agent/constants.js", () => mockConstants);
-vi.mock("../../src/telegram/agent/costs.js", () => mockCosts);
 
 import {
   formatEntriesForPrompt,
@@ -105,7 +99,7 @@ beforeEach(() => {
   mockConfig.config.telegram.allowedChatId = "123";
   // Default: no previous send today
   mockPool.query.mockImplementation((sql: string) => {
-    if (sql.includes("api_usage")) return { rows: [{ count: "0" }] };
+    if (sql.includes("activity_logs")) return { rows: [{ count: "0" }] };
     if (sql.includes("pg_try_advisory_lock")) return { rows: [{ ok: true }] };
     if (sql.includes("pg_advisory_unlock")) return { rows: [] };
     return { rows: [] };
@@ -215,11 +209,7 @@ describe("runOnThisDay", () => {
 
     await runOnThisDay(mockPool);
 
-    expect(mockQueries.logApiUsage).toHaveBeenCalledOnce();
-    expect(mockQueries.logApiUsage.mock.calls[0][1]).toMatchObject({
-      provider: "anthropic",
-      purpose: "on_this_day",
-    });
+    expect(mockQueries.insertActivityLog).toHaveBeenCalledOnce();
   });
 
   it("skips when not target hour", async () => {
@@ -233,7 +223,7 @@ describe("runOnThisDay", () => {
 
   it("skips when already sent today", async () => {
     mockPool.query.mockImplementation((sql: string) => {
-      if (sql.includes("api_usage")) return { rows: [{ count: "1" }] };
+      if (sql.includes("activity_logs")) return { rows: [{ count: "1" }] };
       if (sql.includes("pg_try_advisory_lock")) return { rows: [{ ok: true }] };
       if (sql.includes("pg_advisory_unlock")) return { rows: [] };
       return { rows: [] };
@@ -270,7 +260,7 @@ describe("runOnThisDay", () => {
 
   it("skips when advisory lock not acquired", async () => {
     mockPool.query.mockImplementation((sql: string) => {
-      if (sql.includes("api_usage")) return { rows: [{ count: "0" }] };
+      if (sql.includes("activity_logs")) return { rows: [{ count: "0" }] };
       if (sql.includes("pg_try_advisory_lock")) return { rows: [{ ok: false }] };
       return { rows: [] };
     });

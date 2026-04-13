@@ -1,11 +1,9 @@
 import type pg from "pg";
 import { config } from "../config.js";
-import { getEntriesOnThisDay, type EntryRow } from "../db/queries.js";
-import { logApiUsage } from "../db/queries.js";
+import { getEntriesOnThisDay, insertActivityLog, type EntryRow } from "../db/queries.js";
 import { sendTelegramMessage } from "../telegram/client.js";
 import { notifyError } from "../telegram/notify.js";
 import { getAnthropic } from "../telegram/agent/constants.js";
-import { computeCost } from "../telegram/agent/costs.js";
 import { todayInTimezone, currentHourInTimezone } from "../utils/dates.js";
 
 const LOCK_KEY = 9152203;
@@ -103,9 +101,9 @@ export async function synthesizeReflection(entries: EntryRow[]): Promise<{
 
 async function alreadySentToday(pool: pg.Pool, today: string): Promise<boolean> {
   const result = await pool.query<{ count: string }>(
-    `SELECT COUNT(*)::text AS count FROM api_usage
-     WHERE purpose = 'on_this_day'
-       AND created_at::date = $1::date`,
+    `SELECT COUNT(*)::text AS count FROM activity_logs
+     WHERE created_at::date = $1::date
+       AND tool_calls @> '[{"name":"on_this_day"}]'::jsonb`,
     [today]
   );
   return parseInt(result.rows[0].count, 10) > 0;
@@ -139,25 +137,18 @@ export async function runOnThisDay(pool: pg.Pool): Promise<void> {
     const entries = await getEntriesOnThisDay(pool, month, day, config.timezone);
     if (entries.length === 0) return;
 
-    const t0 = Date.now();
-    const { text, inputTokens, outputTokens } = await synthesizeReflection(entries);
-    const latencyMs = Date.now() - t0;
-
-    const model = config.anthropic.model;
-    const costUsd = computeCost(model, inputTokens, outputTokens);
-
-    await logApiUsage(pool, {
-      provider: "anthropic",
-      model,
-      purpose: "on_this_day",
-      inputTokens,
-      outputTokens,
-      costUsd,
-      latencyMs,
-    });
+    const { text } = await synthesizeReflection(entries);
 
     const header = `<b>📅 On This Day</b>\n\n`;
     await sendTelegramMessage(config.telegram.allowedChatId, header + text);
+
+    // Record activity for dedup (alreadySentToday checks this via tool_calls @> on_this_day)
+    await insertActivityLog(pool, {
+      chatId: config.telegram.allowedChatId,
+      memories: [],
+      toolCalls: [{ name: "on_this_day", args: {}, result: "sent", truncated_result: "sent" }],
+      costUsd: null,
+    });
   } finally {
     await pool.query("SELECT pg_advisory_unlock($1)", [LOCK_KEY]);
   }

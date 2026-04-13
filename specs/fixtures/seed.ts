@@ -416,25 +416,4 @@ export async function seedFixtures(pool: pg.Pool): Promise<void> {
     }
   }
 
-  // Seed patterns
-  for (const pattern of fixturePatterns) {
-    const embeddingStr = `[${pattern.embedding.join(",")}]`;
-    await pool.query(
-      `INSERT INTO patterns (
-        content, kind, confidence, embedding, strength, times_seen, status,
-        first_seen, last_seen
-      ) VALUES ($1, $2, $3, $4::vector, $5, $6, $7, $8, $9)`,
-      [
-        pattern.content,
-        pattern.kind,
-        pattern.confidence,
-        embeddingStr,
-        pattern.strength,
-        pattern.times_seen,
-        pattern.status,
-        pattern.first_seen,
-        pattern.last_seen,
-      ]
-    );
-  }
 }

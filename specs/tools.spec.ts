@@ -40,13 +40,6 @@ const WRITE_IDEMPOTENT: ToolAnnotations = {
   openWorldHint: false,
 };
 
-const WRITE_ADDITIVE: ToolAnnotations = {
-  readOnlyHint: false,
-  destructiveHint: false,
-  idempotentHint: false,
-  openWorldHint: false,
-};
-
 // ============================================================================
 // Shared schemas
 // ============================================================================
@@ -74,10 +67,6 @@ const limitParam = (defaultVal: number, max: number) =>
 const ouraMetricParam = z.enum(["sleep_score", "hrv", "readiness", "activity", "steps", "sleep_duration", "stress", "resting_heart_rate", "temperature", "active_calories", "heart_rate", "efficiency"]).describe("Oura metric: sleep_score, hrv, readiness, activity, steps, sleep_duration, stress, resting_heart_rate, temperature, active_calories, heart_rate, efficiency");
 
 const ouraAnalysisTypeParam = z.enum(["sleep_quality", "anomalies", "hrv_trend", "temperature", "best_sleep"]);
-
-const memoryKindParam = z
-  .enum(["identity", "preference", "goal"])
-  .describe("Memory kind: identity, preference, or goal");
 
 // ============================================================================
 // Tool result types
@@ -451,191 +440,6 @@ export const toolSpecs = {
     ],
   },
 
-  remember: {
-    name: "remember" as const,
-    annotations: WRITE_IDEMPOTENT,
-    description:
-      "Store a single durable memory pattern. Use for explicit identity facts, recurring preferences, and active goals.",
-    params: z.object({
-      content: z.string().min(1).max(200).describe("Memory content to store"),
-      kind: memoryKindParam,
-      confidence: z.number().min(0).max(1).nullable().optional().describe("Optional confidence score (default: 0.8)"),
-      evidence: z.string().nullable().optional().describe("Why this should be remembered"),
-      entry_uuids: z.array(z.string()).nullable().optional().describe("Related journal entry UUIDs"),
-      temporal: z.object({
-        date: dateString.nullable().optional(),
-        relevance: z.enum(["upcoming", "ongoing"]).nullable().optional(),
-      }).nullable().optional().describe("Optional temporal metadata for future-relevant memories"),
-    }),
-    examples: [
-      {
-        input: { content: "Lives in Barcelona", kind: "identity", confidence: 0.95 },
-        behavior: "Stores or reinforces a durable identity memory",
-      },
-      {
-        input: { content: "Wants to reach B2 Spanish by June", kind: "goal" },
-        behavior: "Stores an active intention for future recall",
-      },
-    ],
-  },
-
-  save_chat: {
-    name: "save_chat" as const,
-    annotations: WRITE_ADDITIVE,
-    description:
-      "Extract and store up to 5 memory patterns from a conversation transcript using memory-v2 quality gates.",
-    params: z.object({
-      messages: z.string().min(1).describe("Conversation transcript"),
-      context: z.string().nullable().optional().describe("Optional extraction context hint"),
-    }),
-    examples: [
-      {
-        input: {
-          messages: "User: I live in Barcelona now. User: My goal is B2 Spanish by June.",
-          context: "Spanish coaching session",
-        },
-        behavior: "Extracts identity/goal patterns and stores or reinforces them",
-      },
-    ],
-  },
-
-  recall: {
-    name: "recall" as const,
-    annotations: READ_ONLY,
-    description:
-      "Search memory patterns using hybrid semantic + text retrieval with memory-aware ranking.",
-    params: z.object({
-      query: z.string().min(1).describe("Memory search query"),
-      kinds: z.array(memoryKindParam).nullable().optional().describe("Optional kind filters"),
-      limit: limitParam(10, 20),
-    }),
-    examples: [
-      {
-        input: { query: "language preferences", kinds: ["preference"] },
-        behavior: "Returns relevant preference memories about language use",
-      },
-    ],
-  },
-
-  reflect: {
-    name: "reflect" as const,
-    annotations: WRITE_IDEMPOTENT,
-    description:
-      "Memory maintenance utility: review stats, stale memories, or run consolidation on overlapping patterns.",
-    params: z.object({
-      action: z.enum(["consolidate", "review_stale", "stats"]),
-      kind: memoryKindParam.nullable().optional().describe("Optional kind scope"),
-    }),
-    examples: [
-      {
-        input: { action: "stats" },
-        behavior: "Returns memory counts by kind/status and confidence summary",
-      },
-      {
-        input: { action: "review_stale", kind: "goal" },
-        behavior: "Lists stale goals not seen in 90+ days",
-      },
-    ],
-  },
-
-  list_todos: {
-    name: "list_todos" as const,
-    annotations: READ_ONLY,
-    description:
-      "List todos with filtering by status, Eisenhower quadrant (urgent/important), parent, or focus. " +
-      "Supports include_children to load subtasks inline.",
-    params: z.object({
-      status: z.enum(["active", "waiting", "done", "someday"]).nullable().optional().describe("Filter by status"),
-      urgent: z.boolean().nullable().optional().describe("Filter by urgency"),
-      important: z.boolean().nullable().optional().describe("Filter by importance"),
-      parent_id: z.string().nullable().optional().describe("Filter by parent ID, or 'root' for top-level only"),
-      focus_only: z.boolean().nullable().optional().describe("Only return the current focus todo"),
-      include_children: z.boolean().nullable().optional().describe("Include child todos inline"),
-      limit: limitParam(20, 100),
-      offset: z.number().int().min(0).default(0).describe("Pagination offset"),
-    }),
-    examples: [
-      {
-        input: { urgent: true, important: true, status: "active" },
-        behavior: "Returns 'Do First' quadrant items that are active",
-      },
-      {
-        input: { focus_only: true },
-        behavior: "Returns the current 'One Thing' focus todo",
-      },
-      {
-        input: { include_children: true, parent_id: "root" },
-        behavior: "Returns top-level todos with their subtasks",
-      },
-    ],
-  },
-
-  create_todo: {
-    name: "create_todo" as const,
-    annotations: WRITE_ADDITIVE,
-    description:
-      "Create a new todo with optional Eisenhower urgency/importance flags and parent for subtasks. " +
-      "Max 2 levels deep (parent must be root-level).",
-    params: z.object({
-      title: z.string().min(1).max(300).describe("Todo title"),
-      status: z.enum(["active", "waiting", "done", "someday"]).nullable().optional().describe("Status (default: active)"),
-      next_step: z.string().max(500).nullable().optional().describe("Current action step"),
-      body: z.string().nullable().optional().describe("Markdown notes/context"),
-      urgent: z.boolean().nullable().optional().describe("Is urgent (Eisenhower)"),
-      important: z.boolean().nullable().optional().describe("Is important (Eisenhower)"),
-      parent_id: z.string().nullable().optional().describe("Parent todo ID for subtasks"),
-    }),
-    examples: [
-      {
-        input: { title: "File Spanish taxes", urgent: true, important: true },
-        behavior: "Creates a Do First quadrant todo",
-      },
-      {
-        input: { title: "Send modelo 720 forms", parent_id: "abc-123" },
-        behavior: "Creates a subtask under the parent todo",
-      },
-    ],
-  },
-
-  update_todo: {
-    name: "update_todo" as const,
-    annotations: WRITE_IDEMPOTENT,
-    description:
-      "Update a todo's fields. Auto-sets completed_at when status → done, clears it otherwise.",
-    params: z.object({
-      id: z.string().min(1).describe("Todo ID"),
-      title: z.string().min(1).max(300).nullable().optional().describe("New title"),
-      status: z.enum(["active", "waiting", "done", "someday"]).nullable().optional().describe("New status"),
-      next_step: z.string().max(500).nullable().optional().describe("New next step (null to clear)"),
-      body: z.string().nullable().optional().describe("New body"),
-      urgent: z.boolean().nullable().optional().describe("Update urgency"),
-      important: z.boolean().nullable().optional().describe("Update importance"),
-    }),
-    examples: [
-      {
-        input: { id: "abc-123", status: "done" },
-        behavior: "Marks todo as done and auto-sets completed_at",
-      },
-    ],
-  },
-
-  complete_todo: {
-    name: "complete_todo" as const,
-    annotations: WRITE_IDEMPOTENT,
-    description:
-      "Mark a todo as done, set completed_at, and clear focus if it was the focus item. " +
-      "Convenience shortcut for the common case.",
-    params: z.object({
-      id: z.string().min(1).describe("Todo ID to complete"),
-    }),
-    examples: [
-      {
-        input: { id: "abc-123" },
-        behavior: "Sets status=done, completed_at=now, clears is_focus",
-      },
-    ],
-  },
-
   sync_obsidian_vault: {
     name: "sync_obsidian_vault" as const,
     annotations: WRITE_IDEMPOTENT,
@@ -655,28 +459,6 @@ export const toolSpecs = {
     params: z.object({}),
     examples: [
       { input: {}, behavior: "Returns sync status with last run info, counts, pending embeddings" },
-    ],
-  },
-
-  set_todo_focus: {
-    name: "set_todo_focus" as const,
-    annotations: WRITE_IDEMPOTENT,
-    description:
-      "Set or clear 'The One Thing' focus. Only one todo can be focus at a time. " +
-      "Call with id to set, or with clear=true to unset.",
-    params: z.object({
-      id: z.string().nullable().optional().describe("Todo ID to set as focus"),
-      clear: z.boolean().nullable().optional().describe("Set to true to clear focus without setting a new one"),
-    }),
-    examples: [
-      {
-        input: { id: "abc-123" },
-        behavior: "Clears previous focus and sets this todo as The One Thing",
-      },
-      {
-        input: { clear: true },
-        behavior: "Clears the current focus without setting a new one",
-      },
     ],
   },
 

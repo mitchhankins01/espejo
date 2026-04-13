@@ -23,10 +23,8 @@ const CHANGE_WINDOWS = [
 const OBSERVABLE_TABLE_NAMES: ObservableDbTableName[] = [
   "knowledge_artifacts",
   "artifact_links",
-  "todos",
   "activity_logs",
   "chat_messages",
-  "patterns",
   "daily_metrics",
 ];
 
@@ -77,9 +75,6 @@ function rowDetailLinks(
 
   if (table === "knowledge_artifacts" && typeof row.id === "string") {
     links.push({ to: `/${row.id}`, label: "Open artifact" });
-  }
-  if (table === "todos" && typeof row.id === "string") {
-    links.push({ to: `/todos/${row.id}`, label: "Open todo" });
   }
   return links;
 }

@@ -7,7 +7,6 @@ import { config } from "../config.js";
 import { pool } from "../db/client.js";
 import { notifyError } from "../telegram/notify.js";
 import { sendTelegramMessage } from "../telegram/client.js";
-import { runMemoryConsolidation } from "../memory/consolidation.js";
 import { registerOAuthRoutes, isValidOAuthToken } from "./oauth.js";
 import { startOuraSyncTimer } from "../oura/sync.js";
 import { startObsidianSyncTimer } from "../obsidian/sync.js";
@@ -19,7 +18,6 @@ import { registerActivityRoutes } from "./routes/activity.js";
 import { registerObservabilityRoutes } from "./routes/observability.js";
 import { registerWeightRoutes } from "./routes/weights.js";
 import { registerArtifactRoutes } from "./routes/artifacts.js";
-import { registerTodoRoutes } from "./routes/todos.js";
 import { registerEntryRoutes } from "./routes/entries.js";
 import { registerTemplateRoutes } from "./routes/templates.js";
 import type { RouteDeps } from "./routes/types.js";
@@ -51,29 +49,8 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
       notifyError("Embed pending", err);
     }
   };
-  const runMemoryMaintenance = async (): Promise<void> => {
-    try {
-      const result = await runMemoryConsolidation(pool, {
-        minSimilarity: 0.78,
-        maxPairs: 20,
-        activeCap: 40,
-      });
-      if (result.notes.length === 0) return;
-      if (!config.telegram.botToken || !config.telegram.allowedChatId) return;
-      await sendTelegramMessage(
-        config.telegram.allowedChatId,
-        `Memory maintenance: ${result.notes.join(" ")}`
-      );
-    } catch (err) {
-      notifyError("Memory consolidation", err);
-    }
-  };
-  const runAfterSync = async (): Promise<void> => {
-    await runMemoryMaintenance();
-    await runEmbedPending();
-  };
   /* v8 ignore stop */
-  startOuraSyncTimer(pool, runAfterSync);
+  startOuraSyncTimer(pool, runEmbedPending);
   startObsidianSyncTimer(pool, runEmbedPending);
   startOnThisDayTimer(pool);
   app.use(express.json());
@@ -128,7 +105,6 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
   registerObservabilityRoutes(app, deps);
   registerWeightRoutes(app, deps);
   registerArtifactRoutes(app, deps);
-  registerTodoRoutes(app, deps);
   registerEntryRoutes(app, deps);
   registerTemplateRoutes(app, deps);
 

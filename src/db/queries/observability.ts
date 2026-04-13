@@ -7,18 +7,10 @@ import type pg from "pg";
 export interface ActivityLogRow {
   id: number;
   chat_id: string;
-  memories: ActivityLogMemory[];
+  memories: unknown[];
   tool_calls: ActivityLogToolCall[];
   cost_usd: number | null;
   created_at: Date;
-}
-
-export interface ActivityLogMemory {
-  id: number;
-  content: string;
-  kind: string;
-  confidence: number;
-  score: number;
 }
 
 export interface ActivityLogToolCall {
@@ -35,7 +27,7 @@ export async function insertActivityLog(
   pool: pg.Pool,
   params: {
     chatId: string;
-    memories: ActivityLogMemory[];
+    memories: unknown[];
     toolCalls: ActivityLogToolCall[];
     costUsd: number | null;
   }
@@ -117,10 +109,8 @@ export async function getRecentActivityLogs(
 export const OBSERVABLE_DB_TABLES = [
   "knowledge_artifacts",
   "artifact_links",
-  "todos",
   "activity_logs",
   "chat_messages",
-  "patterns",
   "daily_metrics",
 ] as const;
 
@@ -208,28 +198,6 @@ const OBSERVABLE_DB_TABLE_CONFIG: Record<ObservableDbTableName, ObservableDbTabl
     updatedAtColumn: null,
     rowIdExpression: "source_id::text || '->' || target_id::text",
   },
-  todos: {
-    columns: [
-      { name: "id", type: "uuid" },
-      { name: "title", type: "text" },
-      { name: "status", type: "text" },
-      { name: "next_step", type: "text" },
-      { name: "urgent", type: "boolean" },
-      { name: "important", type: "boolean" },
-      { name: "is_focus", type: "boolean" },
-      { name: "parent_id", type: "uuid" },
-      { name: "sort_order", type: "int4" },
-      { name: "completed_at", type: "timestamptz" },
-      { name: "created_at", type: "timestamptz" },
-      { name: "updated_at", type: "timestamptz" },
-    ],
-    defaultSortColumn: "updated_at",
-    searchableColumns: ["title", "next_step", "body"],
-    dateColumn: "updated_at",
-    createdAtColumn: "created_at",
-    updatedAtColumn: "updated_at",
-    rowIdExpression: "id::text",
-  },
   activity_logs: {
     columns: [
       { name: "id", type: "int4" },
@@ -262,31 +230,6 @@ const OBSERVABLE_DB_TABLE_CONFIG: Record<ObservableDbTableName, ObservableDbTabl
     dateColumn: "created_at",
     createdAtColumn: "created_at",
     updatedAtColumn: null,
-    rowIdExpression: "id::text",
-  },
-  patterns: {
-    columns: [
-      { name: "id", type: "int4" },
-      { name: "kind", type: "text" },
-      { name: "content", type: "text" },
-      { name: "confidence", type: "float8" },
-      { name: "strength", type: "float8" },
-      { name: "times_seen", type: "int4" },
-      { name: "status", type: "text" },
-      { name: "source_type", type: "text" },
-      { name: "source_id", type: "text" },
-      { name: "first_seen", type: "timestamptz" },
-      { name: "last_seen", type: "timestamptz" },
-      { name: "created_at", type: "timestamptz" },
-      { name: "embedding", type: "vector", hidden: true },
-      { name: "text_search", type: "tsvector", hidden: true },
-      { name: "temporal", type: "jsonb", hidden: true },
-    ],
-    defaultSortColumn: "last_seen",
-    searchableColumns: ["kind", "content", "status"],
-    dateColumn: "last_seen",
-    createdAtColumn: "created_at",
-    updatedAtColumn: "last_seen",
     rowIdExpression: "id::text",
   },
   daily_metrics: {
@@ -659,7 +602,7 @@ function mapActivityLogRow(row: Record<string, unknown>): ActivityLogRow {
   return {
     id: row.id as number,
     chat_id: String(row.chat_id),
-    memories: (row.memories as ActivityLogMemory[]) ?? [] /* v8 ignore next -- defensive: SQL defaults to '[]' */,
+    memories: (row.memories as unknown[]) ?? [] /* v8 ignore next -- defensive: SQL defaults to '[]' */,
     tool_calls: (row.tool_calls as ActivityLogToolCall[]) ?? [] /* v8 ignore next -- defensive: SQL defaults to '[]' */,
     cost_usd: row.cost_usd != null ? parseFloat(row.cost_usd as string) : null,
     created_at: row.created_at as Date,

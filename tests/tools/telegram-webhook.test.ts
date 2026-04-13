@@ -19,7 +19,7 @@ const {
   mockInsertChatMessage,
   mockConfig,
 } = vi.hoisted(() => ({
-  mockRunAgent: vi.fn().mockResolvedValue({ response: "agent response", activity: "", activityLogId: null, patternCount: 0 }),
+  mockRunAgent: vi.fn().mockResolvedValue({ response: "agent response", activity: "", activityLogId: null,  }),
   mockForceCompact: vi.fn().mockResolvedValue(undefined),
   mockSendTelegramMessage: vi.fn().mockResolvedValue(undefined),
   mockSendChatAction: vi.fn().mockResolvedValue(undefined),
@@ -150,7 +150,7 @@ function getHandler(): (msg: Record<string, unknown>) => Promise<void> {
 let errorSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
-  mockRunAgent.mockReset().mockResolvedValue({ response: "agent response", activity: "", activityLogId: null, patternCount: 0 });
+  mockRunAgent.mockReset().mockResolvedValue({ response: "agent response", activity: "", activityLogId: null,  });
   mockSendTelegramMessage.mockReset().mockResolvedValue(undefined);
   mockSendChatAction.mockReset().mockResolvedValue(undefined);
   mockTranscribeVoiceMessage.mockReset().mockResolvedValue("transcribed text");
@@ -571,7 +571,7 @@ describe("typing heartbeat", () => {
     vi.useFakeTimers();
     try {
       let resolveAgent:
-        | ((value: { response: string; activity: string; patternCount: number }) => void)
+        | ((value: { response: string; activity: string }) => void)
         | undefined;
       mockRunAgent.mockImplementationOnce(
         () =>
@@ -594,7 +594,6 @@ describe("typing heartbeat", () => {
       resolveAgent({
         response: "agent response",
         activity: "",
-        patternCount: 0,
       });
       await pending;
     } finally {

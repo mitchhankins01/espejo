@@ -289,25 +289,4 @@ describe("config", () => {
     expect(config.telegram.botToken).toBe("");
   });
 
-  it("has apiRates with expected models", async () => {
-    process.env.NODE_ENV = "development";
-
-    const { config } = await import("../../src/config.js");
-    expect(config.apiRates["claude-sonnet-4-6"]).toEqual({
-      input: 3.0,
-      output: 15.0,
-    });
-    expect(config.apiRates["gpt-4.1"]).toEqual({
-      input: 2.0,
-      output: 8.0,
-    });
-    expect(config.apiRates["text-embedding-3-small"]).toEqual({
-      input: 0.02,
-      output: 0,
-    });
-    expect(config.apiRates["whisper-1"]).toEqual({
-      input: 0.006,
-      output: 0,
-    });
-  });
 });

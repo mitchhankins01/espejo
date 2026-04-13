@@ -1224,6 +1224,21 @@ const migrations: Migration[] = [
         ADD COLUMN IF NOT EXISTS duplicate_of UUID REFERENCES knowledge_artifacts(id) ON DELETE SET NULL;
     `,
   },
+  {
+    name: "038-drop-patterns-todos-cost",
+    getSql: () => `
+      DROP TABLE IF EXISTS pattern_observations CASCADE;
+      DROP TABLE IF EXISTS pattern_relations CASCADE;
+      DROP TABLE IF EXISTS pattern_aliases CASCADE;
+      DROP TABLE IF EXISTS pattern_entries CASCADE;
+      DROP TABLE IF EXISTS memory_retrieval_logs CASCADE;
+      DROP TABLE IF EXISTS patterns CASCADE;
+      DROP TABLE IF EXISTS todos CASCADE;
+      DROP TABLE IF EXISTS api_usage CASCADE;
+      DROP TABLE IF EXISTS cost_notifications CASCADE;
+      DROP FUNCTION IF EXISTS todo_updated_at_bump CASCADE;
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

@@ -3,7 +3,6 @@ import OpenAI from "openai";
 import { pool } from "../../db/client.js";
 import {
   insertChatMessage,
-  logApiUsage,
   type ChatMessageRow,
   type ActivityLogToolCall,
 } from "../../db/queries.js";
@@ -20,7 +19,6 @@ import {
   getLlmProvider,
   getLlmModel,
 } from "./constants.js";
-import { computeCost } from "./costs.js";
 import { truncateToolResult } from "./truncation.js";
 
 // ---------------------------------------------------------------------------
@@ -158,30 +156,12 @@ async function runAnthropicToolLoop(
     /* v8 ignore next -- wall clock timeout requires real timing */
     if (elapsed >= WALL_CLOCK_TIMEOUT_MS) break;
 
-    const apiStartMs = Date.now();
     const response = await anthropic.messages.create({
       model,
       max_tokens: 4096,
       system: systemPrompt,
       messages: loopMessages as Anthropic.MessageParam[],
       tools,
-    });
-
-    const latencyMs = Date.now() - apiStartMs;
-    const costUsd = computeCost(
-      model,
-      response.usage.input_tokens,
-      response.usage.output_tokens
-    );
-
-    await logApiUsage(pool, {
-      provider: "anthropic",
-      model,
-      purpose: "agent",
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
-      costUsd,
-      latencyMs,
     });
 
     // Check for tool_use blocks
@@ -332,7 +312,6 @@ async function runOpenAIToolLoop(
     /* v8 ignore next -- wall clock timeout requires real timing */
     if (elapsed >= WALL_CLOCK_TIMEOUT_MS) break;
 
-    const apiStartMs = Date.now();
     const response = await openai.chat.completions.create({
       model,
       max_tokens: 4096,
@@ -342,19 +321,6 @@ async function runOpenAIToolLoop(
       ],
       tools,
       tool_choice: "auto",
-    });
-
-    const latencyMs = Date.now() - apiStartMs;
-    const inputTokens = response.usage?.prompt_tokens ?? 0;
-    const outputTokens = response.usage?.completion_tokens ?? 0;
-    await logApiUsage(pool, {
-      provider: "openai",
-      model,
-      purpose: "agent",
-      inputTokens,
-      outputTokens,
-      costUsd: computeCost(model, inputTokens, outputTokens),
-      latencyMs,
     });
 
     const choice = response.choices[0];

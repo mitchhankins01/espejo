@@ -83,32 +83,28 @@ describe("search_entries spec", () => {
 
 describe("null handling across param types", () => {
   it("strips null from optional boolean and enum params", () => {
-    const result = validateToolInput("list_todos", {
-      status: null,
-      urgent: null,
-      important: null,
-      focus_only: null,
+    const result = validateToolInput("search_entries", {
+      query: "test",
+      city: null,
+      from: null,
     });
-    expect(result.status).toBeUndefined();
-    expect(result.urgent).toBeUndefined();
-    expect(result.important).toBeUndefined();
-    expect(result.focus_only).toBeUndefined();
+    expect(result.city).toBeUndefined();
+    expect(result.from).toBeUndefined();
   });
 
   it("strips null from optional array params", () => {
-    const result = validateToolInput("recall", {
+    const result = validateToolInput("search_content", {
       query: "test",
-      kinds: null,
+      content_types: null,
     });
-    expect(result.kinds).toBeUndefined();
+    expect(result.content_types).toBeUndefined();
   });
 
   it("strips null from optional nested object params", () => {
-    const result = validateToolInput("remember", {
-      content: "test memory",
-      kind: "identity",
-      temporal: null,
+    const result = validateToolInput("save_evening_review", {
+      text: "test review",
+      date: null,
     });
-    expect(result.temporal).toBeUndefined();
+    expect(result.date).toBeUndefined();
   });
 });
