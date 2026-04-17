@@ -125,7 +125,7 @@ export const config = {
   },
   onThisDay: {
     enabled: !!process.env.TELEGRAM_BOT_TOKEN,
-    targetHour: parseIntegerEnv("ON_THIS_DAY_HOUR", 8, 0),
+    targetHour: parseIntegerEnv("ON_THIS_DAY_HOUR", 16, 0),
   },
   timezone: process.env.TIMEZONE || "Europe/Madrid",
 } as const;

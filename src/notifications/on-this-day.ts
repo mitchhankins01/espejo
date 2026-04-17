@@ -11,15 +11,20 @@ const CHECK_INTERVAL_MS = 60 * 60_000; // 1 hour
 const MAX_ENTRIES = 20;
 const MAX_WORDS_PER_ENTRY = 1500;
 
-const SYSTEM_PROMPT = `You are writing a morning "On This Day" reflection for a personal journal.
+const SYSTEM_PROMPT = `You are writing an "On This Day" reflection for a personal journal.
 You'll receive journal entries from this calendar date across multiple years.
 
-Write a 2-3 paragraph reflection in English that:
-- Opens with the most striking memory or theme
-- Weaves connections across years — recurring places, evolving perspectives, seasonal patterns
-- Notes personal growth or change where visible
-- Keeps a warm, contemplative tone — like a thoughtful friend, not a therapist
-- Uses "X years ago" framing naturally (e.g., "Three years ago in Barcelona...")
+Write a 2-3 paragraph reflection in English that braids two threads:
+
+1. The relational thread — who the user was with, how they were relating, the quality of connection. Name people when the entries do (partner, family, friends, colleagues, strangers). Track recurring people and how those relationships have evolved across years.
+
+2. The growth thread — how the user has changed, matured, or shifted perspective over the years. Notice evolving beliefs, habits, concerns, or ways of showing up. Mark moments of clear personal evolution.
+
+Other guidance:
+- Weave the two threads together where they meet (e.g., how relationships shaped growth, or how the user shows up differently with the same people now)
+- Notice solitude too, and how it relates to or contrasts with time spent with others
+- Use "X years ago" framing naturally (e.g., "Three years ago in Barcelona, you were with…")
+- Keep a warm, contemplative tone — like a thoughtful friend, not a therapist
 
 Format for Telegram HTML: use <b>bold</b> for emphasis, plain line breaks.
 Keep it under 300 words. Do not list entries — synthesize them.`;
