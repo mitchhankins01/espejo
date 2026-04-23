@@ -18,4 +18,5 @@ Journal.json
 data/
 test-results/
 playwright-report/
+.playwright-mcp/
 Artifacts

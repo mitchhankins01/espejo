@@ -281,6 +281,10 @@ Any time you commit and push directly to `main`, follow this order:
 - Error messages should be actionable — say what went wrong AND what to do about it
 - No `console.log` in `src/` — use structured logging or MCP SDK's logging if needed
 - `console.log` is fine in `scripts/` for progress output
+- Before bulk CRUD on the vault or DB artifacts, show a diff/preview and wait for confirmation
+- `commit and push` is terminal — execute, don't re-confirm or add gold-plating
+- Prefer embedding/tsvector for cost-sensitive loops (dedup, matching) — don't LLM every comparison
+- Don't build CLI wrappers for things that can be a prompt or skill (YAGNI)
 
 ## Dependencies
 
@@ -310,16 +314,107 @@ Do not implement these (they're planned future work, not part of the current bui
 
 See `specs/*.md` files marked `[Stub]` or `[Planned]` for upcoming features.
 
-## Obsidian Artifacts (Local Vault)
+## Obsidian Vault Workflows
 
-`Artifacts/` is a symlink to `~/Documents/Artifacts` — Mitch's Obsidian vault containing knowledge notes, writing, and reference material. It is gitignored.
+`Artifacts/` is a symlink to `~/Documents/Artifacts` — Mitch's Obsidian vault (gitignored). Syncs bidirectionally with Postgres via Cloudflare R2 (Remotely Save plugin → R2 → `src/obsidian/sync.ts`).
 
-When the user asks about "artifacts", "notes", "Obsidian", or wants to look something up in their vault, read/search files under `Artifacts/` on the filesystem. This is separate from the DB-backed knowledge artifacts in `src/db/queries/artifacts.ts` — those are structured records in Postgres. The Obsidian vault is plain markdown files on disk.
+**Important:** most Claude Code sessions and all OpenCode sessions for espejo operate on the **vault + prod DB**, not on `src/`. Treat these as first-class, not edge cases. Distinguish from the DB-backed `knowledge_artifacts` table in `src/db/queries/artifacts.ts` — the vault is plain markdown on disk; the DB is the synced downstream index.
 
-Common requests:
-- "Look at my note on X" → `Glob` / `Grep` under `Artifacts/`
-- "Search my Obsidian for Y" → `Grep` under `Artifacts/`
-- "What artifacts do I have about Z" → could mean either; ask if ambiguous, but default to filesystem if the context is about notes/writing
+### Vault folders
+
+```
+Artifacts/
+  Insight/     — atomic realizations (canonical home for approved insights)
+  Journal/     — entries migrated from Day One
+  Review/      — structured reflections (evening/weekly/monthly)
+  Note/        — general knowledge notes
+  Project/     — maps-of-content linking related notes
+  Reference/   — external references
+  Prompt/      — reusable prompts + user-defined slash commands
+  Parts/       — IFS parts work (parts.md is a CONCISE OVERVIEW — preserve hierarchy)
+  Attachment/  — media
+  Template/    — Obsidian templates (NOT synced)
+  Pending/     — auto-extracted insights awaiting approval (status: pending)
+```
+
+Any `.md` outside `.obsidian/`, `.trash/`, `Template/` syncs to the DB.
+
+### Frontmatter schema
+
+```yaml
+---
+kind: insight | reference | note | project | review
+status: pending | approved    # default: approved
+tags:
+  - lowercase-hyphenated
+---
+```
+
+- Title goes in the first `# heading`, never in frontmatter.
+- No blank line between closing `---` and `# heading`.
+- `[[Wiki Links]]` become graph edges in the DB.
+- `status: pending` = excluded from semantic search until approved.
+- Tags are normalized to lowercase on sync.
+
+### User-defined slash commands
+
+`Artifacts/Prompt/` is the canonical home for cross-tool prompts (`/load <topic>`, `/reflect`, `/evening-review`, dedup, midday parts checkin). When Mitch says "run the X prompt", read the matching file from `Artifacts/Prompt/` and execute — don't regenerate.
+
+### SOP: Pending → Insight dedup
+
+1. Glob `Artifacts/Pending/*.md` and `Artifacts/Insight/*.md`.
+2. For each pending, classify vs. existing using **embedding similarity + tsvector** (hybrid RRF, same as `search_entries`). Don't LLM-compare — it gets expensive at scale.
+3. Label each **New / Duplicate / Merge** and show candidates.
+4. **Ask before acting.** Never move/merge/delete without explicit confirmation.
+5. On approval: `status: pending` → `approved`, optionally relocate out of `Pending/`, let Remotely Save → R2 → sync pick it up.
+6. To reject: delete the file.
+
+Scope rules **by `kind`** — `insight`-only logic should not apply to `review`/`note`.
+
+### SOP: Load context on topic/person
+
+"Pull in X" = hybrid RRF over DB (entries + artifacts) **plus** `Glob`/`Grep` under `Artifacts/`, with **max limits + request more if available**. MCP tools have implicit limits and under-retrieve — be explicit.
+
+### SOP: Run a checkin prompt
+
+Evening review, morning prompt, midday parts checkin, tolls: read from `Artifacts/Prompt/`, execute against current DB + vault state. Dates derive from source wikilink filenames — never hardcode.
+
+### Direct DB + filesystem > MCP (for vault-side prompt work)
+
+MCP tools have hardcoded limits and sometimes hardcoded dates. For prompt execution prefer direct access:
+
+```bash
+PGURL=$(grep ^DATABASE_URL .env.production.local | cut -d= -f2-)
+OPENAI_API_KEY=$(grep ^OPENAI_API_KEY .env.production.local | cut -d= -f2-)
+```
+
+Then `psql "$PGURL"` + OpenAI embeddings API (`text-embedding-3-small` — same model as indexing).
+
+### Vault ↔ DB sync
+
+- Vault → R2: Remotely Save auto-syncs on edit.
+- R2 → DB: `sync_obsidian_vault` MCP tool or the timer in `src/obsidian/sync.ts`.
+- Status: `get_obsidian_sync_status` MCP tool.
+
+### Writing notes — don'ts
+
+- No frontmatter-less files (they sync as `kind: note` with no tags).
+- No `status: active` — only `pending` / `approved`.
+- No content above frontmatter.
+- No duplicate title in both frontmatter and heading.
+- `parts.md` stays a concise OVERVIEW — don't inline part bodies.
+
+## Gotchas
+
+- **Oura `day_summary` lags 1 day.** For today's signal use `recovery`/`stress` second-level data, not `day_summary`.
+- **Ports**: dev PG `5434`, test PG `5433` (5432 is claimed by the greenline project).
+- **Zod rejects `null` for optional date strings** — see `specs/2026-04-09-fix-mcp-null-optional-params-plan.md` before adding new optional-date params.
+- **DayOne sync**: null-byte/backslash handling required on text fields; `ZHASDATA=0` attachments are iCloud-only and must be skipped.
+- **Chat logs** (useful when Mitch asks "what did I do last week"):
+  - Claude Code sessions: `~/.claude/projects/-Users-mitch-Projects-espejo/*.jsonl`
+  - Claude Code prompt history: `~/.claude/history.jsonl` (filter by `project`)
+  - OpenCode DB: `~/.local/share/opencode/opencode.db` (tables: `session`, `message`, `part`)
+  - OpenCode prompt history: `~/.local/state/opencode/prompt-history.jsonl`
 
 ## Deep Docs
 
