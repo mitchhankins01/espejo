@@ -8,8 +8,10 @@ const {
   mockRunAgent,
   mockForceCompact,
   mockSendTelegramMessage,
+  mockSendTelegramVoice,
   mockSendChatAction,
   mockTranscribeVoiceMessage,
+  mockSynthesizeVoiceReply,
   mockExtractTextFromImage,
   mockExtractTextFromDocument,
   mockSetMessageHandler,
@@ -17,13 +19,20 @@ const {
   mockGetOuraSyncRun,
   mockGetActivityLog,
   mockInsertChatMessage,
+  mockIsPracticeSessionActive,
+  mockStartPracticeSession,
+  mockEndPracticeSession,
+  mockRunPracticeExtraction,
+  mockBuildSpanishPracticeSystemPrompt,
   mockConfig,
 } = vi.hoisted(() => ({
   mockRunAgent: vi.fn().mockResolvedValue({ response: "agent response", activity: "", activityLogId: null,  }),
   mockForceCompact: vi.fn().mockResolvedValue(undefined),
   mockSendTelegramMessage: vi.fn().mockResolvedValue(undefined),
+  mockSendTelegramVoice: vi.fn().mockResolvedValue(true),
   mockSendChatAction: vi.fn().mockResolvedValue(undefined),
   mockTranscribeVoiceMessage: vi.fn().mockResolvedValue("transcribed text"),
+  mockSynthesizeVoiceReply: vi.fn().mockResolvedValue(Buffer.from("audio")),
   mockExtractTextFromImage: vi.fn().mockResolvedValue("image text"),
   mockExtractTextFromDocument: vi.fn().mockResolvedValue("document text"),
   mockSetMessageHandler: vi.fn(),
@@ -31,6 +40,15 @@ const {
   mockGetOuraSyncRun: vi.fn().mockResolvedValue(null),
   mockGetActivityLog: vi.fn().mockResolvedValue(null),
   mockInsertChatMessage: vi.fn().mockResolvedValue({ inserted: true, id: 1 }),
+  mockIsPracticeSessionActive: vi.fn().mockReturnValue(false),
+  mockStartPracticeSession: vi.fn().mockReturnValue({ sessionId: "abc123", startedAt: new Date() }),
+  mockEndPracticeSession: vi.fn().mockReturnValue({ sessionId: "abc123", startedAt: new Date() }),
+  mockRunPracticeExtraction: vi.fn().mockResolvedValue({
+    diffSummary: "- No significant changes.",
+    messageCount: 4,
+    wrotePersisted: true,
+  }),
+  mockBuildSpanishPracticeSystemPrompt: vi.fn().mockResolvedValue("PRACTICE PROMPT"),
   mockConfig: {
     config: {
       telegram: {
@@ -52,11 +70,24 @@ vi.mock("../../src/telegram/agent.js", () => ({
 
 vi.mock("../../src/telegram/client.js", () => ({
   sendTelegramMessage: mockSendTelegramMessage,
+  sendTelegramVoice: mockSendTelegramVoice,
   sendChatAction: mockSendChatAction,
 }));
 
 vi.mock("../../src/telegram/voice.js", () => ({
   transcribeVoiceMessage: mockTranscribeVoiceMessage,
+  synthesizeVoiceReply: mockSynthesizeVoiceReply,
+}));
+
+vi.mock("../../src/telegram/practice-session.js", () => ({
+  isPracticeSessionActive: mockIsPracticeSessionActive,
+  startPracticeSession: mockStartPracticeSession,
+  endPracticeSession: mockEndPracticeSession,
+  runPracticeExtraction: mockRunPracticeExtraction,
+}));
+
+vi.mock("../../src/prompts/spanish-practice.js", () => ({
+  buildSpanishPracticeSystemPrompt: mockBuildSpanishPracticeSystemPrompt,
 }));
 
 vi.mock("../../src/telegram/media.js", () => ({
@@ -152,14 +183,25 @@ let errorSpy: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
   mockRunAgent.mockReset().mockResolvedValue({ response: "agent response", activity: "", activityLogId: null,  });
   mockSendTelegramMessage.mockReset().mockResolvedValue(undefined);
+  mockSendTelegramVoice.mockReset().mockResolvedValue(true);
   mockSendChatAction.mockReset().mockResolvedValue(undefined);
   mockTranscribeVoiceMessage.mockReset().mockResolvedValue("transcribed text");
+  mockSynthesizeVoiceReply.mockReset().mockResolvedValue(Buffer.from("audio"));
   mockExtractTextFromImage.mockReset().mockResolvedValue("image text");
   mockExtractTextFromDocument.mockReset().mockResolvedValue("document text");
   mockSetMessageHandler.mockReset();
   mockProcessUpdate.mockReset();
   mockGetOuraSyncRun.mockReset().mockResolvedValue(null);
   mockGetActivityLog.mockReset().mockResolvedValue(null);
+  mockIsPracticeSessionActive.mockReset().mockReturnValue(false);
+  mockStartPracticeSession.mockReset().mockReturnValue({ sessionId: "abc123", startedAt: new Date() });
+  mockEndPracticeSession.mockReset().mockReturnValue({ sessionId: "abc123", startedAt: new Date() });
+  mockRunPracticeExtraction.mockReset().mockResolvedValue({
+    diffSummary: "- No significant changes.",
+    messageCount: 4,
+    wrotePersisted: true,
+  });
+  mockBuildSpanishPracticeSystemPrompt.mockReset().mockResolvedValue("PRACTICE PROMPT");
   errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -703,6 +745,148 @@ describe("error handling", () => {
 
     expect(mockForceCompact).toHaveBeenCalledWith("100", expect.any(Function));
     expect(mockRunAgent).not.toHaveBeenCalled();
+  });
+});
+
+describe("/practice command", () => {
+  it("starts a practice session and sends a Spanish greeting", async () => {
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/practice", messageId: 1, date: 1000 });
+
+    expect(mockStartPracticeSession).toHaveBeenCalledWith("100");
+    expect(mockRunAgent).not.toHaveBeenCalled();
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      expect.stringContaining("Sesión de práctica iniciada")
+    );
+  });
+
+  it("refuses when a session is already active", async () => {
+    mockIsPracticeSessionActive.mockReturnValueOnce(true);
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/practice", messageId: 1, date: 1000 });
+
+    expect(mockStartPracticeSession).not.toHaveBeenCalled();
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      expect.stringContaining("Ya estamos en sesión")
+    );
+  });
+});
+
+describe("/done command", () => {
+  it("ends the session and sends the extraction diff summary", async () => {
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/done", messageId: 1, date: 1000 });
+
+    expect(mockEndPracticeSession).toHaveBeenCalledWith("100");
+    expect(mockRunPracticeExtraction).toHaveBeenCalled();
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      expect.stringContaining("Estado actualizado")
+    );
+  });
+
+  it("reports when extraction could not persist", async () => {
+    mockRunPracticeExtraction.mockResolvedValueOnce({
+      diffSummary: "State file missing.",
+      messageCount: 2,
+      wrotePersisted: false,
+    });
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/done", messageId: 1, date: 1000 });
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      expect.stringContaining("estado no guardado")
+    );
+  });
+
+  it("responds when no session is active", async () => {
+    mockEndPracticeSession.mockReturnValueOnce(null);
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/done", messageId: 1, date: 1000 });
+
+    expect(mockRunPracticeExtraction).not.toHaveBeenCalled();
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      expect.stringContaining("No hay sesión activa")
+    );
+  });
+
+  it("reports extraction errors without crashing", async () => {
+    mockRunPracticeExtraction.mockRejectedValueOnce(new Error("LLM down"));
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "/done", messageId: 1, date: 1000 });
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      expect.stringContaining("Extraction failed: LLM down")
+    );
+  });
+});
+
+describe("active practice session routing", () => {
+  it("passes the Spanish practice system prompt to runAgent when active", async () => {
+    mockIsPracticeSessionActive.mockReturnValue(true);
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "Hola, ¿cómo estás?", messageId: 1, date: 1000 });
+
+    expect(mockBuildSpanishPracticeSystemPrompt).toHaveBeenCalled();
+    expect(mockRunAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        systemPromptOverride: "PRACTICE PROMPT",
+      })
+    );
+    // No activity line in practice mode
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith("100", "agent response");
+  });
+
+  it("sends voice + text when input was voice and session is active", async () => {
+    mockIsPracticeSessionActive.mockReturnValue(true);
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "",
+      messageId: 1,
+      date: 1000,
+      voice: { fileId: "voice-xyz", durationSeconds: 4 },
+    });
+
+    expect(mockSynthesizeVoiceReply).toHaveBeenCalledWith("agent response");
+    expect(mockSendTelegramVoice).toHaveBeenCalled();
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith("100", "agent response");
+  });
+
+  it("only sends text when input was text even if session is active", async () => {
+    mockIsPracticeSessionActive.mockReturnValue(true);
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "Hola", messageId: 1, date: 1000 });
+
+    expect(mockSynthesizeVoiceReply).not.toHaveBeenCalled();
+    expect(mockSendTelegramVoice).not.toHaveBeenCalled();
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith("100", "agent response");
+  });
+
+  it("recovers when voice synthesis fails mid-session", async () => {
+    mockIsPracticeSessionActive.mockReturnValue(true);
+    mockSynthesizeVoiceReply.mockRejectedValueOnce(new Error("TTS down"));
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "",
+      messageId: 1,
+      date: 1000,
+      voice: { fileId: "voice-xyz", durationSeconds: 4 },
+    });
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("voice synth failed"),
+      expect.any(Error)
+    );
+    // Text still goes through even when voice fails
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith("100", "agent response");
   });
 });
 

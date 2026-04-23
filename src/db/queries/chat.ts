@@ -44,6 +44,27 @@ export async function insertChatMessage(
 }
 
 /**
+ * Get user + assistant messages for a chat since a timestamp, oldest first.
+ * Used for practice session extraction — excludes tool_result rows.
+ */
+export async function getMessagesSince(
+  pool: pg.Pool,
+  chatId: string,
+  since: Date
+): Promise<ChatMessageRow[]> {
+  const result = await pool.query(
+    `SELECT *
+     FROM chat_messages
+     WHERE chat_id = $1
+       AND created_at >= $2
+       AND role IN ('user', 'assistant')
+     ORDER BY created_at ASC, id ASC`,
+    [chatId, since]
+  );
+  return result.rows;
+}
+
+/**
  * Get recent uncompacted messages, ordered oldest first.
  */
 export async function getRecentMessages(

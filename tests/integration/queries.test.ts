@@ -22,6 +22,7 @@ import {
   getWeightPatterns,
   insertChatMessage,
   getRecentMessages,
+  getMessagesSince,
   markMessagesCompacted,
   purgeCompactedMessages,
   getLastCompactionTime,
@@ -667,6 +668,60 @@ describe("getRecentMessages", () => {
     expect(messages).toHaveLength(2);
     expect(messages[0].content).toBe("Message 3");
     expect(messages[1].content).toBe("Message 4");
+  });
+});
+
+describe("getMessagesSince", () => {
+  it("returns only user and assistant messages since the cutoff, in order", async () => {
+    // Before cutoff
+    await insertChatMessage(pool, {
+      chatId: "771234",
+      externalMessageId: "ext-a",
+      role: "user",
+      content: "before",
+    });
+    // Manually backdate the first message so we have a clear cutoff
+    await pool.query(
+      "UPDATE chat_messages SET created_at = NOW() - INTERVAL '1 hour' WHERE external_message_id = 'ext-a'"
+    );
+
+    const cutoff = new Date(Date.now() - 30 * 60 * 1000); // 30 min ago
+
+    // After cutoff
+    await insertChatMessage(pool, {
+      chatId: "771234",
+      externalMessageId: "ext-b",
+      role: "user",
+      content: "first",
+    });
+    await insertChatMessage(pool, {
+      chatId: "771234",
+      externalMessageId: null,
+      role: "assistant",
+      content: "reply",
+    });
+    // Should be excluded (tool_result)
+    await insertChatMessage(pool, {
+      chatId: "771234",
+      externalMessageId: null,
+      role: "tool_result",
+      content: "tool data",
+      toolCallId: "t-1",
+    });
+    await insertChatMessage(pool, {
+      chatId: "771234",
+      externalMessageId: "ext-c",
+      role: "user",
+      content: "second",
+    });
+
+    const rows = await getMessagesSince(pool, "771234", cutoff);
+    expect(rows.map((r) => r.content)).toEqual(["first", "reply", "second"]);
+  });
+
+  it("returns empty when no messages since cutoff", async () => {
+    const rows = await getMessagesSince(pool, "888999", new Date());
+    expect(rows).toEqual([]);
   });
 });
 

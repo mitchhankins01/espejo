@@ -10,14 +10,23 @@ import {
 import { runAgent, forceCompact } from "./agent.js";
 import {
   sendTelegramMessage,
+  sendTelegramVoice,
   sendChatAction,
 } from "./client.js";
 import {
   transcribeVoiceMessage,
+  synthesizeVoiceReply,
 } from "./voice.js";
 import { extractTextFromDocument, extractTextFromImage } from "./media.js";
 import { setMessageHandler, processUpdate } from "./updates.js";
 import type { AssembledMessage, TelegramUpdate } from "./updates.js";
+import {
+  startPracticeSession,
+  endPracticeSession,
+  isPracticeSessionActive,
+  runPracticeExtraction,
+} from "./practice-session.js";
+import { buildSpanishPracticeSystemPrompt } from "../prompts/spanish-practice.js";
 
 // ---------------------------------------------------------------------------
 // Message handler — wires updates → agent → client
@@ -320,35 +329,100 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
       return;
     }
 
+    // Handle /practice command — start a Spanish practice session
+    if (command?.name === "practice") {
+      if (isPracticeSessionActive(chatId)) {
+        await sendAndStoreResponse(
+          chatId,
+          "Ya estamos en sesión. Envía /done para terminar primero."
+        );
+        return;
+      }
+      startPracticeSession(chatId);
+      await sendAndStoreResponse(
+        chatId,
+        "🇪🇸 <b>Sesión de práctica iniciada.</b>\nHablamos en español. Corrijo al vuelo. Tú llevas el ritmo — yo te mantengo en movimiento.\n\n¿Cómo va el día? Cuéntame lo que tengas encima ahora mismo.\n\n<i>Cuando quieras cerrar, manda /done.</i>"
+      );
+      return;
+    }
+
+    // Handle /done command — end active Spanish practice session and run extraction
+    if (command?.name === "done") {
+      const session = endPracticeSession(chatId);
+      if (!session) {
+        await sendAndStoreResponse(
+          chatId,
+          "No hay sesión activa. /practice para empezar una."
+        );
+        return;
+      }
+      await sendAndStoreResponse(chatId, "<i>Procesando sesión…</i>");
+      try {
+        const result = await runPracticeExtraction(chatId, session);
+        const prefix = result.wrotePersisted
+          ? `✅ Estado actualizado (${result.messageCount} mensajes).\n\n`
+          : `⚠️ ${result.messageCount} mensajes — estado no guardado.\n\n`;
+        await sendAndStoreResponse(chatId, `${prefix}${escapeHtml(result.diffSummary)}`);
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error(`[practice] extraction failed [chat:${chatId}]:`, err);
+        await sendAndStoreResponse(chatId, `Extraction failed: ${escapeHtml(errMsg)}`);
+      }
+      return;
+    }
+
+    const practiceActive = isPracticeSessionActive(chatId);
+    const inputWasVoice = Boolean(msg.voice);
+
     const stopProgress = startProgressUpdates(chatId);
     try {
+      const systemPromptOverride = practiceActive
+        ? await buildSpanishPracticeSystemPrompt(pool)
+        : undefined;
+
       const { response, activity, activityLogId } = await runAgent({
         chatId,
         message: text,
         storedUserMessage: originalUserText,
         messageDate: msg.date,
         prefill: undefined,
+        systemPromptOverride,
         /* v8 ignore next 3 -- async callback tested via agent compaction tests */
         onCompacted: async (summary) => {
           await sendTelegramMessage(chatId, `<i>Memory note: ${summary}</i>`);
         },
       });
 
-      if (response) {
-        const cleanActivity = stripActivityDetailLink(activity);
-        const activityDetailMarkup = buildActivityDetailMarkup(
-          cleanActivity,
-          activityLogId
-        );
-        const fullResponse = cleanActivity
-          ? `${response}\n\n<i>${cleanActivity}</i>`
-          : response;
+      if (!response) return;
 
-        if (activityDetailMarkup) {
-          await sendTelegramMessage(chatId, fullResponse, activityDetailMarkup);
-        } else {
-          await sendTelegramMessage(chatId, fullResponse);
+      if (practiceActive) {
+        // In practice mode: skip the activity line noise. If user spoke,
+        // reply with both a voice note and the text transcript.
+        if (inputWasVoice) {
+          try {
+            const audio = await synthesizeVoiceReply(response);
+            await sendTelegramVoice(chatId, audio);
+          } catch (err) {
+            console.error(`[practice] voice synth failed [chat:${chatId}]:`, err);
+          }
         }
+        await sendTelegramMessage(chatId, response);
+        return;
+      }
+
+      const cleanActivity = stripActivityDetailLink(activity);
+      const activityDetailMarkup = buildActivityDetailMarkup(
+        cleanActivity,
+        activityLogId
+      );
+      const fullResponse = cleanActivity
+        ? `${response}\n\n<i>${cleanActivity}</i>`
+        : response;
+
+      if (activityDetailMarkup) {
+        await sendTelegramMessage(chatId, fullResponse, activityDetailMarkup);
+      } else {
+        await sendTelegramMessage(chatId, fullResponse);
       }
     } finally {
       stopProgress();

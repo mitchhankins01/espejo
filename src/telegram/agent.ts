@@ -31,6 +31,7 @@ export async function runAgent(params: {
   storedUserMessage?: string;
   messageDate: number;
   prefill?: string;
+  systemPromptOverride?: string;
   onCompacted?: (summary: string) => Promise<void>;
 }): Promise<AgentResult> {
   const {
@@ -38,18 +39,24 @@ export async function runAgent(params: {
     message,
     storedUserMessage,
     prefill,
+    systemPromptOverride,
     onCompacted,
   } = params;
 
   // User message is now stored by handleMessage() in webhook.ts before calling runAgent().
 
   // 2. Build context
-  const baseSystemPrompt = buildSystemPrompt();
-  const ouraContextPrompt = await buildOuraContextPrompt(pool);
-  const contextSections = [ouraContextPrompt].filter((v) => v.length > 0);
-  const systemPrompt = contextSections.length > 0
-    ? `${baseSystemPrompt}\n\n${contextSections.join("\n\n")}`
-    : baseSystemPrompt;
+  let systemPrompt: string;
+  if (systemPromptOverride) {
+    systemPrompt = systemPromptOverride;
+  } else {
+    const baseSystemPrompt = buildSystemPrompt();
+    const ouraContextPrompt = await buildOuraContextPrompt(pool);
+    const contextSections = [ouraContextPrompt].filter((v) => v.length > 0);
+    systemPrompt = contextSections.length > 0
+      ? `${baseSystemPrompt}\n\n${contextSections.join("\n\n")}`
+      : baseSystemPrompt;
+  }
   const recentMessages = await getRecentMessages(pool, chatId, RECENT_MESSAGES_LIMIT);
   const messages = reconstructMessages(recentMessages);
   // Allow command handlers to persist the raw user command while still
