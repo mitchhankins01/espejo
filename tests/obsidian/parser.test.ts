@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { parseObsidianNote } from "../../src/obsidian/parser.js";
+import { parseObsidianNote, stripSources } from "../../src/obsidian/parser.js";
 
 describe("parseObsidianNote", () => {
   it("parses frontmatter with kind", () => {
@@ -75,5 +75,32 @@ describe("parseObsidianNote", () => {
     const content = "---\nkind: project\n---\n# My Project\n\nDetails here.";
     const result = parseObsidianNote(content, "test.md");
     expect(result.kind).toBe("project");
+  });
+});
+
+describe("stripSources", () => {
+  it("removes the ## Sources section and everything after it", () => {
+    const body = "Body paragraph one.\n\nBody paragraph two.\n\n## Sources\n[[Link A]]\n[[Link B]]";
+    expect(stripSources(body)).toBe("Body paragraph one.\n\nBody paragraph two.");
+  });
+
+  it("returns body unchanged when no Sources section exists", () => {
+    const body = "Body paragraph with [[Inline Link]] but no sources section.";
+    expect(stripSources(body)).toBe(body);
+  });
+
+  it("does not strip other ## headings", () => {
+    const body = "Body.\n\n## Context\n\nMore body.\n\n## Sources\n[[X]]";
+    expect(stripSources(body)).toBe("Body.\n\n## Context\n\nMore body.");
+  });
+
+  it("handles trailing whitespace on the Sources heading", () => {
+    const body = "Body.\n\n## Sources   \n[[X]]";
+    expect(stripSources(body)).toBe("Body.");
+  });
+
+  it("is case-sensitive (vault convention uses capital S)", () => {
+    const body = "Body.\n\n## sources\n[[X]]";
+    expect(stripSources(body)).toBe(body);
   });
 });

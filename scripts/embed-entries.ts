@@ -7,6 +7,7 @@ if (process.env.NODE_ENV === "production") {
 }
 import pg from "pg";
 import OpenAI from "openai";
+import { stripSources } from "../src/obsidian/parser.js";
 
 const databaseUrl =
   process.env.DATABASE_URL ||
@@ -164,9 +165,9 @@ async function embedEntries(force: boolean): Promise<void> {
       if (batch.rows.length === 0) break;
 
       const embeddable = batch.rows.filter((row) => {
-        const full = `${row.title as string}\n\n${row.body as string}`;
+        const full = `${row.title as string}\n\n${stripSources(row.body as string)}`;
         if (full.length > MAX_CHARS) {
-          console.warn(`  ��️ Skipping artifact "${row.title}" (${full.length} chars > ${MAX_CHARS} limit)`);
+          console.warn(`  ⚠️ Skipping artifact "${row.title}" (${full.length} chars > ${MAX_CHARS} limit)`);
           return false;
         }
         return true;
@@ -176,7 +177,7 @@ async function embedEntries(force: boolean): Promise<void> {
         continue;
       }
       const texts = embeddable.map(
-        (row) => `${row.title as string}\n\n${row.body as string}`
+        (row) => `${row.title as string}\n\n${stripSources(row.body as string)}`
       );
       const ids = embeddable.map((row) => row.id as string);
 

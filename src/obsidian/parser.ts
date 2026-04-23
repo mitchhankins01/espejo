@@ -75,6 +75,17 @@ function stripFirstHeading(markdown: string): string {
   return markdown.replace(/^#\s+.+$/m, "").trim();
 }
 
+/**
+ * Strip the `## Sources` section (and everything after it) from a body.
+ * Sources are graph metadata, not content — embedding them pulls pairs with
+ * overlapping source sets closer in vector space than their actual meaning warrants.
+ */
+export function stripSources(body: string): string {
+  const match = body.match(/^##\s+Sources\s*$/m);
+  if (!match || match.index === undefined) return body;
+  return body.slice(0, match.index).trimEnd();
+}
+
 /** Extract filename stem: "Directory/Sub note.md" → "Sub note" */
 function filenameStem(filename: string): string {
   const base = filename.includes("/")
