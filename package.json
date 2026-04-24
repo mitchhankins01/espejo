@@ -43,7 +43,8 @@
     "check:all": "pnpm -w check && pnpm --filter @espejo/web check",
     "sync:oura": "tsx scripts/sync-oura.ts",
     "backup:prod": "source .env.production.local && pg_dump \"$DATABASE_URL\" --format=custom --file=backup_$(date +%Y%m%d).dump",
-    "spec:plan": "bash scripts/spec-plan.sh"
+    "spec:plan": "bash scripts/spec-plan.sh",
+    "write-tomo": "NODE_ENV=production tsx scripts/write-tomo.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
@@ -51,9 +52,12 @@
     "@modelcontextprotocol/sdk": "^1.25.3",
     "better-sqlite3": "^11.7.0",
     "dotenv": "^16.4.7",
+    "epub-gen-memory": "^1.1.2",
     "express": "^5.1.0",
     "gray-matter": "^4.0.3",
+    "marked": "^18.0.2",
     "multer": "^2.1.1",
+    "nodemailer": "^8.0.5",
     "openai": "^4.77.0",
     "pg": "^8.13.1",
     "pgvector": "^0.2.0",
@@ -65,6 +69,7 @@
     "@types/express": "^5.0.0",
     "@types/multer": "^2.1.0",
     "@types/node": "^20.17.12",
+    "@types/nodemailer": "^8.0.0",
     "@types/pg": "^8.11.11",
     "@vitest/coverage-v8": "^2.1.9",
     "eslint": "^9.17.0",

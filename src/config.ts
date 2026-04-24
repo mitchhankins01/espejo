@@ -1,9 +1,11 @@
 import dotenv from "dotenv";
 if (process.env.NODE_ENV === "production") {
   dotenv.config({ path: ".env" });
+  dotenv.config({ path: ".env.local", override: true });
   dotenv.config({ path: ".env.production.local", override: true });
 } else if (process.env.NODE_ENV !== "test") {
   dotenv.config({ path: ".env", override: true });
+  dotenv.config({ path: ".env.local", override: true });
 } else {
   dotenv.config({ path: ".env.test", override: true });
 }
@@ -128,4 +130,10 @@ export const config = {
     targetHour: parseIntegerEnv("ON_THIS_DAY_HOUR", 16, 0),
   },
   timezone: process.env.TIMEZONE || "Europe/Madrid",
+  gmail: {
+    appPassword: process.env.GMAIL_APP_PASSWORD || "",
+    fromEmail: process.env.GMAIL_FROM_EMAIL || "mitchhankins01@gmail.com",
+    kindleEmail:
+      process.env.KINDLE_EMAIL || "mitchhankins01_Afzu6H@kindle.com",
+  },
 } as const;
