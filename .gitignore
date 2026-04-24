@@ -20,3 +20,4 @@ test-results/
 playwright-report/
 .playwright-mcp/
 Artifacts
+books/

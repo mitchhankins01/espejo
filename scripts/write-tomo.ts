@@ -22,6 +22,11 @@ import {
 import { gatherContext } from "./book/context.js";
 import { plan } from "./book/planner.js";
 import { write, countWords } from "./book/writer.js";
+import {
+  formatLookupsForWriter,
+  readLookups,
+  recentLookups,
+} from "./book/lookups.js";
 import { buildEpub, tomoFilename } from "./book/epub.js";
 import { sendToKindle } from "./book/send.js";
 import { config } from "../src/config.js";
@@ -84,7 +89,14 @@ async function main(): Promise<void> {
   }
 
   console.log("[5/6] writing (Claude pass 2)");
-  const markdown = await write(p, style, context);
+  const lookups = await readLookups();
+  const lookupsBlock = formatLookupsForWriter(recentLookups(lookups, 30));
+  if (lookups.length > 0) {
+    console.log(
+      `      injecting ${Math.min(lookups.length, 30)} recent lookups (${lookups.length} total)`
+    );
+  }
+  const markdown = await write(p, style, context, lookupsBlock);
   const words = countWords(markdown);
   console.log(`      ${words} words`);
   if (words < 1100 || words > 1800) {

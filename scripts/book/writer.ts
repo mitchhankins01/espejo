@@ -38,7 +38,8 @@ Output format — exactly:
 export async function write(
   plan: Plan,
   style: string,
-  context: ContextItem[]
+  context: ContextItem[],
+  lookupsBlock = ""
 ): Promise<string> {
   if (!config.anthropic.apiKey) {
     throw new Error("ANTHROPIC_API_KEY is required for the writer");
@@ -56,6 +57,7 @@ export async function write(
   const user = [
     "# Style guide",
     style,
+    ...(lookupsBlock ? ["", lookupsBlock] : []),
     "",
     "# Tomo plan",
     `- Título: ${plan.title}`,

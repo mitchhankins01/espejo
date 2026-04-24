@@ -44,7 +44,8 @@
     "sync:oura": "tsx scripts/sync-oura.ts",
     "backup:prod": "source .env.production.local && pg_dump \"$DATABASE_URL\" --format=custom --file=backup_$(date +%Y%m%d).dump",
     "spec:plan": "bash scripts/spec-plan.sh",
-    "write-tomo": "NODE_ENV=production tsx scripts/write-tomo.ts"
+    "write-tomo": "NODE_ENV=production tsx scripts/write-tomo.ts",
+    "import-lookups": "tsx scripts/import-lookups.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
