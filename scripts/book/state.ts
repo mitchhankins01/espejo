@@ -3,15 +3,26 @@ import { existsSync } from "fs";
 
 const HISTORY_PATH = "books/history.json";
 
+export type TomoDomain =
+  | "neuroscience"
+  | "psychology"
+  | "physics"
+  | "psychedelics"
+  | "robotics"
+  | "ai"
+  | "technology"
+  | "none";
+
 export interface TomoRecord {
   n: number;
   title: string;
   format: "fiction" | "essay";
-  domain: "neuroscience" | "psychology" | "technology" | "none";
+  domain: TomoDomain;
   topic: string;
   source_uuids: string[];
   date: string;
   word_count: number;
+  series_seed?: boolean;
 }
 
 export async function readHistory(): Promise<TomoRecord[]> {

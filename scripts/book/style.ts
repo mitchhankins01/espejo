@@ -6,7 +6,7 @@ import { config } from "../../src/config.js";
 const VIVO_PATH = "Artifacts/Project/Español Vivo.md";
 const STYLE_PATH = "books/style.md";
 
-const DISTILL_PROMPT = `You are distilling a Spanish-learning journal into a compact style guide for a writer who will produce 1300-1600 word Spanish tomos (mini-books) for the learner. The guide must be actionable inside a prompt — no meta-commentary, no "this document contains".
+const DISTILL_PROMPT = `You are distilling a Spanish-learning journal into a compact style guide for a writer who will produce 1950-2400 word Spanish tomos (mini-books) for the learner. The guide must be actionable inside a prompt — no meta-commentary, no "this document contains".
 
 Extract and organize into these sections (use these exact headings):
 
