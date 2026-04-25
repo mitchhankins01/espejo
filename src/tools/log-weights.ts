@@ -13,8 +13,12 @@ export async function handleLogWeights(
   }
 
   const weightCount = measurements.length;
-  const dayCount = new Set(measurements.map((m) => m.date)).size;
+  const sorted = [...measurements].sort((a, b) =>
+    a.date < b.date ? 1 : a.date > b.date ? -1 : 0
+  );
+  const pairs = sorted
+    .map(({ date, weight_kg }) => `${date} (${weight_kg.toFixed(1)} kg)`)
+    .join(", ");
   const weightWord = weightCount === 1 ? "weight" : "weights";
-  const dayWord = dayCount === 1 ? "day" : "days";
-  return `Logged ${weightCount} ${weightWord} on ${dayCount} ${dayWord}`;
+  return `Logged ${weightCount} ${weightWord}: ${pairs}`;
 }

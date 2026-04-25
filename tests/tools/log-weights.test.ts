@@ -19,7 +19,7 @@ beforeEach(() => {
 });
 
 describe("handleLogWeights", () => {
-  it("upserts a single measurement with singular wording", async () => {
+  it("returns a single weight with its date and kg value", async () => {
     const result = await handleLogWeights(mockPool, {
       measurements: [{ date: "2026-04-25", weight_kg: 78.2 }],
     });
@@ -30,10 +30,10 @@ describe("handleLogWeights", () => {
       "2026-04-25",
       78.2
     );
-    expect(result).toBe("Logged 1 weight on 1 day");
+    expect(result).toBe("Logged 1 weight: 2026-04-25 (78.2 kg)");
   });
 
-  it("upserts multiple distinct dates with plural wording", async () => {
+  it("returns each date+weight pair, newest first", async () => {
     const result = await handleLogWeights(mockPool, {
       measurements: [
         { date: "2026-04-22", weight_kg: 78.4 },
@@ -43,19 +43,16 @@ describe("handleLogWeights", () => {
     });
 
     expect(mockWeights.upsertWeight).toHaveBeenCalledTimes(3);
-    expect(result).toBe("Logged 3 weights on 3 days");
+    expect(result).toBe(
+      "Logged 3 weights: 2026-04-25 (78.2 kg), 2026-04-24 (78.1 kg), 2026-04-22 (78.4 kg)"
+    );
   });
 
-  it("counts distinct days when same date appears twice", async () => {
+  it("rounds each weight to one decimal place", async () => {
     const result = await handleLogWeights(mockPool, {
-      measurements: [
-        { date: "2026-04-25", weight_kg: 78.2 },
-        { date: "2026-04-25", weight_kg: 78.4 },
-      ],
+      measurements: [{ date: "2026-04-25", weight_kg: 78.234 }],
     });
-
-    expect(mockWeights.upsertWeight).toHaveBeenCalledTimes(2);
-    expect(result).toBe("Logged 2 weights on 1 day");
+    expect(result).toBe("Logged 1 weight: 2026-04-25 (78.2 kg)");
   });
 
   it("rejects an empty measurements array", async () => {
