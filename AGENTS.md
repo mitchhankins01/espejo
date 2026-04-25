@@ -89,6 +89,7 @@ src/
     sync-obsidian-vault.ts — Trigger Obsidian vault sync from R2.
     get-obsidian-sync-status.ts — Obsidian vault sync status.
     save-evening-review.ts — Save evening review as knowledge artifact.
+    log-weights.ts  — Upsert one or more daily body-weight measurements (single or batch).
   telegram/
     webhook.ts      — Telegram webhook handler. Validates secret token, processes updates, routes commands.
     updates.ts      — Update deduplication, per-chat queue, fragment reassembly.

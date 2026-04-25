@@ -462,6 +462,48 @@ export const toolSpecs = {
     ],
   },
 
+  log_weights: {
+    name: "log_weights" as const,
+    annotations: WRITE_IDEMPOTENT,
+    description:
+      "Upsert one or more daily body-weight measurements. Call this whenever the user reports a weight value " +
+      "(e.g. \"78.2\", \"78.2 kg today\", \"I was 79 yesterday\", \"Saturday I was 78.5\") or shares a screenshot " +
+      "containing weight data with dates. Resolve any relative dates (today, yesterday, last Monday, three days ago) " +
+      "to YYYY-MM-DD using today's date in the user's timezone before calling. Each entry upserts on its date — " +
+      "re-logging the same date overwrites with the new value. Pass an array even for a single measurement.",
+    params: z.object({
+      measurements: z
+        .array(
+          z.object({
+            date: dateString,
+            weight_kg: z
+              .number()
+              .positive()
+              .describe("Body weight in kilograms"),
+          })
+        )
+        .min(1)
+        .describe("One or more {date, weight_kg} entries"),
+    }),
+    examples: [
+      {
+        input: { measurements: [{ date: "2026-04-25", weight_kg: 78.2 }] },
+        behavior: "Logs a single weight for today",
+      },
+      {
+        input: {
+          measurements: [
+            { date: "2026-04-25", weight_kg: 78.2 },
+            { date: "2026-04-24", weight_kg: 78.1 },
+            { date: "2026-04-22", weight_kg: 78.4 },
+          ],
+        },
+        behavior:
+          "Bulk-upserts three days of weight history (e.g. extracted from an Apple Health screenshot)",
+      },
+    ],
+  },
+
   save_evening_review: {
     name: "save_evening_review" as const,
     annotations: WRITE_IDEMPOTENT,

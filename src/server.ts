@@ -21,6 +21,7 @@ import { handleSearchContent } from "./tools/search-content.js";
 import { handleSyncObsidianVault } from "./tools/sync-obsidian-vault.js";
 import { handleGetObsidianSyncStatus } from "./tools/get-obsidian-sync-status.js";
 import { handleSaveEveningReview } from "./tools/save-evening-review.js";
+import { handleLogWeights } from "./tools/log-weights.js";
 import { handleEveningReviewPrompt } from "./prompts/evening-review.js";
 
 /** Tool handlers can return a plain string or a rich CallToolResult with audience annotations. */
@@ -47,6 +48,7 @@ export const toolHandlers: Record<string, ToolHandler> = {
   sync_obsidian_vault: handleSyncObsidianVault,
   get_obsidian_sync_status: handleGetObsidianSyncStatus,
   save_evening_review: handleSaveEveningReview,
+  log_weights: handleLogWeights,
 };
 
 export function createServer(pool: pg.Pool, version: string): McpServer {
