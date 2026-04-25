@@ -148,7 +148,7 @@ async function main(): Promise<void> {
     console.error("");
     console.error("Example:");
     console.error(
-      "  pnpm telegram:setup https://espejo.railway.app/api/telegram"
+      "  pnpm telegram:setup https://espejo-production.up.railway.app/api/telegram"
     );
     process.exit(1);
   }

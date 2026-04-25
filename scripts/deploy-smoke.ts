@@ -36,7 +36,7 @@ async function run(): Promise<void> {
   const baseUrlArg = process.argv[2] || process.env.APP_BASE_URL;
   if (!baseUrlArg) {
     console.error("Usage: pnpm deploy:smoke <base-url>");
-    console.error("Example: pnpm deploy:smoke https://espejo.railway.app");
+    console.error("Example: pnpm deploy:smoke https://espejo-production.up.railway.app");
     process.exit(1);
   }
 
