@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { parseObsidianNote, stripSources } from "../../src/obsidian/parser.js";
 
@@ -75,6 +75,117 @@ describe("parseObsidianNote", () => {
     const content = "---\nkind: project\n---\n# My Project\n\nDetails here.";
     const result = parseObsidianNote(content, "test.md");
     expect(result.kind).toBe("project");
+  });
+});
+
+describe("parseObsidianNote — frontmatter timestamps", () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  it("extracts unquoted YYYY-MM-DD created_at and updated_at as Date", () => {
+    const content =
+      "---\nkind: insight\ncreated_at: 2026-03-27\nupdated_at: 2026-04-01\n---\n# Title\n\nBody.";
+    const result = parseObsidianNote(content, "test.md");
+    expect(result.createdAt).toBeInstanceOf(Date);
+    expect(result.createdAt?.toISOString()).toBe("2026-03-27T00:00:00.000Z");
+    expect(result.updatedAt).toBeInstanceOf(Date);
+    expect(result.updatedAt?.toISOString()).toBe("2026-04-01T00:00:00.000Z");
+    expect(result.dateParseErrors).toEqual([]);
+  });
+
+  it("extracts ISO 8601 string timestamps", () => {
+    const content =
+      "---\nkind: insight\ncreated_at: '2026-03-27T14:30:00Z'\nupdated_at: '2026-04-01T09:15:00+02:00'\n---\n# Title\n\nBody.";
+    const result = parseObsidianNote(content, "test.md");
+    expect(result.createdAt?.toISOString()).toBe("2026-03-27T14:30:00.000Z");
+    expect(result.updatedAt?.toISOString()).toBe("2026-04-01T07:15:00.000Z");
+    expect(result.dateParseErrors).toEqual([]);
+  });
+
+  it("extracts only created_at when updated_at is absent", () => {
+    const content =
+      "---\nkind: insight\ncreated_at: 2026-03-27\n---\n# Title\n\nBody.";
+    const result = parseObsidianNote(content, "test.md");
+    expect(result.createdAt).toBeInstanceOf(Date);
+    expect(result.updatedAt).toBeUndefined();
+    expect(result.dateParseErrors).toEqual([]);
+  });
+
+  it("extracts only updated_at when created_at is absent", () => {
+    const content =
+      "---\nkind: insight\nupdated_at: 2026-04-01\n---\n# Title\n\nBody.";
+    const result = parseObsidianNote(content, "test.md");
+    expect(result.createdAt).toBeUndefined();
+    expect(result.updatedAt).toBeInstanceOf(Date);
+    expect(result.dateParseErrors).toEqual([]);
+  });
+
+  it("returns no errors when frontmatter has no timestamp fields", () => {
+    const content = "---\nkind: insight\n---\n# Title\n\nBody.";
+    const result = parseObsidianNote(content, "test.md");
+    expect(result.createdAt).toBeUndefined();
+    expect(result.updatedAt).toBeUndefined();
+    expect(result.dateParseErrors).toEqual([]);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it("records error and logs warning for unparseable date string", () => {
+    const content =
+      "---\nkind: insight\ncreated_at: 'not-a-date'\n---\n# Title\n\nBody.";
+    const result = parseObsidianNote(content, "Insight/Test.md");
+    expect(result.createdAt).toBeUndefined();
+    expect(result.dateParseErrors).toHaveLength(1);
+    expect(result.dateParseErrors[0]).toContain("invalid created_at");
+    expect(result.dateParseErrors[0]).toContain('"not-a-date"');
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[obsidian-parser] Insight/Test.md")
+    );
+  });
+
+  it("records error for non-string non-Date type (number)", () => {
+    const content =
+      "---\nkind: insight\ncreated_at: 12345\n---\n# Title\n\nBody.";
+    const result = parseObsidianNote(content, "test.md");
+    expect(result.createdAt).toBeUndefined();
+    expect(result.dateParseErrors).toHaveLength(1);
+    expect(result.dateParseErrors[0]).toContain("expected string or Date");
+    expect(result.dateParseErrors[0]).toContain("number");
+  });
+
+  it("records error for array type", () => {
+    const content =
+      "---\nkind: insight\nupdated_at:\n  - 2026-03-27\n  - 2026-04-01\n---\n# Title\n\nBody.";
+    const result = parseObsidianNote(content, "test.md");
+    expect(result.updatedAt).toBeUndefined();
+    expect(result.dateParseErrors).toHaveLength(1);
+    expect(result.dateParseErrors[0]).toContain("invalid updated_at");
+    expect(result.dateParseErrors[0]).toContain("expected string or Date");
+  });
+
+  it("collects errors for both fields when both are bad", () => {
+    const content =
+      "---\nkind: insight\ncreated_at: 'bogus'\nupdated_at: 'also-bogus'\n---\n# Title\n\nBody.";
+    const result = parseObsidianNote(content, "test.md");
+    expect(result.createdAt).toBeUndefined();
+    expect(result.updatedAt).toBeUndefined();
+    expect(result.dateParseErrors).toHaveLength(2);
+    expect(result.dateParseErrors[0]).toContain("created_at");
+    expect(result.dateParseErrors[1]).toContain("updated_at");
+  });
+
+  it("preserves valid created_at when updated_at is malformed", () => {
+    const content =
+      "---\nkind: insight\ncreated_at: 2026-03-27\nupdated_at: 'nope'\n---\n# Title\n\nBody.";
+    const result = parseObsidianNote(content, "test.md");
+    expect(result.createdAt?.toISOString()).toBe("2026-03-27T00:00:00.000Z");
+    expect(result.updatedAt).toBeUndefined();
+    expect(result.dateParseErrors).toHaveLength(1);
+    expect(result.dateParseErrors[0]).toContain("updated_at");
   });
 });
 

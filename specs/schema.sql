@@ -332,11 +332,14 @@ CREATE TABLE IF NOT EXISTS obsidian_sync_runs (
 CREATE INDEX IF NOT EXISTS idx_sync_runs_started
     ON obsidian_sync_runs (started_at DESC);
 
--- Trigger: auto-bump updated_at and version on UPDATE
+-- Trigger: bump version on UPDATE and auto-bump updated_at unless the caller
+-- explicitly changed it (e.g. obsidian sync writing the frontmatter timestamp).
 CREATE OR REPLACE FUNCTION knowledge_artifact_version_bump()
 RETURNS TRIGGER AS $$
 BEGIN
-    NEW.updated_at := NOW();
+    IF NEW.updated_at IS NOT DISTINCT FROM OLD.updated_at THEN
+        NEW.updated_at := NOW();
+    END IF;
     NEW.version := OLD.version + 1;
     RETURN NEW;
 END;

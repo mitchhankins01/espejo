@@ -70,6 +70,7 @@ import {
   updateEntryEmbeddingIfVersionMatches,
   findArtifactByKindAndTitle,
   getRecentReviewArtifacts,
+  upsertObsidianArtifact,
 } from "../../src/db/queries.js";
 import { fixturePatterns, fixtureArtifacts } from "../../specs/fixtures/seed.js";
 
@@ -2061,5 +2062,167 @@ describe("Entry templates", () => {
 
     expect(updated).not.toBeNull();
     expect(updated!.system_prompt).toBeNull();
+  });
+});
+
+// ============================================================================
+// upsertObsidianArtifact + trigger respect explicit updated_at
+// ============================================================================
+
+describe("upsertObsidianArtifact — frontmatter timestamps", () => {
+  async function fetchTimestamps(sourcePath: string): Promise<{
+    created_at: Date;
+    updated_at: Date;
+    version: number;
+  }> {
+    const r = await pool.query(
+      `SELECT created_at, updated_at, version
+       FROM knowledge_artifacts WHERE source_path = $1`,
+      [sourcePath]
+    );
+    return {
+      created_at: r.rows[0].created_at as Date,
+      updated_at: r.rows[0].updated_at as Date,
+      version: r.rows[0].version as number,
+    };
+  }
+
+  it("INSERT applies frontmatter created_at and updated_at", async () => {
+    const path = "Insight/timestamps-insert.md";
+    const created = new Date("2025-06-15T00:00:00Z");
+    const updated = new Date("2025-07-20T00:00:00Z");
+    await upsertObsidianArtifact(pool, {
+      sourcePath: path,
+      title: "Title",
+      body: "Body",
+      kind: "insight",
+      contentHash: "etag-1",
+      createdAt: created,
+      updatedAt: updated,
+    });
+    const row = await fetchTimestamps(path);
+    expect(row.created_at.toISOString()).toBe(created.toISOString());
+    expect(row.updated_at.toISOString()).toBe(updated.toISOString());
+  });
+
+  it("INSERT without timestamps falls back to NOW()", async () => {
+    const path = "Insight/timestamps-insert-default.md";
+    const before = Date.now();
+    await upsertObsidianArtifact(pool, {
+      sourcePath: path,
+      title: "Title",
+      body: "Body",
+      kind: "insight",
+      contentHash: "etag-1",
+    });
+    const row = await fetchTimestamps(path);
+    const t = row.created_at.getTime();
+    expect(t).toBeGreaterThanOrEqual(before - 1000);
+    expect(t).toBeLessThanOrEqual(Date.now() + 1000);
+    expect(row.updated_at.getTime()).toBe(t);
+  });
+
+  it("UPDATE preserves explicit updated_at (trigger does not bump it)", async () => {
+    const path = "Insight/timestamps-update-explicit.md";
+    await upsertObsidianArtifact(pool, {
+      sourcePath: path,
+      title: "Title v1",
+      body: "Body v1",
+      kind: "insight",
+      contentHash: "etag-1",
+      createdAt: new Date("2025-01-01T00:00:00Z"),
+      updatedAt: new Date("2025-01-01T00:00:00Z"),
+    });
+
+    const explicit = new Date("2025-12-25T12:34:56Z");
+    await upsertObsidianArtifact(pool, {
+      sourcePath: path,
+      title: "Title v2",
+      body: "Body v2",
+      kind: "insight",
+      contentHash: "etag-2",
+      createdAt: new Date("2025-01-01T00:00:00Z"),
+      updatedAt: explicit,
+    });
+
+    const row = await fetchTimestamps(path);
+    expect(row.updated_at.toISOString()).toBe(explicit.toISOString());
+    expect(row.version).toBe(2);
+  });
+
+  it("UPDATE without timestamps preserves existing created_at and lets trigger bump updated_at", async () => {
+    const path = "Insight/timestamps-update-default.md";
+    const initialCreated = new Date("2024-03-15T00:00:00Z");
+    const initialUpdated = new Date("2024-03-15T00:00:00Z");
+    await upsertObsidianArtifact(pool, {
+      sourcePath: path,
+      title: "Title v1",
+      body: "Body v1",
+      kind: "insight",
+      contentHash: "etag-1",
+      createdAt: initialCreated,
+      updatedAt: initialUpdated,
+    });
+
+    const beforeUpdate = Date.now();
+    await upsertObsidianArtifact(pool, {
+      sourcePath: path,
+      title: "Title v2",
+      body: "Body v2",
+      kind: "insight",
+      contentHash: "etag-2",
+    });
+
+    const row = await fetchTimestamps(path);
+    expect(row.created_at.toISOString()).toBe(initialCreated.toISOString());
+    expect(row.updated_at.getTime()).toBeGreaterThanOrEqual(beforeUpdate - 1000);
+    expect(row.updated_at.getTime()).toBeGreaterThan(initialUpdated.getTime());
+    expect(row.version).toBe(2);
+  });
+
+  it("trigger respects explicit updated_at on raw UPDATE statements", async () => {
+    const path = "Insight/timestamps-trigger-direct.md";
+    await upsertObsidianArtifact(pool, {
+      sourcePath: path,
+      title: "Title",
+      body: "Body",
+      kind: "insight",
+      contentHash: "etag-1",
+      createdAt: new Date("2025-01-01T00:00:00Z"),
+      updatedAt: new Date("2025-01-01T00:00:00Z"),
+    });
+
+    const explicit = new Date("2030-01-01T00:00:00Z");
+    await pool.query(
+      `UPDATE knowledge_artifacts SET title = 'Changed', updated_at = $1 WHERE source_path = $2`,
+      [explicit, path]
+    );
+
+    const row = await fetchTimestamps(path);
+    expect(row.updated_at.toISOString()).toBe(explicit.toISOString());
+  });
+
+  it("trigger bumps updated_at on raw UPDATE that does not touch updated_at", async () => {
+    const path = "Insight/timestamps-trigger-fallback.md";
+    const initial = new Date("2024-01-01T00:00:00Z");
+    await upsertObsidianArtifact(pool, {
+      sourcePath: path,
+      title: "Title",
+      body: "Body",
+      kind: "insight",
+      contentHash: "etag-1",
+      createdAt: initial,
+      updatedAt: initial,
+    });
+
+    const beforeUpdate = Date.now();
+    await pool.query(
+      `UPDATE knowledge_artifacts SET title = 'Changed' WHERE source_path = $1`,
+      [path]
+    );
+
+    const row = await fetchTimestamps(path);
+    expect(row.updated_at.getTime()).toBeGreaterThanOrEqual(beforeUpdate - 1000);
+    expect(row.updated_at.getTime()).toBeGreaterThan(initial.getTime());
   });
 });

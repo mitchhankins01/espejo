@@ -30,11 +30,15 @@ export interface ParsedNote {
   body: string;
   kind: ArtifactKind;
   wikiLinks: string[];
+  createdAt?: Date;
+  updatedAt?: Date;
+  /** Per-field date-parse problems. Empty when frontmatter timestamps parse cleanly or are absent. */
+  dateParseErrors: string[];
 }
 
 /**
  * Parse an Obsidian markdown note into structured fields.
- * Extracts frontmatter (kind), title, body, and wiki links.
+ * Extracts frontmatter (kind, created_at, updated_at), title, body, and wiki links.
  */
 export function parseObsidianNote(
   content: string,
@@ -45,6 +49,20 @@ export function parseObsidianNote(
   const fm = frontmatterSchema.safeParse(data);
   const kind = (fm.success ? fm.data.kind : "note") as ArtifactKind;
 
+  const dateParseErrors: string[] = [];
+  const createdAt = parseFrontmatterDate(
+    "created_at",
+    data.created_at,
+    filename,
+    dateParseErrors
+  );
+  const updatedAt = parseFrontmatterDate(
+    "updated_at",
+    data.updated_at,
+    filename,
+    dateParseErrors
+  );
+
   const title = extractTitle(markdownBody) ?? filenameStem(filename);
   const body = stripFirstHeading(markdownBody).trim() || title;
   const wikiLinks = extractWikiLinks(markdownBody);
@@ -54,7 +72,51 @@ export function parseObsidianNote(
     body,
     kind,
     wikiLinks,
+    createdAt,
+    updatedAt,
+    dateParseErrors,
   };
+}
+
+/**
+ * Parse a frontmatter date value into a Date.
+ * Accepts a Date (js-yaml auto-parses unquoted YYYY-MM-DD into a Date)
+ * or a string (ISO 8601, YYYY-MM-DD, etc.).
+ *
+ * Returns undefined and records an error message in `errors` for malformed input;
+ * returns undefined silently if the field is absent.
+ */
+function parseFrontmatterDate(
+  field: "created_at" | "updated_at",
+  raw: unknown,
+  filename: string,
+  errors: string[]
+): Date | undefined {
+  if (raw === undefined || raw === null) return undefined;
+
+  let date: Date | undefined;
+  let error: string | undefined;
+
+  if (raw instanceof Date) {
+    date = Number.isNaN(raw.getTime()) ? undefined : raw;
+    if (!date) error = "non-finite Date object";
+  } else if (typeof raw === "string") {
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) {
+      error = `unparseable date string: ${JSON.stringify(raw)}`;
+    } else {
+      date = d;
+    }
+  } else {
+    error = `expected string or Date, got ${typeof raw}`;
+  }
+
+  if (error) {
+    const msg = `invalid ${field}: ${error}`;
+    errors.push(msg);
+    console.warn(`[obsidian-parser] ${filename}: ${msg}`);
+  }
+  return date;
 }
 
 /** Extract first # heading from markdown, stripping formatting */

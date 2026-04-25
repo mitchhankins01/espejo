@@ -1239,6 +1239,22 @@ const migrations: Migration[] = [
       DROP FUNCTION IF EXISTS todo_updated_at_bump CASCADE;
     `,
   },
+  {
+    name: "039-artifact-timestamp-trigger-respect-explicit",
+    getSql: () => ``,
+    rawStatements: [
+      `CREATE OR REPLACE FUNCTION knowledge_artifact_version_bump()
+       RETURNS TRIGGER AS $$
+       BEGIN
+           IF NEW.updated_at IS NOT DISTINCT FROM OLD.updated_at THEN
+               NEW.updated_at := NOW();
+           END IF;
+           NEW.version := OLD.version + 1;
+           RETURN NEW;
+       END;
+       $$ LANGUAGE plpgsql`,
+    ],
+  },
 ];
 
 async function migrate(): Promise<void> {

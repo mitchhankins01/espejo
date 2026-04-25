@@ -120,12 +120,17 @@ export async function runObsidianSync(
         if (!item) continue;
         try {
           const parsed = parseObsidianNote(item.content, item.key);
+          for (const msg of parsed.dateParseErrors) {
+            errors.push({ file: item.key, error: msg });
+          }
           const id = await upsertObsidianArtifact(pool, {
             sourcePath: item.key,
             title: parsed.title,
             body: parsed.body,
             kind: parsed.kind,
             contentHash: item.etag,
+            createdAt: parsed.createdAt,
+            updatedAt: parsed.updatedAt,
           });
 
           upsertedArtifacts.push({ id, key: item.key, wikiLinks: parsed.wikiLinks, title: parsed.title, body: parsed.body, kind: parsed.kind });
