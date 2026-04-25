@@ -2,6 +2,7 @@ import { appendFile, readFile } from "fs/promises";
 import { existsSync } from "fs";
 
 export const LOOKUPS_PATH = "books/lookups.jsonl";
+export const GRAMMAR_FLAGS_PATH = "books/grammar-flags.jsonl";
 
 export interface Lookup {
   word: string;
@@ -68,6 +69,62 @@ export function formatLookupsForWriter(recent: Lookup[]): string {
   return [
     "# Recent reader lookups",
     "Words he looked up on Kindle while reading prior tomos. Reuse naturally where they fit — reinforcement through reuse, not repetition. Avoid stacking equivalently hard new vocabulary in a single paragraph.",
+    "",
+    bullets,
+  ].join("\n");
+}
+
+export interface GrammarFlag {
+  stem: string;
+  form: string;
+  note: string;
+  tomo_n: number | null;
+  flagged_at: string;
+}
+
+export async function readGrammarFlags(): Promise<GrammarFlag[]> {
+  if (!existsSync(GRAMMAR_FLAGS_PATH)) return [];
+  const raw = await readFile(GRAMMAR_FLAGS_PATH, "utf-8");
+  return raw
+    .split("\n")
+    .filter((l) => l.trim().length > 0)
+    .map((l) => JSON.parse(l) as GrammarFlag);
+}
+
+export async function appendGrammarFlags(rows: GrammarFlag[]): Promise<void> {
+  if (rows.length === 0) return;
+  const body = rows.map((r) => JSON.stringify(r)).join("\n") + "\n";
+  await appendFile(GRAMMAR_FLAGS_PATH, body, "utf-8");
+}
+
+export function recentGrammarFlags(all: GrammarFlag[], n: number): GrammarFlag[] {
+  const sorted = [...all].sort((a, b) =>
+    b.flagged_at.localeCompare(a.flagged_at)
+  );
+  const seen = new Set<string>();
+  const out: GrammarFlag[] = [];
+  for (const f of sorted) {
+    const key = `${f.stem.toLowerCase()}|${f.form.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(f);
+    if (out.length >= n) break;
+  }
+  return out;
+}
+
+export function formatGrammarFlagsForWriter(recent: GrammarFlag[]): string {
+  if (recent.length === 0) return "";
+  const bullets = recent
+    .map((f) => {
+      const source = f.tomo_n != null ? ` (tomo ${f.tomo_n})` : "";
+      const note = f.note ? ` — ${f.note}` : "";
+      return `- ${f.form} (de ${f.stem})${source}${note}`;
+    })
+    .join("\n");
+  return [
+    "# Reader grammar uncertainties",
+    "Conjugations or forms the reader paused on while reading prior tomos — he knew the verb but wasn't sure about the form. Use these structures again in natural prose so the pattern locks in. Don't gloss them, don't draw attention to them, just let them appear.",
     "",
     bullets,
   ].join("\n");

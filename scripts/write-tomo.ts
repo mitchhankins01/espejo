@@ -28,8 +28,11 @@ import { gatherContext } from "./book/context.js";
 import { plan, type Plan } from "./book/planner.js";
 import { write, countWords } from "./book/writer.js";
 import {
+  formatGrammarFlagsForWriter,
   formatLookupsForWriter,
+  readGrammarFlags,
   readLookups,
+  recentGrammarFlags,
   recentLookups,
 } from "./book/lookups.js";
 import { buildEpub, tomoFilename } from "./book/epub.js";
@@ -159,7 +162,16 @@ async function main(): Promise<void> {
       `      injecting ${Math.min(lookups.length, 30)} recent lookups (${lookups.length} total)`
     );
   }
-  const markdown = await write(p, style, context, lookupsBlock);
+  const grammarFlags = await readGrammarFlags();
+  const grammarBlock = formatGrammarFlagsForWriter(
+    recentGrammarFlags(grammarFlags, 15)
+  );
+  if (grammarFlags.length > 0) {
+    console.log(
+      `      injecting ${Math.min(grammarFlags.length, 15)} grammar uncertainties (${grammarFlags.length} total)`
+    );
+  }
+  const markdown = await write(p, style, context, lookupsBlock, grammarBlock);
   const words = countWords(markdown);
   console.log(`      ${words} words`);
   if (words < 1700 || words > 2700) {
