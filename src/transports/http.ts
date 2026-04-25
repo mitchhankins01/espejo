@@ -1,5 +1,3 @@
-import path from "path";
-import { fileURLToPath } from "url";
 import express from "express";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -13,14 +11,6 @@ import { startObsidianSyncTimer } from "../obsidian/sync.js";
 import { startOnThisDayTimer } from "../notifications/on-this-day.js";
 import { embedPending } from "../db/embed-pending.js";
 import { registerHealthRoutes } from "./routes/health.js";
-import { registerMetricsRoutes } from "./routes/metrics.js";
-import { registerActivityRoutes } from "./routes/activity.js";
-import { registerObservabilityRoutes } from "./routes/observability.js";
-import { registerWeightRoutes } from "./routes/weights.js";
-import { registerArtifactRoutes } from "./routes/artifacts.js";
-import { registerEntryRoutes } from "./routes/entries.js";
-import { registerTemplateRoutes } from "./routes/templates.js";
-import type { RouteDeps } from "./routes/types.js";
 
 type ServerFactory = () => McpServer;
 
@@ -95,18 +85,7 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
     });
   });
 
-  // Shared dependencies for route modules
-  const deps: RouteDeps = { pool, secret };
-
-  // Register all route modules — order matters for static-before-param routes
   registerHealthRoutes(app);
-  registerMetricsRoutes(app, deps);
-  registerActivityRoutes(app, deps);
-  registerObservabilityRoutes(app, deps);
-  registerWeightRoutes(app, deps);
-  registerArtifactRoutes(app, deps);
-  registerEntryRoutes(app, deps);
-  registerTemplateRoutes(app, deps);
 
   // Telegram webhook (conditional — only when bot token is configured)
   /* v8 ignore next 4 -- dynamic import tested in telegram-webhook.test.ts */
@@ -134,18 +113,6 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
         });
       }
     }
-  });
-
-  // Serve web app static files from web/dist
-  /* v8 ignore next 9 -- static file serving only active when web build exists */
-  const webDistPath = path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "..", "..", "..", "web", "dist"
-  );
-  app.use(express.static(webDistPath));
-  app.get("/{*splat}", (_req, res, next) => {
-    if (_req.path.startsWith("/api") || _req.path.startsWith("/mcp")) return next();
-    res.sendFile(path.join(webDistPath, "index.html"));
   });
 
   const server = app.listen(port, "0.0.0.0", () => {

@@ -7,7 +7,5 @@ export * from "./chat.js";
 export * from "./observability.js";
 export * from "./oura.js";
 export * from "./artifacts.js";
-export * from "./media.js";
-export * from "./templates.js";
 export * from "./content-search.js";
 export * from "./obsidian.js";

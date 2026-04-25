@@ -47,6 +47,8 @@ specs/schema.sql      ← Source of truth for database schema
        └──▶ scripts/migrate.ts          (applies schema)
 ```
 
+The web frontend, REST CRUD API, and entry-templates feature were removed in 2026-04 — Mitch edits via Obsidian, reads via MCP, logs via Telegram.
+
 ### Directory Map
 
 ```
@@ -59,14 +61,12 @@ src/
     embeddings.ts   — OpenAI embedding helper. Used by search tool at query time + embed script.
     queries/        — ALL SQL lives here. Domain-split modules, parameterized queries only.
       index.ts      — Re-exports all query modules (facade).
-      entries.ts    — Entry CRUD + search queries.
+      entries.ts    — Entry search + read queries (Day One imports).
       artifacts.ts  — Artifact CRUD + search + graph queries.
       oura.ts       — Oura biometric data queries.
       chat.ts       — Chat message storage + retrieval.
       weights.ts    — Weight tracking queries.
       observability.ts — Activity logs.
-      media.ts      — Media attachment queries.
-      templates.ts  — Entry template queries.
       content-search.ts — Unified cross-type search.
       obsidian.ts   — Obsidian vault sync queries.
   tools/
@@ -131,20 +131,10 @@ src/
   utils/
     dates.ts        — Shared timezone-aware date utility (todayInTimezone).
   transports/
-    http.ts         — Express HTTP bootstrap. Mounts routes and middleware.
+    http.ts         — Express HTTP bootstrap. Mounts MCP, OAuth, health, Telegram webhook.
     oauth.ts        — OAuth token validation for HTTP API authentication.
-    routes/         — Route handlers, split from monolithic http.ts.
-      activity.ts   — Activity log endpoints.
-      artifacts.ts  — Artifact CRUD + search + graph endpoints.
-      entries.ts    — Entry CRUD + media upload endpoints.
+    routes/
       health.ts     — Health check endpoint.
-      metrics.ts    — Legacy metrics ingestion endpoint.
-      observability.ts — Observability endpoints.
-      templates.ts  — Entry template CRUD endpoints.
-      types.ts      — Shared route type definitions.
-      weights.ts    — Weight tracking endpoints.
-    middleware/
-      auth.ts       — Bearer token authentication middleware.
   storage/
     r2.ts           — Cloudflare R2 client. Upload, exists check, public URL.
   formatters/
@@ -175,17 +165,6 @@ specs/
   proactive-checkins.md, project-management.md
   fixtures/
     seed.ts         — Test data with pre-computed embeddings for determinism.
-packages/
-  shared/           — @espejo/shared workspace. Shared TypeScript types between MCP server and web frontend.
-web/                — React + Vite frontend (@espejo/web workspace). Knowledge base CRUD editor.
-  src/
-    main.tsx        — Entry point. Routes: /, /new, /:id, /journal, /templates, /weight, /db.
-    api.ts          — API client for artifacts, entries, templates, and weights.
-    index.css       — Tailwind CSS v4 entry + theme vars.
-    constants/      — Shared artifact constants (kinds, labels, badge class mapping).
-    pages/          — ArtifactList/Create/Edit + EntryList/Create/Edit + TemplateList/Create/Edit + Weight + DbObservability.
-    components/     — AuthGate, KindSelect, SourcePicker, MarkdownEditor, QuickSwitcher, GraphView, MediaGallery, MediaUpload, TemplatePicker.
-  e2e/              — Playwright e2e tests (auth, CRUD, filters, pagination, theme).
 docs/               — Deep documentation (see Deep Docs section below).
 ```
 
@@ -297,18 +276,17 @@ Any time you commit and push directly to `main`, follow this order:
 | `openai` | Embedding generation |
 | `zod` | Runtime param validation |
 | `dotenv` | Env file loading |
-| `express` | HTTP server for REST API, Telegram webhook, and MCP StreamableHTTP transport |
+| `express` | HTTP server for Telegram webhook + MCP StreamableHTTP transport |
 | `@aws-sdk/client-s3` | Cloudflare R2 media storage (S3-compatible) |
 | `better-sqlite3` | Read DayOne.sqlite during sync |
 | `@anthropic-ai/sdk` | Claude agent for Telegram chatbot conversations |
-| `multer` | Multipart form-data parsing for media upload |
 
 ## What's Out of Scope
 
 Do not implement these (they're planned future work, not part of the current build):
 
 - Clustering analysis (HDBSCAN/k-means over embeddings)
-- Write/update/delete MCP tools for journal entries (entries now have CRUD via REST API and web UI; artifacts have CRUD via REST API)
+- Write/update/delete MCP tools for journal entries — Day One is the canonical writer for `entries`; new long-form notes go into the Obsidian vault and flow through the artifact sync.
 - Multi-user support or auth beyond MCP SDK defaults
 - Chunking strategies (entries fit in single embeddings)
 - Auto-purge of compacted messages (function exists in `queries.ts`, not wired up)
@@ -387,9 +365,10 @@ MCP tools have hardcoded limits and sometimes hardcoded dates. For prompt execut
 ```bash
 PGURL=$(grep ^DATABASE_URL .env.production.local | cut -d= -f2-)
 OPENAI_API_KEY=$(grep ^OPENAI_API_KEY .env.production.local | cut -d= -f2-)
+PSQL=/opt/homebrew/opt/libpq/bin/psql   # libpq Homebrew formula, not on PATH
 ```
 
-Then `psql "$PGURL"` + OpenAI embeddings API (`text-embedding-3-small` — same model as indexing).
+Then `$PSQL "$PGURL"` + OpenAI embeddings API (`text-embedding-3-small` — same model as indexing).
 
 ### Vault ↔ DB sync
 
@@ -411,6 +390,8 @@ Then `psql "$PGURL"` + OpenAI embeddings API (`text-embedding-3-small` — same 
 - **Ports**: dev PG `5434`, test PG `5433` (5432 is claimed by the greenline project).
 - **Zod rejects `null` for optional date strings** — see `specs/2026-04-09-fix-mcp-null-optional-params-plan.md` before adding new optional-date params.
 - **DayOne sync**: null-byte/backslash handling required on text fields; `ZHASDATA=0` attachments are iCloud-only and must be skipped.
+- **Agent tool-call audit**: every Telegram agent run inserts a row in `activity_logs` with `tool_calls` JSONB containing `{name, args, result}` for each tool call. To inspect a recent agent action: `SELECT created_at, jsonb_pretty(tool_calls) FROM activity_logs WHERE tool_calls::text LIKE '%<tool_name>%' ORDER BY created_at DESC LIMIT 5;` — canonical way to see what arguments the agent passed without re-running anything.
+- **`daily_metrics` upsert preserves `created_at`**: the `ON CONFLICT (date) DO UPDATE SET weight_kg = EXCLUDED.weight_kg` clause only touches `weight_kg`, so `created_at` reflects the original insert. Use `activity_logs` (not `daily_metrics.created_at`) to determine when a value was last written.
 - **Chat logs** (useful when Mitch asks "what did I do last week"):
   - Claude Code sessions: `~/.claude/projects/-Users-mitch-Projects-espejo/*.jsonl`
   - Claude Code prompt history: `~/.claude/history.jsonl` (filter by `project`)

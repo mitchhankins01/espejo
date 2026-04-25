@@ -77,34 +77,6 @@ CREATE TABLE IF NOT EXISTS daily_metrics (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS entry_templates (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    slug TEXT UNIQUE NOT NULL CHECK (char_length(slug) BETWEEN 1 AND 80),
-    name TEXT NOT NULL CHECK (char_length(name) BETWEEN 1 AND 100),
-    description TEXT,
-    body TEXT NOT NULL DEFAULT '',
-    system_prompt TEXT CHECK (system_prompt IS NULL OR char_length(system_prompt) <= 10000),
-    default_tags TEXT[] NOT NULL DEFAULT '{}',
-    sort_order INT NOT NULL DEFAULT 0,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_entry_templates_sort
-    ON entry_templates (sort_order ASC, created_at ASC);
-
-CREATE OR REPLACE FUNCTION touch_updated_at() RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at := NOW();
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS trg_entry_templates_touch_updated_at ON entry_templates;
-CREATE TRIGGER trg_entry_templates_touch_updated_at
-    BEFORE UPDATE ON entry_templates
-    FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
-
 CREATE TABLE IF NOT EXISTS _migrations (
     id SERIAL PRIMARY KEY,
     name TEXT UNIQUE NOT NULL,

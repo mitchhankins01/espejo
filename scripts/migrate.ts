@@ -1255,6 +1255,14 @@ const migrations: Migration[] = [
        $$ LANGUAGE plpgsql`,
     ],
   },
+  {
+    name: "040-drop-entry-templates",
+    getSql: () => `
+      DROP TRIGGER IF EXISTS trg_entry_templates_touch_updated_at ON entry_templates;
+      DROP INDEX IF EXISTS idx_entry_templates_sort;
+      DROP TABLE IF EXISTS entry_templates;
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

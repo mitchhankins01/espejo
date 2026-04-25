@@ -73,22 +73,6 @@ describe("queries.ts export parity", () => {
       "searchArtifactsKeyword",
       "searchContent",
       "getArtifactGraph",
-      "searchEntriesForPicker",
-      "createEntry",
-      "updateEntry",
-      "deleteEntry",
-      "listEntries",
-      "insertMedia",
-      "getMediaForEntry",
-      "deleteMedia",
-      "updateEntryEmbeddingIfVersionMatches",
-      "listTemplates",
-      "getTemplateById",
-      "createTemplate",
-      "updateTemplate",
-      "deleteTemplate",
-      "getEntryIdByUuid",
-      "getTemplateBySlug",
     ].sort();
 
     for (const name of expected) {
@@ -105,7 +89,7 @@ describe("queries.ts export parity", () => {
 // Keep this in sync — update when intentionally adding/removing exports
 function expected_count(): number {
   // Current runtime export count (functions + constants, not types/interfaces)
-  return 73;
+  return 56;
 }
 
 describe("oura/analysis.ts export parity", () => {
