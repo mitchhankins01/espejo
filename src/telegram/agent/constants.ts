@@ -44,6 +44,10 @@ export const COMPACTION_TOKEN_BUDGET = 12_000;
 export const MIN_MESSAGES_FOR_FORCE_COMPACT = 4;
 export const RECENT_MESSAGES_LIMIT = 50;
 
+// Practice mode runs no tools and a smaller, faster model so replies feel
+// instant. The Spanish coach prompt is purely conversational.
+export const PRACTICE_MODEL = "claude-haiku-4-5-20251001";
+
 // ---------------------------------------------------------------------------
 // Shared utilities
 // ---------------------------------------------------------------------------

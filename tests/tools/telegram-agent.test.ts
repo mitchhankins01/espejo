@@ -11,6 +11,7 @@ const {
   mockGetLastCompactionTime,
   mockInsertActivityLog,
   mockAnthropicCreate,
+  mockAnthropicStream,
   mockOpenAIChatCreate,
   mockToolHandler,
   mockConfig,
@@ -28,6 +29,7 @@ const {
     created_at: new Date(),
   }),
   mockAnthropicCreate: vi.fn(),
+  mockAnthropicStream: vi.fn(),
   mockOpenAIChatCreate: vi.fn(),
   mockToolHandler: vi.fn().mockResolvedValue("tool result text"),
   mockConfig: {
@@ -102,6 +104,7 @@ vi.mock("@anthropic-ai/sdk", () => ({
   default: vi.fn().mockImplementation(() => ({
     messages: {
       create: mockAnthropicCreate,
+      stream: mockAnthropicStream,
     },
   })),
 }));
@@ -138,6 +141,7 @@ beforeEach(() => {
     created_at: new Date(),
   });
   mockAnthropicCreate.mockReset();
+  mockAnthropicStream.mockReset();
   mockOpenAIChatCreate.mockReset();
   mockToolHandler.mockReset().mockResolvedValue("tool result text");
   mockConfig.telegram.llmProvider = "anthropic";
@@ -875,6 +879,107 @@ describe("runAgent", () => {
   });
 
   });
+
+describe("runAgent — practice mode (no tools, model override, streaming)", () => {
+  function makeStream(text: string): {
+    on: ReturnType<typeof vi.fn>;
+    finalText: () => Promise<string>;
+  } {
+    const handlers: Record<string, ((delta: string, snap: string) => void) | undefined> = {};
+    return {
+      on: vi.fn((event: string, cb: (delta: string, snap: string) => void) => {
+        handlers[event] = cb;
+        return undefined;
+      }),
+      finalText: async () => {
+        // Simulate two text deltas before final
+        handlers.text?.(text.slice(0, 4), text.slice(0, 4));
+        handlers.text?.(text.slice(4), text);
+        return text;
+      },
+    };
+  }
+
+  it("disableTools omits the tools field on Anthropic create", async () => {
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "no tools needed" }],
+      usage: { input_tokens: 10, output_tokens: 5 },
+    });
+
+    await runAgent({
+      chatId: "100",
+      message: "Hi",
+      messageDate: 1000,
+      disableTools: true,
+    });
+
+    expect(mockAnthropicCreate).toHaveBeenCalledTimes(1);
+    const params = mockAnthropicCreate.mock.calls[0][0];
+    expect(params.tools).toBeUndefined();
+  });
+
+  it("modelOverride is used in place of config.anthropic.model", async () => {
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "ok" }],
+      usage: { input_tokens: 10, output_tokens: 5 },
+    });
+
+    await runAgent({
+      chatId: "100",
+      message: "Hi",
+      messageDate: 1000,
+      modelOverride: "claude-haiku-4-5-20251001",
+    });
+
+    const params = mockAnthropicCreate.mock.calls[0][0];
+    expect(params.model).toBe("claude-haiku-4-5-20251001");
+  });
+
+  it("streams via messages.stream when onTextDelta + disableTools", async () => {
+    const stream = makeStream("Hola, ¿qué tal?");
+    mockAnthropicStream.mockReturnValueOnce(stream);
+
+    const snapshots: string[] = [];
+    const result = await runAgent({
+      chatId: "100",
+      message: "hola",
+      messageDate: 1000,
+      disableTools: true,
+      modelOverride: "claude-haiku-4-5-20251001",
+      onTextDelta: (snap) => snapshots.push(snap),
+    });
+
+    expect(mockAnthropicCreate).not.toHaveBeenCalled();
+    expect(mockAnthropicStream).toHaveBeenCalledTimes(1);
+    const params = mockAnthropicStream.mock.calls[0][0];
+    expect(params.model).toBe("claude-haiku-4-5-20251001");
+    expect(params.tools).toBeUndefined();
+
+    expect(snapshots).toEqual(["Hola", "Hola, ¿qué tal?"]);
+    expect(result.response).toBe("Hola, ¿qué tal?");
+    // No tool activity in practice mode
+    expect(result.activity).toBe("");
+  });
+
+  it("disableTools also omits tools on the OpenAI path", async () => {
+    mockConfig.telegram.llmProvider = "openai";
+    mockOpenAIChatCreate.mockResolvedValueOnce({
+      choices: [{ message: { role: "assistant", content: "no tools" } }],
+      usage: { prompt_tokens: 10, completion_tokens: 5 },
+    });
+
+    await runAgent({
+      chatId: "100",
+      message: "Hi",
+      messageDate: 1000,
+      disableTools: true,
+    });
+
+    const params = mockOpenAIChatCreate.mock.calls[0][0];
+    expect(params.tools).toBeUndefined();
+    expect(params.tool_choice).toBeUndefined();
+  });
+});
 
 describe.skip("compactIfNeeded — additional coverage", () => {
         it("links new patterns to entry UUIDs", async () => {

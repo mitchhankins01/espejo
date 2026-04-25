@@ -194,6 +194,151 @@ export async function sendChatAction(
 }
 
 /**
+ * Send a single short message and return its message_id, or null on failure.
+ * Used as the seed bubble for streaming edits — keep the text short and
+ * plain (no parse_mode) so it never fails to render.
+ */
+export async function sendTelegramMessageReturningId(
+  chatId: string,
+  text: string
+): Promise<number | null> {
+  try {
+    const res = await telegramPost("sendMessage", { chat_id: chatId, text });
+    if (!res.ok) {
+      const description = await extractTelegramDescription(res);
+      console.error(
+        `Telegram send-with-id error [chat:${chatId}]: ${description ?? res.status}`
+      );
+      return null;
+    }
+    const body = (await res.json().catch(/* v8 ignore next */ () => ({}))) as {
+      result?: { message_id?: number };
+    };
+    return body.result?.message_id ?? null;
+  } catch (err) {
+    /* v8 ignore next 2 -- network failures non-deterministic */
+    console.error(`Telegram send-with-id failed [chat:${chatId}]:`, err);
+    return null;
+  }
+}
+
+/**
+ * Edit a previously sent message in place. Best-effort: errors are logged
+ * but never thrown so they can't kill an in-flight stream. "Message is not
+ * modified" errors (same text as before) are swallowed.
+ */
+export async function editTelegramMessageText(
+  chatId: string,
+  messageId: number,
+  text: string,
+  parseMode?: "HTML"
+): Promise<void> {
+  try {
+    const body: Record<string, unknown> = {
+      chat_id: chatId,
+      message_id: messageId,
+      text,
+    };
+    if (parseMode) body.parse_mode = parseMode;
+    const res = await telegramPost("editMessageText", body);
+    if (res.ok) return;
+    const description = await extractTelegramDescription(res);
+    if (description?.toLowerCase().includes("message is not modified")) return;
+    if (
+      parseMode === "HTML" &&
+      description?.toLowerCase().includes("can't parse entities")
+    ) {
+      // Retry without parse_mode so the user still sees the final text.
+      await telegramPost("editMessageText", {
+        chat_id: chatId,
+        message_id: messageId,
+        text,
+      });
+      return;
+    }
+    console.error(
+      `Telegram edit error [chat:${chatId} msg:${messageId}]: ${description ?? res.status}`
+    );
+  } catch (err) {
+    /* v8 ignore next 2 -- network failures non-deterministic */
+    console.error(`Telegram edit failed [chat:${chatId} msg:${messageId}]:`, err);
+  }
+}
+
+const STREAM_EDIT_INTERVAL_MS = 1200;
+const STREAM_EDIT_MAX_CHARS = 4000;
+
+/**
+ * Build a throttled editor for an in-flight Telegram message. Calls to the
+ * returned `update(text)` are coalesced — at most one edit per
+ * STREAM_EDIT_INTERVAL_MS, with the latest snapshot. `flush()` forces the
+ * pending edit out immediately and waits for it.
+ */
+export function createStreamEditor(
+  chatId: string,
+  messageId: number,
+  intervalMs: number = STREAM_EDIT_INTERVAL_MS
+): {
+  update: (text: string) => void;
+  flush: () => Promise<void>;
+} {
+  let pendingText: string | null = null;
+  let lastSent = "";
+  let lastEditAt = 0;
+  let inflight: Promise<void> | null = null;
+  let scheduled: NodeJS.Timeout | null = null;
+
+  async function send(text: string): Promise<void> {
+    lastSent = text;
+    lastEditAt = Date.now();
+    await editTelegramMessageText(chatId, messageId, text);
+  }
+
+  function scheduleSend(): void {
+    if (scheduled || inflight) return;
+    const wait = Math.max(0, lastEditAt + intervalMs - Date.now());
+    scheduled = setTimeout(() => {
+      scheduled = null;
+      const next = pendingText;
+      if (next == null || next === lastSent) return;
+      pendingText = null;
+      inflight = send(next).finally(() => {
+        inflight = null;
+        if (pendingText != null) scheduleSend();
+      });
+    }, wait);
+  }
+
+  function update(text: string): void {
+    // Telegram caps message text at 4096 chars; clip preview so partial
+    // streams never blow the limit. Final flush from caller passes the
+    // full text (still subject to clip — practice replies are short).
+    const clipped =
+      text.length > STREAM_EDIT_MAX_CHARS
+        ? text.slice(0, STREAM_EDIT_MAX_CHARS) + "…"
+        : text;
+    if (clipped === lastSent) return;
+    pendingText = clipped;
+    scheduleSend();
+  }
+
+  async function flush(): Promise<void> {
+    if (scheduled) {
+      clearTimeout(scheduled);
+      scheduled = null;
+    }
+    if (inflight) await inflight;
+    if (pendingText != null && pendingText !== lastSent) {
+      const next = pendingText;
+      pendingText = null;
+      await send(next);
+    }
+  }
+
+  return { update, flush };
+}
+
+/**
  * Acknowledge a callback query to dismiss the loading spinner.
  */
 export async function answerCallbackQuery(

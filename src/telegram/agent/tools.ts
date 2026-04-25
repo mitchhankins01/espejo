@@ -163,28 +163,46 @@ export interface ToolLoopResult {
   toolCalls: ActivityLogToolCall[];
 }
 
+export interface ToolLoopOptions {
+  prefill?: string;
+  /**
+   * Skip the tool catalog entirely. Used for purely conversational modes
+   * (e.g. /practice) where tool reasoning just adds latency.
+   */
+  disableTools?: boolean;
+  /** Override config.anthropic.model — only honored on the Anthropic path. */
+  modelOverride?: string;
+  /**
+   * Stream text deltas as they arrive (Anthropic only). Receives the running
+   * text snapshot. Implies a single-turn, non-tool-calling request.
+   */
+  onTextDelta?: (textSnapshot: string) => void;
+}
+
 export async function runToolLoop(
   systemPrompt: string,
   messages: ChatHistoryMessage[],
   chatId: string,
-  prefill?: string
+  options: ToolLoopOptions = {}
 ): Promise<ToolLoopResult> {
   const provider = getLlmProvider();
   if (provider === "openai") {
-    return runOpenAIToolLoop(systemPrompt, messages, chatId, prefill);
+    return runOpenAIToolLoop(systemPrompt, messages, chatId, options);
   }
-  return runAnthropicToolLoop(systemPrompt, messages, chatId, prefill);
+  return runAnthropicToolLoop(systemPrompt, messages, chatId, options);
 }
 
 async function runAnthropicToolLoop(
   systemPrompt: string,
   messages: ChatHistoryMessage[],
   chatId: string,
-  prefill?: string
+  options: ToolLoopOptions
 ): Promise<ToolLoopResult> {
+  const { disableTools = false, modelOverride, onTextDelta } = options;
+  let { prefill } = options;
   const anthropic = getAnthropic();
-  const model = getLlmModel("anthropic");
-  const tools = getAnthropicTools();
+  const model = modelOverride ?? getLlmModel("anthropic");
+  const tools = disableTools ? undefined : getAnthropicTools();
   const startMs = Date.now();
   let toolCallCount = 0;
   let lastToolKey = "";
@@ -199,6 +217,26 @@ async function runAnthropicToolLoop(
     loopMessages.push({ role: "assistant", content: prefill });
   }
 
+  // Streaming path: single-shot, no tool loop needed since tools are disabled.
+  if (onTextDelta && disableTools) {
+    const stream = anthropic.messages.stream({
+      model,
+      max_tokens: 4096,
+      system: systemPrompt,
+      messages: loopMessages as Anthropic.MessageParam[],
+    });
+    stream.on("text", (_delta, snapshot) => {
+      onTextDelta(snapshot);
+    });
+    const finalText = await stream.finalText();
+    return {
+      text: prefill ? prefill + finalText : finalText,
+      toolCallCount: 0,
+      toolNames: [],
+      toolCalls: [],
+    };
+  }
+
   while (true) {
     const elapsed = Date.now() - startMs;
     /* v8 ignore next -- wall clock timeout requires real timing */
@@ -209,7 +247,7 @@ async function runAnthropicToolLoop(
       max_tokens: 4096,
       system: systemPrompt,
       messages: loopMessages as Anthropic.MessageParam[],
-      tools,
+      ...(tools ? { tools } : {}),
     });
 
     // Check for tool_use blocks
@@ -323,11 +361,13 @@ async function runOpenAIToolLoop(
   systemPrompt: string,
   messages: ChatHistoryMessage[],
   chatId: string,
-  prefill?: string
+  options: ToolLoopOptions
 ): Promise<ToolLoopResult> {
+  const { disableTools = false } = options;
+  let { prefill } = options;
   const openai = getOpenAI();
   const model = getLlmModel("openai");
-  const tools = getOpenAITools();
+  const tools = disableTools ? undefined : getOpenAITools();
   const startMs = Date.now();
   let toolCallCount = 0;
   let lastToolKey = "";
@@ -356,8 +396,7 @@ async function runOpenAIToolLoop(
         { role: "system", content: systemPrompt },
         ...loopMessages,
       ],
-      tools,
-      tool_choice: "auto",
+      ...(tools ? { tools, tool_choice: "auto" as const } : {}),
     });
 
     const choice = response.choices[0];

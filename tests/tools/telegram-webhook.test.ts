@@ -10,6 +10,11 @@ const {
   mockSendTelegramMessage,
   mockSendTelegramVoice,
   mockSendChatAction,
+  mockSendTelegramMessageReturningId,
+  mockEditTelegramMessageText,
+  mockStreamUpdate,
+  mockStreamFlush,
+  mockCreateStreamEditor,
   mockTranscribeVoiceMessage,
   mockSynthesizeVoiceReply,
   mockExtractTextFromImage,
@@ -25,43 +30,55 @@ const {
   mockRunPracticeExtraction,
   mockBuildSpanishPracticeSystemPrompt,
   mockConfig,
-} = vi.hoisted(() => ({
-  mockRunAgent: vi.fn().mockResolvedValue({ response: "agent response", activity: "", activityLogId: null,  }),
-  mockForceCompact: vi.fn().mockResolvedValue(undefined),
-  mockSendTelegramMessage: vi.fn().mockResolvedValue(undefined),
-  mockSendTelegramVoice: vi.fn().mockResolvedValue(true),
-  mockSendChatAction: vi.fn().mockResolvedValue(undefined),
-  mockTranscribeVoiceMessage: vi.fn().mockResolvedValue("transcribed text"),
-  mockSynthesizeVoiceReply: vi.fn().mockResolvedValue(Buffer.from("audio")),
-  mockExtractTextFromImage: vi.fn().mockResolvedValue("image text"),
-  mockExtractTextFromDocument: vi.fn().mockResolvedValue("document text"),
-  mockSetMessageHandler: vi.fn(),
-  mockProcessUpdate: vi.fn(),
-  mockGetOuraSyncRun: vi.fn().mockResolvedValue(null),
-  mockGetActivityLog: vi.fn().mockResolvedValue(null),
-  mockInsertChatMessage: vi.fn().mockResolvedValue({ inserted: true, id: 1 }),
-  mockIsPracticeSessionActive: vi.fn().mockReturnValue(false),
-  mockStartPracticeSession: vi.fn().mockReturnValue({ sessionId: "abc123", startedAt: new Date() }),
-  mockEndPracticeSession: vi.fn().mockReturnValue({ sessionId: "abc123", startedAt: new Date() }),
-  mockRunPracticeExtraction: vi.fn().mockResolvedValue({
-    diffSummary: "- No significant changes.",
-    messageCount: 4,
-    wrotePersisted: true,
-  }),
-  mockBuildSpanishPracticeSystemPrompt: vi.fn().mockResolvedValue("PRACTICE PROMPT"),
-  mockConfig: {
-    config: {
-      telegram: {
-        botToken: "test-bot-token",
-        secretToken: "test-secret",
-        allowedChatId: "100",
-        voiceModel: "gpt-4o-mini-tts",
-        voiceName: "alloy",
+} = vi.hoisted(() => {
+  const streamUpdate = vi.fn();
+  const streamFlush = vi.fn().mockResolvedValue(undefined);
+  return {
+    mockRunAgent: vi.fn().mockResolvedValue({ response: "agent response", activity: "", activityLogId: null,  }),
+    mockForceCompact: vi.fn().mockResolvedValue(undefined),
+    mockSendTelegramMessage: vi.fn().mockResolvedValue(undefined),
+    mockSendTelegramVoice: vi.fn().mockResolvedValue(true),
+    mockSendChatAction: vi.fn().mockResolvedValue(undefined),
+    mockSendTelegramMessageReturningId: vi.fn().mockResolvedValue(7777),
+    mockEditTelegramMessageText: vi.fn().mockResolvedValue(undefined),
+    mockStreamUpdate: streamUpdate,
+    mockStreamFlush: streamFlush,
+    mockCreateStreamEditor: vi.fn(() => ({
+      update: streamUpdate,
+      flush: streamFlush,
+    })),
+    mockTranscribeVoiceMessage: vi.fn().mockResolvedValue("transcribed text"),
+    mockSynthesizeVoiceReply: vi.fn().mockResolvedValue(Buffer.from("audio")),
+    mockExtractTextFromImage: vi.fn().mockResolvedValue("image text"),
+    mockExtractTextFromDocument: vi.fn().mockResolvedValue("document text"),
+    mockSetMessageHandler: vi.fn(),
+    mockProcessUpdate: vi.fn(),
+    mockGetOuraSyncRun: vi.fn().mockResolvedValue(null),
+    mockGetActivityLog: vi.fn().mockResolvedValue(null),
+    mockInsertChatMessage: vi.fn().mockResolvedValue({ inserted: true, id: 1 }),
+    mockIsPracticeSessionActive: vi.fn().mockReturnValue(false),
+    mockStartPracticeSession: vi.fn().mockReturnValue({ sessionId: "abc123", startedAt: new Date() }),
+    mockEndPracticeSession: vi.fn().mockReturnValue({ sessionId: "abc123", startedAt: new Date() }),
+    mockRunPracticeExtraction: vi.fn().mockResolvedValue({
+      diffSummary: "- No significant changes.",
+      messageCount: 4,
+      wrotePersisted: true,
+    }),
+    mockBuildSpanishPracticeSystemPrompt: vi.fn().mockResolvedValue("PRACTICE PROMPT"),
+    mockConfig: {
+      config: {
+        telegram: {
+          botToken: "test-bot-token",
+          secretToken: "test-secret",
+          allowedChatId: "100",
+          voiceModel: "gpt-4o-mini-tts",
+          voiceName: "alloy",
+        },
+        openai: { apiKey: "test-openai-key", chatModel: "gpt-4o-mini" },
       },
-      openai: { apiKey: "test-openai-key", chatModel: "gpt-4o-mini" },
     },
-  },
-}));
+  };
+});
 
 vi.mock("../../src/telegram/agent.js", () => ({
   runAgent: mockRunAgent,
@@ -72,6 +89,13 @@ vi.mock("../../src/telegram/client.js", () => ({
   sendTelegramMessage: mockSendTelegramMessage,
   sendTelegramVoice: mockSendTelegramVoice,
   sendChatAction: mockSendChatAction,
+  sendTelegramMessageReturningId: mockSendTelegramMessageReturningId,
+  editTelegramMessageText: mockEditTelegramMessageText,
+  createStreamEditor: mockCreateStreamEditor,
+}));
+
+vi.mock("../../src/telegram/agent/constants.js", () => ({
+  PRACTICE_MODEL: "claude-haiku-4-5-20251001",
 }));
 
 vi.mock("../../src/telegram/voice.js", () => ({
@@ -185,6 +209,14 @@ beforeEach(() => {
   mockSendTelegramMessage.mockReset().mockResolvedValue(undefined);
   mockSendTelegramVoice.mockReset().mockResolvedValue(true);
   mockSendChatAction.mockReset().mockResolvedValue(undefined);
+  mockSendTelegramMessageReturningId.mockReset().mockResolvedValue(7777);
+  mockEditTelegramMessageText.mockReset().mockResolvedValue(undefined);
+  mockStreamUpdate.mockReset();
+  mockStreamFlush.mockReset().mockResolvedValue(undefined);
+  mockCreateStreamEditor.mockReset().mockImplementation(() => ({
+    update: mockStreamUpdate,
+    flush: mockStreamFlush,
+  }));
   mockTranscribeVoiceMessage.mockReset().mockResolvedValue("transcribed text");
   mockSynthesizeVoiceReply.mockReset().mockResolvedValue(Buffer.from("audio"));
   mockExtractTextFromImage.mockReset().mockResolvedValue("image text");
@@ -828,22 +860,55 @@ describe("/done command", () => {
 });
 
 describe("active practice session routing", () => {
-  it("passes the Spanish practice system prompt to runAgent when active", async () => {
+  it("streams replies via the seed bubble with no tools and the practice model", async () => {
     mockIsPracticeSessionActive.mockReturnValue(true);
     const handler = getHandler();
     await handler({ chatId: 100, text: "Hola, ¿cómo estás?", messageId: 1, date: 1000 });
 
     expect(mockBuildSpanishPracticeSystemPrompt).toHaveBeenCalled();
+    expect(mockSendTelegramMessageReturningId).toHaveBeenCalledWith("100", "…");
+    expect(mockCreateStreamEditor).toHaveBeenCalledWith("100", 7777);
     expect(mockRunAgent).toHaveBeenCalledWith(
       expect.objectContaining({
         systemPromptOverride: "PRACTICE PROMPT",
+        disableTools: true,
+        modelOverride: "claude-haiku-4-5-20251001",
+        onTextDelta: expect.any(Function),
       })
     );
-    // No activity line in practice mode
+    expect(mockStreamFlush).toHaveBeenCalled();
+    expect(mockEditTelegramMessageText).toHaveBeenCalledWith(
+      "100",
+      7777,
+      "agent response",
+      "HTML"
+    );
+    // No fresh send — practice mode edits the seed bubble in place
+    expect(mockSendTelegramMessage).not.toHaveBeenCalledWith(
+      "100",
+      "agent response"
+    );
+  });
+
+  it("falls back to a fresh send when the seed bubble could not be created", async () => {
+    mockIsPracticeSessionActive.mockReturnValue(true);
+    mockSendTelegramMessageReturningId.mockResolvedValueOnce(null);
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "Hola", messageId: 1, date: 1000 });
+
+    expect(mockCreateStreamEditor).not.toHaveBeenCalled();
+    expect(mockRunAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        disableTools: true,
+        modelOverride: "claude-haiku-4-5-20251001",
+        onTextDelta: undefined,
+      })
+    );
+    expect(mockEditTelegramMessageText).not.toHaveBeenCalled();
     expect(mockSendTelegramMessage).toHaveBeenCalledWith("100", "agent response");
   });
 
-  it("sends voice + text when input was voice and session is active", async () => {
+  it("sends voice plus the text edit when input was voice", async () => {
     mockIsPracticeSessionActive.mockReturnValue(true);
     const handler = getHandler();
     await handler({
@@ -856,17 +921,22 @@ describe("active practice session routing", () => {
 
     expect(mockSynthesizeVoiceReply).toHaveBeenCalledWith("agent response");
     expect(mockSendTelegramVoice).toHaveBeenCalled();
-    expect(mockSendTelegramMessage).toHaveBeenCalledWith("100", "agent response");
+    expect(mockEditTelegramMessageText).toHaveBeenCalledWith(
+      "100",
+      7777,
+      "agent response",
+      "HTML"
+    );
   });
 
-  it("only sends text when input was text even if session is active", async () => {
+  it("only edits the seed bubble when input was text", async () => {
     mockIsPracticeSessionActive.mockReturnValue(true);
     const handler = getHandler();
     await handler({ chatId: 100, text: "Hola", messageId: 1, date: 1000 });
 
     expect(mockSynthesizeVoiceReply).not.toHaveBeenCalled();
     expect(mockSendTelegramVoice).not.toHaveBeenCalled();
-    expect(mockSendTelegramMessage).toHaveBeenCalledWith("100", "agent response");
+    expect(mockEditTelegramMessageText).toHaveBeenCalled();
   });
 
   it("recovers when voice synthesis fails mid-session", async () => {
@@ -885,8 +955,13 @@ describe("active practice session routing", () => {
       expect.stringContaining("voice synth failed"),
       expect.any(Error)
     );
-    // Text still goes through even when voice fails
-    expect(mockSendTelegramMessage).toHaveBeenCalledWith("100", "agent response");
+    // Text still lands in the seed bubble even when voice fails
+    expect(mockEditTelegramMessageText).toHaveBeenCalledWith(
+      "100",
+      7777,
+      "agent response",
+      "HTML"
+    );
   });
 });
 

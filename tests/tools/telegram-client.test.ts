@@ -15,6 +15,9 @@ import {
   sendTelegramVoice,
   sendChatAction,
   answerCallbackQuery,
+  sendTelegramMessageReturningId,
+  editTelegramMessageText,
+  createStreamEditor,
 } from "../../src/telegram/client.js";
 
 let fetchSpy: ReturnType<typeof vi.spyOn>;
@@ -336,5 +339,198 @@ describe("answerCallbackQuery", () => {
     expect(url).toContain("/answerCallbackQuery");
     const body = JSON.parse(opts!.body as string);
     expect(body.callback_query_id).toBe("cb-123");
+  });
+});
+
+describe("sendTelegramMessageReturningId", () => {
+  it("returns the message_id from the API response", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ ok: true, result: { message_id: 4242 } }),
+        { status: 200 }
+      )
+    );
+
+    const id = await sendTelegramMessageReturningId("12345", "…");
+
+    expect(id).toBe(4242);
+    const [url, opts] = fetchSpy.mock.calls[0];
+    expect(url).toContain("/sendMessage");
+    const body = JSON.parse(opts!.body as string);
+    expect(body.text).toBe("…");
+    // No parse_mode — the seed bubble must always succeed
+    expect(body.parse_mode).toBeUndefined();
+  });
+
+  it("returns null when Telegram rejects the send", async () => {
+    fetchSpy.mockResolvedValueOnce(otherErrorResponse());
+
+    const id = await sendTelegramMessageReturningId("12345", "…");
+
+    expect(id).toBeNull();
+    expect(errorSpy).toHaveBeenCalled();
+  });
+
+  it("returns null when fetch throws", async () => {
+    fetchSpy.mockRejectedValueOnce(new Error("network down"));
+
+    const id = await sendTelegramMessageReturningId("12345", "…");
+
+    expect(id).toBeNull();
+    expect(errorSpy).toHaveBeenCalled();
+  });
+
+  it("returns null when the success body has no message_id", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true }), { status: 200 })
+    );
+
+    const id = await sendTelegramMessageReturningId("12345", "…");
+
+    expect(id).toBeNull();
+  });
+});
+
+describe("editTelegramMessageText", () => {
+  it("edits the message with HTML parse mode when requested", async () => {
+    fetchSpy.mockResolvedValueOnce(okResponse());
+
+    await editTelegramMessageText("12345", 7777, "<b>hi</b>", "HTML");
+
+    const [url, opts] = fetchSpy.mock.calls[0];
+    expect(url).toContain("/editMessageText");
+    const body = JSON.parse(opts!.body as string);
+    expect(body.message_id).toBe(7777);
+    expect(body.text).toBe("<b>hi</b>");
+    expect(body.parse_mode).toBe("HTML");
+  });
+
+  it("retries without parse_mode on HTML parse failure", async () => {
+    fetchSpy
+      .mockResolvedValueOnce(parseErrorResponse())
+      .mockResolvedValueOnce(okResponse());
+
+    await editTelegramMessageText("12345", 7777, "<b broken", "HTML");
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const retryBody = JSON.parse(fetchSpy.mock.calls[1][1]!.body as string);
+    expect(retryBody.parse_mode).toBeUndefined();
+  });
+
+  it("silently swallows 'message is not modified' errors", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ok: false,
+          description: "Bad Request: message is not modified",
+        }),
+        { status: 400 }
+      )
+    );
+
+    await editTelegramMessageText("12345", 7777, "same text");
+
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it("logs other Telegram API errors without throwing", async () => {
+    fetchSpy.mockResolvedValueOnce(otherErrorResponse());
+
+    await expect(
+      editTelegramMessageText("12345", 7777, "hi")
+    ).resolves.toBeUndefined();
+    expect(errorSpy).toHaveBeenCalled();
+  });
+
+  it("logs and swallows fetch errors", async () => {
+    fetchSpy.mockRejectedValueOnce(new Error("ECONNRESET"));
+
+    await expect(
+      editTelegramMessageText("12345", 7777, "hi")
+    ).resolves.toBeUndefined();
+    expect(errorSpy).toHaveBeenCalled();
+  });
+});
+
+describe("createStreamEditor", () => {
+  it("sends the first update immediately and coalesces rapid follow-ups", async () => {
+    fetchSpy.mockResolvedValue(okResponse());
+    const { update, flush } = createStreamEditor("12345", 7777, 1000);
+
+    update("Hola");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    // While inside the throttle window, multiple updates collapse to one.
+    update("Hola, ");
+    update("Hola, ¿cómo");
+    update("Hola, ¿cómo estás?");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const lastBody = JSON.parse(fetchSpy.mock.calls[1][1]!.body as string);
+    expect(lastBody.text).toBe("Hola, ¿cómo estás?");
+
+    await flush();
+  });
+
+  it("flush forces the latest pending text out and waits for it", async () => {
+    fetchSpy.mockResolvedValue(okResponse());
+    const { update, flush } = createStreamEditor("12345", 7777, 5000);
+
+    update("first");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    update("second");
+    update("third");
+    await flush();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const flushed = JSON.parse(fetchSpy.mock.calls[1][1]!.body as string);
+    expect(flushed.text).toBe("third");
+  });
+
+  it("flush is a no-op when no pending text differs from last sent", async () => {
+    fetchSpy.mockResolvedValue(okResponse());
+    const { update, flush } = createStreamEditor("12345", 7777, 1000);
+
+    update("only");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    await flush();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores duplicate updates with identical text", async () => {
+    fetchSpy.mockResolvedValue(okResponse());
+    const { update, flush } = createStreamEditor("12345", 7777, 1000);
+
+    update("hi");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    update("hi");
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    await flush();
+  });
+
+  it("clips snapshots that exceed the streaming preview cap", async () => {
+    fetchSpy.mockResolvedValue(okResponse());
+    const { update, flush } = createStreamEditor("12345", 7777, 1000);
+
+    update("x".repeat(5000));
+    await vi.advanceTimersByTimeAsync(0);
+
+    const body = JSON.parse(fetchSpy.mock.calls[0][1]!.body as string);
+    expect(body.text.length).toBe(4001); // 4000 + ellipsis
+    expect(body.text.endsWith("…")).toBe(true);
+
+    await flush();
   });
 });

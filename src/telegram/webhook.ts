@@ -12,7 +12,11 @@ import {
   sendTelegramMessage,
   sendTelegramVoice,
   sendChatAction,
+  sendTelegramMessageReturningId,
+  editTelegramMessageText,
+  createStreamEditor,
 } from "./client.js";
+import { PRACTICE_MODEL } from "./agent/constants.js";
 import {
   transcribeVoiceMessage,
   synthesizeVoiceReply,
@@ -178,6 +182,63 @@ async function sendAndStoreResponse(
     role: "assistant",
     content: text,
   });
+}
+
+async function handlePracticeReply(params: {
+  chatId: string;
+  text: string;
+  storedUserMessage: string;
+  messageDate: number;
+  inputWasVoice: boolean;
+}): Promise<void> {
+  const { chatId, text, storedUserMessage, messageDate, inputWasVoice } = params;
+
+  const systemPromptOverride = await buildSpanishPracticeSystemPrompt(pool);
+  const seedMessageId = await sendTelegramMessageReturningId(chatId, "…");
+
+  const editor = seedMessageId != null
+    ? createStreamEditor(chatId, seedMessageId)
+    : null;
+
+  try {
+    const { response } = await runAgent({
+      chatId,
+      message: text,
+      storedUserMessage,
+      messageDate,
+      systemPromptOverride,
+      disableTools: true,
+      modelOverride: PRACTICE_MODEL,
+      /* v8 ignore next -- streaming callback fires only with live SDK */
+      onTextDelta: editor ? (snapshot) => editor.update(snapshot) : undefined,
+      /* v8 ignore next 3 -- async callback tested via agent compaction tests */
+      onCompacted: async (summary) => {
+        await sendTelegramMessage(chatId, `<i>Memory note: ${summary}</i>`);
+      },
+    });
+
+    if (editor) await editor.flush();
+
+    if (!response) return;
+
+    if (inputWasVoice) {
+      try {
+        const audio = await synthesizeVoiceReply(response);
+        await sendTelegramVoice(chatId, audio);
+      } catch (err) {
+        console.error(`[practice] voice synth failed [chat:${chatId}]:`, err);
+      }
+    }
+
+    if (seedMessageId != null) {
+      await editTelegramMessageText(chatId, seedMessageId, response, "HTML");
+    } else {
+      await sendTelegramMessage(chatId, response);
+    }
+  } catch (err) {
+    if (editor) await editor.flush().catch(/* v8 ignore next */ () => {});
+    throw err;
+  }
 }
 
 async function handleMessage(msg: AssembledMessage): Promise<void> {
@@ -374,19 +435,25 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
     const practiceActive = isPracticeSessionActive(chatId);
     const inputWasVoice = Boolean(msg.voice);
 
+    if (practiceActive) {
+      await handlePracticeReply({
+        chatId,
+        text,
+        storedUserMessage: originalUserText,
+        messageDate: msg.date,
+        inputWasVoice,
+      });
+      return;
+    }
+
     const stopProgress = startProgressUpdates(chatId);
     try {
-      const systemPromptOverride = practiceActive
-        ? await buildSpanishPracticeSystemPrompt(pool)
-        : undefined;
-
       const { response, activity, activityLogId } = await runAgent({
         chatId,
         message: text,
         storedUserMessage: originalUserText,
         messageDate: msg.date,
         prefill: undefined,
-        systemPromptOverride,
         /* v8 ignore next 3 -- async callback tested via agent compaction tests */
         onCompacted: async (summary) => {
           await sendTelegramMessage(chatId, `<i>Memory note: ${summary}</i>`);
@@ -394,21 +461,6 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
       });
 
       if (!response) return;
-
-      if (practiceActive) {
-        // In practice mode: skip the activity line noise. If user spoke,
-        // reply with both a voice note and the text transcript.
-        if (inputWasVoice) {
-          try {
-            const audio = await synthesizeVoiceReply(response);
-            await sendTelegramVoice(chatId, audio);
-          } catch (err) {
-            console.error(`[practice] voice synth failed [chat:${chatId}]:`, err);
-          }
-        }
-        await sendTelegramMessage(chatId, response);
-        return;
-      }
 
       const cleanActivity = stripActivityDetailLink(activity);
       const activityDetailMarkup = buildActivityDetailMarkup(

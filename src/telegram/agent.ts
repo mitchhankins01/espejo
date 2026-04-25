@@ -33,6 +33,12 @@ export async function runAgent(params: {
   prefill?: string;
   systemPromptOverride?: string;
   onCompacted?: (summary: string) => Promise<void>;
+  /** Skip tool catalog entirely — purely conversational mode. */
+  disableTools?: boolean;
+  /** Override config.anthropic.model — useful for swapping in a faster model. */
+  modelOverride?: string;
+  /** Stream text deltas (Anthropic only; requires disableTools). */
+  onTextDelta?: (textSnapshot: string) => void;
 }): Promise<AgentResult> {
   const {
     chatId,
@@ -41,6 +47,9 @@ export async function runAgent(params: {
     prefill,
     systemPromptOverride,
     onCompacted,
+    disableTools,
+    modelOverride,
+    onTextDelta,
   } = params;
 
   // User message is now stored by handleMessage() in webhook.ts before calling runAgent().
@@ -71,7 +80,12 @@ export async function runAgent(params: {
   }
 
   // 3. Run tool loop
-  const { text, toolCallCount, toolNames, toolCalls } = await runToolLoop(systemPrompt, messages, chatId, prefill);
+  const { text, toolCallCount, toolNames, toolCalls } = await runToolLoop(
+    systemPrompt,
+    messages,
+    chatId,
+    { prefill, disableTools, modelOverride, onTextDelta }
+  );
 
   // 4. Build activity summary
   const activityParts: string[] = [];
