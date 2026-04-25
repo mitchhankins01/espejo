@@ -1263,6 +1263,31 @@ const migrations: Migration[] = [
       DROP TABLE IF EXISTS entry_templates;
     `,
   },
+  {
+    name: "041-usage-logs",
+    getSql: () => `
+      CREATE TABLE IF NOT EXISTS usage_logs (
+          id BIGSERIAL PRIMARY KEY,
+          ts TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          source TEXT NOT NULL,
+          surface TEXT,
+          actor TEXT,
+          action TEXT NOT NULL,
+          args JSONB,
+          ok BOOLEAN NOT NULL,
+          error TEXT,
+          duration_ms INTEGER,
+          meta JSONB
+      );
+
+      CREATE INDEX IF NOT EXISTS usage_logs_ts_idx
+          ON usage_logs (ts DESC);
+      CREATE INDEX IF NOT EXISTS usage_logs_source_ts_idx
+          ON usage_logs (source, ts DESC);
+      CREATE INDEX IF NOT EXISTS usage_logs_action_ts_idx
+          ON usage_logs (action, ts DESC);
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

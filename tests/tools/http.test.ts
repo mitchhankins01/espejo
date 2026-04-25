@@ -63,10 +63,17 @@ vi.mock("../../src/telegram/client.js", () => ({
   sendTelegramMessage: vi.fn().mockResolvedValue(undefined),
 }));
 
-const { mockPool } = vi.hoisted(() => ({ mockPool: {} }));
+const { mockPool, mockLogUsage } = vi.hoisted(() => ({
+  mockPool: {},
+  mockLogUsage: vi.fn(),
+}));
 
 vi.mock("../../src/db/client.js", () => ({
   pool: mockPool,
+}));
+
+vi.mock("../../src/db/queries/usage.js", () => ({
+  logUsage: mockLogUsage,
 }));
 
 const mockHandleRequest = vi.fn();
@@ -81,6 +88,7 @@ import { startHttpServer } from "../../src/transports/http.js";
 describe("startHttpServer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockLogUsage.mockReset();
     mockServer.on.mockReset();
     mockApp.set.mockReturnThis();
     mockApp.use.mockReturnThis();
@@ -333,5 +341,119 @@ describe("startHttpServer", () => {
 
     expect(mockRes.sendStatus).toHaveBeenCalledWith(204);
     expect(mockNext).not.toHaveBeenCalled();
+  });
+
+  it("usage middleware skips /health", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const useCalls = mockApp.use.mock.calls.filter(
+      (c: any[]) => typeof c[0] === "function"
+    );
+    // Two function-only middlewares: CORS first, usage second
+    const usageMiddleware = useCalls[1]![0];
+
+    const mockReq = { path: "/health", method: "GET", headers: {}, query: {} };
+    const mockRes = { on: vi.fn() };
+    const mockNext = vi.fn();
+    usageMiddleware(mockReq, mockRes, mockNext);
+
+    expect(mockNext).toHaveBeenCalled();
+    expect(mockRes.on).not.toHaveBeenCalled();
+    expect(mockLogUsage).not.toHaveBeenCalled();
+  });
+
+  it("usage middleware logs an MCP request as mcp-http surface", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const useCalls = mockApp.use.mock.calls.filter(
+      (c: any[]) => typeof c[0] === "function"
+    );
+    const usageMiddleware = useCalls[1]![0];
+
+    const finishHandlers: Array<() => void> = [];
+    const mockReq = {
+      path: "/mcp",
+      method: "POST",
+      headers: { "x-forwarded-for": "203.0.113.4, 10.0.0.1" },
+      query: {},
+    };
+    const mockRes = {
+      statusCode: 200,
+      on: vi.fn((event: string, cb: () => void) => {
+        if (event === "finish") finishHandlers.push(cb);
+      }),
+    };
+    const mockNext = vi.fn();
+    usageMiddleware(mockReq, mockRes, mockNext);
+    expect(mockNext).toHaveBeenCalled();
+
+    // Trigger the finish callback to run logUsage
+    finishHandlers.forEach((cb) => cb());
+
+    expect(mockLogUsage).toHaveBeenCalledTimes(1);
+    const [, payload] = mockLogUsage.mock.calls[0];
+    expect(payload.source).toBe("http");
+    expect(payload.surface).toBe("mcp-http");
+    expect(payload.actor).toBe("203.0.113.4");
+    expect(payload.action).toBe("POST /mcp");
+    expect(payload.ok).toBe(true);
+    expect(payload.meta.status).toBe(200);
+  });
+
+  it("usage middleware tags telegram webhook + records 5xx as not ok", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const useCalls = mockApp.use.mock.calls.filter(
+      (c: any[]) => typeof c[0] === "function"
+    );
+    const usageMiddleware = useCalls[1]![0];
+
+    const finishHandlers: Array<() => void> = [];
+    const mockReq = {
+      path: "/api/telegram",
+      method: "POST",
+      headers: {},
+      ip: "10.0.0.5",
+      query: {},
+    };
+    const mockRes = {
+      statusCode: 500,
+      on: vi.fn((event: string, cb: () => void) => {
+        if (event === "finish") finishHandlers.push(cb);
+      }),
+    };
+    usageMiddleware(mockReq, mockRes, vi.fn());
+    finishHandlers.forEach((cb) => cb());
+
+    const [, payload] = mockLogUsage.mock.calls[0];
+    expect(payload.surface).toBe("webhook");
+    expect(payload.actor).toBe("10.0.0.5");
+    expect(payload.ok).toBe(false);
+    expect(payload.meta.status).toBe(500);
+  });
+
+  it("usage middleware tags other paths as rest surface", async () => {
+    await startHttpServer((() => ({ connect: vi.fn() })) as any);
+    const useCalls = mockApp.use.mock.calls.filter(
+      (c: any[]) => typeof c[0] === "function"
+    );
+    const usageMiddleware = useCalls[1]![0];
+
+    const finishHandlers: Array<() => void> = [];
+    const mockReq = {
+      path: "/oauth/authorize",
+      method: "GET",
+      headers: {},
+      query: { client_id: "abc" },
+    };
+    const mockRes = {
+      statusCode: 302,
+      on: vi.fn((event: string, cb: () => void) => {
+        if (event === "finish") finishHandlers.push(cb);
+      }),
+    };
+    usageMiddleware(mockReq, mockRes, vi.fn());
+    finishHandlers.forEach((cb) => cb());
+
+    const [, payload] = mockLogUsage.mock.calls[0];
+    expect(payload.surface).toBe("rest");
+    expect(payload.meta.query).toEqual({ client_id: "abc" });
   });
 });

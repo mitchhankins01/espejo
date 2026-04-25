@@ -69,6 +69,7 @@ src/
       observability.ts — Activity logs.
       content-search.ts — Unified cross-type search.
       obsidian.ts   — Obsidian vault sync queries.
+      usage.ts      — Universal usage_logs writer (logUsage helper).
   tools/
     search.ts       — Hybrid RRF search. The most important tool.
     get-entry.ts    — Single entry by UUID.
@@ -391,6 +392,10 @@ Then `$PSQL "$PGURL"` + OpenAI embeddings API (`text-embedding-3-small` — same
 - **Zod rejects `null` for optional date strings** — see `specs/2026-04-09-fix-mcp-null-optional-params-plan.md` before adding new optional-date params.
 - **DayOne sync**: null-byte/backslash handling required on text fields; `ZHASDATA=0` attachments are iCloud-only and must be skipped.
 - **Agent tool-call audit**: every Telegram agent run inserts a row in `activity_logs` with `tool_calls` JSONB containing `{name, args, result}` for each tool call. To inspect a recent agent action: `SELECT created_at, jsonb_pretty(tool_calls) FROM activity_logs WHERE tool_calls::text LIKE '%<tool_name>%' ORDER BY created_at DESC LIMIT 5;` — canonical way to see what arguments the agent passed without re-running anything.
+- **Universal usage log**: `usage_logs` records every MCP tool call (including from Claude desktop/mobile, which `activity_logs` does not capture), every HTTP request (excluding `/health`), Telegram tool dispatch (mirrors the per-tool slice of `activity_logs`), and cron fires (oura-sync, obsidian-sync, on-this-day). Schema: `(ts, source, surface, actor, action, args jsonb, ok, error, duration_ms, meta jsonb)`. Examples:
+  - "Which MCP tools fired in the last 24h": `SELECT action, surface, COUNT(*) FROM usage_logs WHERE source = 'mcp' AND ts > NOW() - INTERVAL '1 day' GROUP BY 1,2 ORDER BY 3 DESC;`
+  - "Did anything error today": `SELECT ts, source, action, error FROM usage_logs WHERE NOT ok AND ts > NOW() - INTERVAL '1 day' ORDER BY ts DESC;`
+  - Use this table for traffic/source breakdowns; keep `activity_logs` for full-conversation Telegram audits (memories, cost, complete tool transcript).
 - **`daily_metrics` upsert preserves `created_at`**: the `ON CONFLICT (date) DO UPDATE SET weight_kg = EXCLUDED.weight_kg` clause only touches `weight_kg`, so `created_at` reflects the original insert. Use `activity_logs` (not `daily_metrics.created_at`) to determine when a value was last written.
 - **Chat logs** (useful when Mitch asks "what did I do last week"):
   - Claude Code sessions: `~/.claude/projects/-Users-mitch-Projects-espejo/*.jsonl`

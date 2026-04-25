@@ -3,6 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { config } from "../config.js";
 import { pool } from "../db/client.js";
+import { logUsage } from "../db/queries/usage.js";
 import { notifyError } from "../telegram/notify.js";
 import { sendTelegramMessage } from "../telegram/client.js";
 import { registerOAuthRoutes, isValidOAuthToken } from "./oauth.js";
@@ -55,6 +56,42 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
       res.sendStatus(204);
       return;
     }
+    next();
+  });
+
+  // Usage logging — every non-trivial HTTP request lands in usage_logs.
+  // Skip /health (Railway pings it constantly) so the table doesn't fill up
+  // with noise. /mcp gets its own per-tool log via logUsage in server.ts, so
+  // we only record the outer request here for transport-level visibility.
+  app.use((req, res, next) => {
+    if (req.path === "/health") {
+      next();
+      return;
+    }
+    const startedAt = Date.now();
+    const ip =
+      (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim() ||
+      req.ip ||
+      undefined;
+    res.on("finish", () => {
+      const surface = req.path.startsWith("/mcp")
+        ? "mcp-http"
+        : req.path === "/api/telegram"
+          ? "webhook"
+          : "rest";
+      logUsage(pool, {
+        source: "http",
+        surface,
+        actor: ip,
+        action: `${req.method} ${req.path}`,
+        ok: res.statusCode < 500,
+        durationMs: Date.now() - startedAt,
+        meta: {
+          status: res.statusCode,
+          query: req.query,
+        },
+      });
+    });
     next();
   });
 

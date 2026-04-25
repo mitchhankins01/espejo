@@ -11,6 +11,7 @@ import {
 import {
   syncExplicitLinks,
 } from "../db/queries/artifacts.js";
+import { logUsage } from "../db/queries/usage.js";
 import { createClient, listAllObjects, getObjectContent } from "../storage/r2.js";
 import { notifyError } from "../telegram/notify.js";
 import { extractAndNotifyReviews } from "./extraction.js";
@@ -211,15 +212,40 @@ async function syncAndNotify(
   pool: pg.Pool,
   onAfterSync?: () => Promise<void>
 ): Promise<void> {
+  const startedAt = Date.now();
   try {
-    await runObsidianSync(pool);
+    const result = await runObsidianSync(pool);
+    logUsage(pool, {
+      source: "cron",
+      surface: "obsidian-sync",
+      action: "obsidian-sync",
+      ok: true,
+      durationMs: Date.now() - startedAt,
+      meta: result
+        ? {
+            runId: result.runId,
+            filesSynced: result.filesSynced,
+            filesDeleted: result.filesDeleted,
+            linksResolved: result.linksResolved,
+            errors: result.errors,
+          }
+        : { skipped: true },
+    });
     /* v8 ignore next 3 -- background callback is runtime-only */
     if (onAfterSync) {
       await onAfterSync();
     }
-  /* v8 ignore next 3 -- background sync: errors already recorded in obsidian_sync_runs */
+  /* v8 ignore next 11 -- background sync: errors already recorded in obsidian_sync_runs */
   } catch (err) {
     notifyError("Obsidian sync", err);
+    logUsage(pool, {
+      source: "cron",
+      surface: "obsidian-sync",
+      action: "obsidian-sync",
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+      durationMs: Date.now() - startedAt,
+    });
   }
 }
 

@@ -77,6 +77,30 @@ CREATE TABLE IF NOT EXISTS daily_metrics (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Universal usage log: every MCP tool call, HTTP request, Telegram tool, cron
+-- fire, and script run records here. Telegram-specific conversation audit
+-- (memories, per-message cost) stays in `activity_logs`.
+CREATE TABLE IF NOT EXISTS usage_logs (
+    id BIGSERIAL PRIMARY KEY,
+    ts TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    source TEXT NOT NULL,         -- 'mcp' | 'telegram' | 'http' | 'cron' | 'script'
+    surface TEXT,                 -- 'mcp-stdio' | 'mcp-http' | 'webhook' | 'rest' | 'oura-sync' | 'obsidian-sync' | 'on-this-day' | etc.
+    actor TEXT,                   -- chat_id, ip, hostname, script name
+    action TEXT NOT NULL,         -- tool name, METHOD+path, job name
+    args JSONB,
+    ok BOOLEAN NOT NULL,
+    error TEXT,
+    duration_ms INTEGER,
+    meta JSONB
+);
+
+CREATE INDEX IF NOT EXISTS usage_logs_ts_idx
+    ON usage_logs (ts DESC);
+CREATE INDEX IF NOT EXISTS usage_logs_source_ts_idx
+    ON usage_logs (source, ts DESC);
+CREATE INDEX IF NOT EXISTS usage_logs_action_ts_idx
+    ON usage_logs (action, ts DESC);
+
 CREATE TABLE IF NOT EXISTS _migrations (
     id SERIAL PRIMARY KEY,
     name TEXT UNIQUE NOT NULL,

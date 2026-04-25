@@ -1,6 +1,7 @@
 import type pg from "pg";
 import { config } from "../config.js";
 import { getEntriesOnThisDay, insertActivityLog, type EntryRow } from "../db/queries.js";
+import { logUsage } from "../db/queries/usage.js";
 import { sendTelegramMessage } from "../telegram/client.js";
 import { notifyError } from "../telegram/notify.js";
 import { getAnthropic } from "../telegram/agent/constants.js";
@@ -160,10 +161,26 @@ export async function runOnThisDay(pool: pg.Pool): Promise<void> {
 }
 
 async function runAndNotify(pool: pg.Pool): Promise<void> {
+  const startedAt = Date.now();
   try {
     await runOnThisDay(pool);
+    logUsage(pool, {
+      source: "cron",
+      surface: "on-this-day",
+      action: "on-this-day",
+      ok: true,
+      durationMs: Date.now() - startedAt,
+    });
   } catch (err) {
     notifyError("On This Day", err);
+    logUsage(pool, {
+      source: "cron",
+      surface: "on-this-day",
+      action: "on-this-day",
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+      durationMs: Date.now() - startedAt,
+    });
   }
 }
 

@@ -6,6 +6,7 @@ import {
   type ChatMessageRow,
   type ActivityLogToolCall,
 } from "../../db/queries.js";
+import { logUsage } from "../../db/queries/usage.js";
 import { toolHandlers, type ToolResult } from "../../server.js";
 import {
   allToolNames,
@@ -88,6 +89,53 @@ export function reconstructMessages(
   }
 
   return messages;
+}
+
+async function dispatchTool(
+  name: string,
+  args: unknown,
+  chatId: string
+): Promise<string> {
+  const startedAt = Date.now();
+  const handler = toolHandlers[name];
+  /* v8 ignore next 9 -- defensive: all registered tools have handlers */
+  if (!handler) {
+    logUsage(pool, {
+      source: "telegram",
+      action: name,
+      actor: chatId,
+      args,
+      ok: false,
+      error: `Unknown tool "${name}"`,
+      durationMs: Date.now() - startedAt,
+    });
+    return `Error: Unknown tool "${name}"`;
+  }
+  try {
+    const result = resolveToolResultText(await handler(pool, args));
+    logUsage(pool, {
+      source: "telegram",
+      action: name,
+      actor: chatId,
+      args,
+      ok: true,
+      durationMs: Date.now() - startedAt,
+    });
+    return result;
+  } catch (err) {
+    /* v8 ignore next -- errors are always Error instances in practice */
+    const message = err instanceof Error ? err.message : String(err);
+    logUsage(pool, {
+      source: "telegram",
+      action: name,
+      actor: chatId,
+      args,
+      ok: false,
+      error: message,
+      durationMs: Date.now() - startedAt,
+    });
+    return `Error: ${message}`;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -225,18 +273,7 @@ async function runAnthropicToolLoop(
       toolNamesUsed.add(toolUse.name);
 
       // Execute tool
-      let result: string;
-      const handler = toolHandlers[toolUse.name];
-      if (handler) {
-        try {
-          result = resolveToolResultText(await handler(pool, toolUse.input));
-        } catch (err) {
-          /* v8 ignore next -- errors are always Error instances in practice */
-          result = `Error: ${err instanceof Error ? err.message : String(err)}`;
-        }
-      } /* v8 ignore next 2 -- defensive: all registered tools have handlers */ else {
-        result = `Error: Unknown tool "${toolUse.name}"`;
-      }
+      const result = await dispatchTool(toolUse.name, toolUse.input, chatId);
 
       // Store tool result in chat_messages (truncated)
       const truncated = truncateToolResult(toolUse.name, result);
@@ -401,17 +438,7 @@ async function runOpenAIToolLoop(
         continue;
       }
 
-      const handler = toolHandlers[toolName];
-      if (handler) {
-        try {
-          result = resolveToolResultText(await handler(pool, parsedArgs));
-        } catch (err) {
-          /* v8 ignore next -- errors are always Error instances in practice */
-          result = `Error: ${err instanceof Error ? err.message : String(err)}`;
-        }
-      } /* v8 ignore next 2 -- defensive: all registered tools have handlers */ else {
-        result = `Error: Unknown tool "${toolName}"`;
-      }
+      result = await dispatchTool(toolName, parsedArgs, chatId);
 
       const truncated = truncateToolResult(toolName, result);
       await insertChatMessage(pool, {

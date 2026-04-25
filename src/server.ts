@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type pg from "pg";
 import { toolSpecs } from "../specs/tools.spec.js";
+import { logUsage } from "./db/queries/usage.js";
 import { handleSearchEntries } from "./tools/search.js";
 import { handleGetEntry } from "./tools/get-entry.js";
 import { handleGetEntriesByDate } from "./tools/get-entries-by-date.js";
@@ -23,6 +24,8 @@ import { handleGetObsidianSyncStatus } from "./tools/get-obsidian-sync-status.js
 import { handleSaveEveningReview } from "./tools/save-evening-review.js";
 import { handleLogWeights } from "./tools/log-weights.js";
 import { handleEveningReviewPrompt } from "./prompts/evening-review.js";
+
+export type McpSurface = "mcp-stdio" | "mcp-http";
 
 /** Tool handlers can return a plain string or a rich CallToolResult with audience annotations. */
 export type ToolResult = string | CallToolResult;
@@ -51,7 +54,11 @@ export const toolHandlers: Record<string, ToolHandler> = {
   log_weights: handleLogWeights,
 };
 
-export function createServer(pool: pg.Pool, version: string): McpServer {
+export function createServer(
+  pool: pg.Pool,
+  version: string,
+  surface: McpSurface = "mcp-stdio"
+): McpServer {
   const server = new McpServer({
     name: "espejo-mcp",
     version,
@@ -71,8 +78,17 @@ export function createServer(pool: pg.Pool, version: string): McpServer {
         annotations: spec.annotations,
       },
       async (args: Record<string, unknown>) => {
+        const startedAt = Date.now();
         try {
           const result = await handler(pool, args);
+          logUsage(pool, {
+            source: "mcp",
+            surface,
+            action: name,
+            args,
+            ok: true,
+            durationMs: Date.now() - startedAt,
+          });
           // Rich result: handler already built content with audience annotations
           if (typeof result !== "string") return result;
           return {
@@ -81,6 +97,15 @@ export function createServer(pool: pg.Pool, version: string): McpServer {
         } catch (err) {
           const message =
             err instanceof Error ? err.message : "Unknown error occurred";
+          logUsage(pool, {
+            source: "mcp",
+            surface,
+            action: name,
+            args,
+            ok: false,
+            error: message,
+            durationMs: Date.now() - startedAt,
+          });
           return {
             content: [{ type: "text" as const, text: `Error: ${message}` }],
             isError: true,

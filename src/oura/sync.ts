@@ -11,6 +11,7 @@ import {
   upsertOuraSyncState,
   upsertOuraWorkout,
 } from "../db/queries.js";
+import { logUsage } from "../db/queries/usage.js";
 import { notifyError } from "../telegram/notify.js";
 import { todayInTimezone, daysAgoInTimezone } from "../utils/dates.js";
 import { OuraClient } from "./client.js";
@@ -86,11 +87,31 @@ async function syncAndNotify(
   lookbackDays: number,
   onAfterSync?: () => Promise<void>
 ): Promise<void> {
+  const startedAt = Date.now();
   try {
-    await runOuraSync(pool, lookbackDays);
-    /* v8 ignore next 3 -- background sync: errors already recorded in oura_sync_runs */
+    const result = await runOuraSync(pool, lookbackDays);
+    logUsage(pool, {
+      source: "cron",
+      surface: "oura-sync",
+      action: "oura-sync",
+      ok: true,
+      durationMs: Date.now() - startedAt,
+      meta: result
+        ? { lookbackDays, total: result.total, counts: result.counts, runId: result.runId }
+        : { lookbackDays, skipped: true },
+    });
+    /* v8 ignore next 9 -- background sync: errors already recorded in oura_sync_runs */
   } catch (err) {
     notifyError("Oura sync", err);
+    logUsage(pool, {
+      source: "cron",
+      surface: "oura-sync",
+      action: "oura-sync",
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+      durationMs: Date.now() - startedAt,
+      meta: { lookbackDays },
+    });
   } finally {
     if (onAfterSync) {
       await onAfterSync();

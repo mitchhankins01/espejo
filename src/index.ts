@@ -31,9 +31,9 @@ async function main(): Promise<void> {
 
   if (useHttp) {
     const { startHttpServer } = await import("./transports/http.js");
-    await startHttpServer(() => createServer(pool, VERSION));
+    await startHttpServer(() => createServer(pool, VERSION, "mcp-http"));
   } else {
-    const server = createServer(pool, VERSION);
+    const server = createServer(pool, VERSION, "mcp-stdio");
     const transport = new StdioServerTransport();
     await server.connect(transport);
     console.error("espejo-mcp running on stdio");
