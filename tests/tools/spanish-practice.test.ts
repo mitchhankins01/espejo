@@ -30,11 +30,12 @@ describe("getEspanolVivoBody", () => {
 
 describe("buildSpanishPracticeSystemPrompt", () => {
   it("injects the state machine body when present", async () => {
-    const pool = makePool([{ body: "| Presente | 🟢 Cómodo |" }]);
+    const yamlBody = "level: A2/B1\nfocus:\n  topic: imperfecto vs pretérito\n";
+    const pool = makePool([{ body: yamlBody }]);
     const prompt = await buildSpanishPracticeSystemPrompt(pool);
     expect(prompt).toContain("Mitch's Spanish conversation partner");
     expect(prompt).toContain("SESSION CONTRACT");
-    expect(prompt).toContain("| Presente | 🟢 Cómodo |");
+    expect(prompt).toContain(yamlBody);
     expect(prompt).toContain(ESPANOL_VIVO_PATH);
   });
 
@@ -50,6 +51,6 @@ describe("EXTRACTION_PROMPT", () => {
   it("requests JSON output with updated_body and diff_summary keys", () => {
     expect(EXTRACTION_PROMPT).toContain("updated_body");
     expect(EXTRACTION_PROMPT).toContain("diff_summary");
-    expect(EXTRACTION_PROMPT).toContain("Audit Log");
+    expect(EXTRACTION_PROMPT).toContain("audit_log");
   });
 });

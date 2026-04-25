@@ -6,7 +6,9 @@ import { config } from "../../src/config.js";
 const VIVO_PATH = "Artifacts/Project/Español Vivo.md";
 const STYLE_PATH = "books/style.md";
 
-const DISTILL_PROMPT = `You are distilling a Spanish-learning journal into a compact style guide for a writer who will produce 1950-2400 word Spanish tomos (mini-books) for the learner. The guide must be actionable inside a prompt — no meta-commentary, no "this document contains".
+const DISTILL_PROMPT = `You are distilling a Spanish-learning state machine (YAML) into a compact style guide for a writer who will produce 1950-2400 word Spanish tomos (mini-books) for the learner. The guide must be actionable inside a prompt — no meta-commentary, no "this document contains".
+
+The input YAML has these fields: level, profile, tenses (per-tense status: solid | comfortable | learning | not_yet), focus (topic, mental_model, trigger_phrases, common_traps, status), recurring_errors (with last_seen dates), open_questions, active_vocab (with seen dates), audit_log.
 
 Extract and organize into these sections (use these exact headings):
 
@@ -14,19 +16,19 @@ Extract and organize into these sections (use these exact headings):
 One paragraph: level, background, disposition.
 
 ## Tenses — comfortable
-Bullet list of tenses the reader uses naturally. One line each.
+Bullet list of tenses with status "solid" or "comfortable". One line each.
 
 ## Tenses — learning (use, but sparingly and clearly)
-Bullet list of tenses marked 🟡 in the source. One line each.
+Bullet list of tenses with status "learning". One line each.
 
 ## Current grammar focus
-The active "Focus Actual" from the source, paraphrased in one short paragraph. Call out trigger phrases and common traps.
+Paraphrase focus.topic + focus.mental_model in one short paragraph. Call out the trigger_phrases and common_traps.
 
 ## Vocabulary to lean into
-Bullet list of recently resolved / newly emerging words and phrases the reader should see again. Include brief gloss in parens if useful.
+Bullet list from active_vocab. Include brief gloss in parens. Prefer the most recently seen.
 
 ## Avoid
-Bullet list of anglicisms, false friends, and recurring errors to steer clear of.
+Bullet list paraphrased from recurring_errors — the patterns to steer clear of.
 
 ## Voice
 2-3 sentences: warm, specific, not academic, not motivational. Match the reader's actual journaling voice when possible.

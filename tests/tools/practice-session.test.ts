@@ -144,10 +144,12 @@ describe("runPracticeExtraction", () => {
       { role: "user", content: "he siento cansado" },
       { role: "assistant", content: "(*me* siento — 'he' es auxiliar). ¿El cuerpo cómo lo siente?" },
     ]);
-    mockGetEspanolVivoBody.mockResolvedValue("# Español Vivo\n\n## Practice Log\n\n|Fecha|Tipo|Notas|\n|---|---|---|");
+    mockGetEspanolVivoBody.mockResolvedValue("level: A2/B1\naudit_log:\n  - prior\n");
+    const updatedYaml =
+      "level: A2/B1\naudit_log:\n  - prior\n  - \"2026-04-23 telegram — reflexive slip on 'he siento'\"\n";
     mockClaudeJsonReply({
-      updated_body: "# Español Vivo\n\n## Practice Log\n\n| 2026-04-23 | LLM | he siento → me siento |\n## Audit Log\n- 2026-04-23 10:30 — s1 — added row",
-      diff_summary: "- Added practice log row\n- Added audit line",
+      updated_body: updatedYaml,
+      diff_summary: "- Refreshed reflexive recurring_error\n- Appended audit_log line",
     });
 
     const result = await runPracticeExtraction("100", session);
@@ -157,7 +159,7 @@ describe("runPracticeExtraction", () => {
       { r2: true },
       "artifacts",
       "Project/Español Vivo.md",
-      expect.stringContaining("Audit Log")
+      expect.stringContaining("audit_log")
     );
     expect(mockUpsertObsidianArtifact).toHaveBeenCalled();
   });
