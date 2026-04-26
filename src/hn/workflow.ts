@@ -118,14 +118,14 @@ export async function runHnDistillWorkflow(
         inputTokens: distill.usage.inputTokens,
         outputTokens: distill.usage.outputTokens,
         costUsd: distill.cost.totalCostUsd,
-        vaultFile: vaultFile.filename,
+        vaultKey: vaultFile.key,
       },
     });
 
     if (chatId) {
       await sendTelegramMessage(
         chatId,
-        `✅ HN #${input.itemId} distilled (${costSummary}) — emailed and saved to <code>Pending/Reference/${vaultFile.filename}</code>`
+        `✅ HN #${input.itemId} distilled (${costSummary}) — emailed and uploaded to vault: <code>${vaultFile.key}</code> (Remotely Save will pull it down on next sync)`
       );
     }
   } catch (err) {

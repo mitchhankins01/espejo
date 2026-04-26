@@ -1,10 +1,15 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
 import matter from "gray-matter";
+import { config } from "../config.js";
+import { createClient, putObjectContent } from "../storage/r2.js";
 
-function defaultVaultRoot(): string {
-  return path.resolve(process.cwd(), "Artifacts");
-}
+/**
+ * Vault bucket name. Must stay in sync with `VAULT_BUCKET` in
+ * src/obsidian/sync.ts — Remotely Save (in Obsidian) writes to this same
+ * bucket, our R2→DB sync reads from it, and the new HN distill writes here
+ * so the file shows up in both Mitch's local vault (via Remotely Save) and
+ * the knowledge_artifacts DB (via the periodic sync).
+ */
+const VAULT_BUCKET = "artifacts";
 
 export interface WritePendingReferenceInput {
   title: string;
@@ -15,12 +20,12 @@ export interface WritePendingReferenceInput {
   isoDate: string;
   /** Extra tags beyond the default `["hn"]`. Lowercase, hyphenated. */
   extraTags?: string[];
-  /** Override the vault root (defaults to ./Artifacts). Mainly for tests. */
-  vaultRoot?: string;
+  /** Override the vault key prefix (defaults to "Pending/Reference"). For tests. */
+  keyPrefix?: string;
 }
 
 export interface WrittenReference {
-  filePath: string;
+  key: string;
   filename: string;
 }
 
@@ -38,24 +43,28 @@ export function slugify(title: string): string {
 }
 
 /**
- * Write the distillation to `Artifacts/Pending/Reference/HN-{date}-{slug}.md`.
+ * Upload the distillation to R2 at `Pending/Reference/HN-{date}-{slug}.md`
+ * inside the vault bucket. Remotely Save (Obsidian plugin) syncs that key
+ * down to Mitch's local vault on its next run, and src/obsidian/sync.ts
+ * indexes it into the DB on its next 30-min cycle.
  *
- * Frontmatter follows the project convention (kind/status/tags). Title lives
- * in the first `# heading`, never in frontmatter. Body = the distillation +
- * a small footer with the source URLs, parallel to what the email shows.
- *
- * Returns the absolute path so the caller can include it in the success message.
+ * Frontmatter follows project convention (kind/status/tags). Title lives in
+ * the first `# heading`, never in frontmatter. Body = the distillation + a
+ * footer with the source URLs, parallel to what the email shows.
  */
 export async function writePendingReference(
   input: WritePendingReferenceInput
 ): Promise<WrittenReference> {
-  const vaultRoot = input.vaultRoot ?? defaultVaultRoot();
-  const pendingReferenceDir = path.join(vaultRoot, "Pending", "Reference");
-  await mkdir(pendingReferenceDir, { recursive: true });
+  if (!config.r2.accountId || !config.r2.accessKeyId) {
+    throw new Error(
+      "R2 credentials are not configured. Set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY."
+    );
+  }
 
   const slug = slugify(input.title);
   const filename = `HN-${input.isoDate}-${slug}.md`;
-  const filePath = path.join(pendingReferenceDir, filename);
+  const prefix = (input.keyPrefix ?? "Pending/Reference").replace(/\/+$/, "");
+  const key = `${prefix}/${filename}`;
 
   const tags = ["hn", ...(input.extraTags ?? [])];
   const sourceLines = [`HN thread: ${input.hnUrl}`];
@@ -72,15 +81,14 @@ export async function writePendingReference(
     "",
   ].join("\n");
 
-  // gray-matter's stringify gives us valid frontmatter without hand-rolling YAML.
-  // Wrap in a trim/respace step so there's no blank line between `---` and `# heading`.
   const file = matter.stringify(body, {
     kind: "reference",
     status: "pending",
     tags,
   });
 
-  await writeFile(filePath, file, "utf8");
+  const client = createClient();
+  await putObjectContent(client, VAULT_BUCKET, key, file);
 
-  return { filePath, filename };
+  return { key, filename };
 }

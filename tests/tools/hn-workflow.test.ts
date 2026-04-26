@@ -72,7 +72,7 @@ describe("runHnDistillWorkflow", () => {
     sendEmail.mockResolvedValueOnce(undefined);
     writePendingReference.mockResolvedValueOnce({
       filename: "HN-2026-04-26-article-title.md",
-      filePath: "/tmp/HN-2026-04-26-article-title.md",
+      key: "Pending/Reference/HN-2026-04-26-article-title.md",
     });
     sendTelegramMessage.mockResolvedValueOnce(undefined);
 
@@ -120,7 +120,7 @@ describe("runHnDistillWorkflow", () => {
     sendEmail.mockResolvedValue(undefined);
     writePendingReference.mockResolvedValueOnce({
       filename: "HN-2026-04-26-test.md",
-      filePath: "/tmp/HN-2026-04-26-test.md",
+      key: "Pending/Reference/HN-2026-04-26-test.md",
     });
 
     await runHnDistillWorkflow({
@@ -142,7 +142,7 @@ describe("runHnDistillWorkflow", () => {
     sendEmail.mockResolvedValue(undefined);
     writePendingReference.mockResolvedValueOnce({
       filename: "x",
-      filePath: "x",
+      key: "Pending/Reference/x",
     });
 
     await runHnDistillWorkflow({
@@ -165,7 +165,7 @@ describe("runHnDistillWorkflow", () => {
     sendEmail.mockResolvedValue(undefined);
     writePendingReference.mockResolvedValueOnce({
       filename: "x",
-      filePath: "x",
+      key: "Pending/Reference/x",
     });
 
     await runHnDistillWorkflow({
@@ -215,7 +215,7 @@ describe("runHnDistillWorkflow", () => {
     sendEmail.mockResolvedValue(undefined);
     writePendingReference.mockResolvedValueOnce({
       filename: "x",
-      filePath: "x",
+      key: "Pending/Reference/x",
     });
 
     await runHnDistillWorkflow({

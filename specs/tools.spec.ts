@@ -518,8 +518,9 @@ export const toolSpecs = {
       "(news.ycombinator.com/item?id=…) or a bare HN item id. " +
       "Fetches the linked article + the full comment tree via the HN Algolia API, " +
       "runs a single Claude Opus 4.7 distillation, emails the result (HTML + text), " +
-      "and saves a copy to Artifacts/Pending/Reference for vault review. " +
-      "Returns immediately; the user gets a Telegram follow-up when the email is sent.",
+      "and uploads a copy to the R2 vault bucket at Pending/Reference/ — Remotely Save " +
+      "pulls it into Obsidian and the periodic sync indexes it into the DB. " +
+      "Returns immediately; the user gets a Telegram follow-up when done.",
     params: z.object({
       url: z
         .string()

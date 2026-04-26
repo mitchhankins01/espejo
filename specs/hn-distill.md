@@ -52,7 +52,7 @@ runHnDistillWorkflow()
 | `src/hn/pricing.ts` | Per-million token rates + cost computation |
 | `src/hn/distill.ts` | Single Opus 4.7 call with the spec's system prompt |
 | `src/hn/email.ts` | Compose subject/text/HTML for the email |
-| `src/hn/vault.ts` | Write `Pending/Reference/HN-{date}-{slug}.md` with frontmatter |
+| `src/hn/vault.ts` | Upload `Pending/Reference/HN-{date}-{slug}.md` to the R2 vault bucket |
 | `src/hn/workflow.ts` | Orchestrator — fetch → distill → email → vault → notify |
 | `src/email/send.ts` | Generic Gmail SMTP wrapper, shared with `scripts/book/send.ts` |
 | `src/telegram/agent/context.ts` | New behavioral rule pointing the agent at the tool |
@@ -79,11 +79,14 @@ Quote sparingly, paraphrase by default. Skip generic agreement, jokes-without-in
 
 ## Vault copy
 
-- Path: `Artifacts/Pending/Reference/HN-{YYYY-MM-DD}-{slug}.md` (date in `config.timezone`)
-- Frontmatter: `kind: reference`, `status: pending`, `tags: [hn, ...]`
-- Title in first `# heading` (per project convention)
-- Body: distillation + footer with HN + article URLs
-- After Mitch reviews: delete OR move to `Artifacts/Reference/` and flip `status: approved`. The Obsidian sync picks the change up automatically.
+- **Storage**: uploaded to R2 bucket `artifacts` at key `Pending/Reference/HN-{YYYY-MM-DD}-{slug}.md` (date in `config.timezone`). This is the same bucket Remotely Save reads/writes from in Obsidian, so the file appears in Mitch's local vault on Remotely Save's next sync.
+- **DB indexing**: `src/obsidian/sync.ts` runs every 30 min, picks up the new key from R2, parses the frontmatter, upserts into `knowledge_artifacts` (status: pending). Can also be triggered on-demand via the `sync_obsidian_vault` MCP tool or `pnpm sync:obsidian`.
+- **Frontmatter**: `kind: reference`, `status: pending`, `tags: [hn, ...]`
+- **Title** in first `# heading` (per project convention)
+- **Body**: distillation + footer with HN + article URLs
+- **Review flow**: Mitch deletes OR moves to `Reference/` and flips `status: approved`. Remotely Save pushes the change back up to R2 → next sync indexes it.
+
+Why R2 instead of writing to a local `Artifacts/` symlink? The Telegram bot runs on Railway, where the container filesystem is ephemeral. R2 is the single source of truth that both the local Obsidian vault and the production DB sync read from.
 
 ## Configuration
 

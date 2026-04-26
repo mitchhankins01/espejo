@@ -176,6 +176,7 @@ scripts/
     council.mjs     — Stage 2: fans out Claude/Gemini/GPT in parallel, chunks GPT, validates JSON (pnpm dedup:council).
     synthesize.mjs  — Stage 3: tallies leg outputs, picks recommended merge bodies, writes synthesis.json + preview.md (pnpm dedup:synth).
     apply.mjs       — Stage 4: snapshot + inbound-wikilink rewrite + execute. Dry-run default; --apply to mutate (pnpm dedup:apply).
+    check-faithfulness.mjs — Optional: per-sentence cosine sim check that LLM merge bodies trace back to source/target content (pnpm dedup:check).
 specs/
   schema.sql        — Canonical DB schema.
   tools.spec.ts     — Tool contracts: params, types, descriptions, examples.
