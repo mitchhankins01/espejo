@@ -133,6 +133,10 @@ export const config = {
   gmail: {
     appPassword: process.env.GMAIL_APP_PASSWORD || "",
     fromEmail: process.env.GMAIL_FROM_EMAIL || "mitchhankins01@gmail.com",
+    toEmail:
+      process.env.GMAIL_TO_EMAIL ||
+      process.env.GMAIL_FROM_EMAIL ||
+      "mitchhankins01@gmail.com",
     kindleEmail:
       process.env.KINDLE_EMAIL || "mitchhankins01_Afzu6H@kindle.com",
   },

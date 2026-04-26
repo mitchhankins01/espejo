@@ -101,6 +101,7 @@ src/
     get-obsidian-sync-status.ts — Obsidian vault sync status.
     save-evening-review.ts — Save evening review as knowledge artifact.
     log-weights.ts  — Upsert one or more daily body-weight measurements (single or batch).
+    distill-hn-thread.ts — Distill a Hacker News thread (article + full Algolia comment tree) and email + save to Pending/Reference.
   telegram/
     webhook.ts      — Telegram webhook handler. Validates secret token, processes updates, routes commands.
     updates.ts      — Update deduplication, per-chat queue, fragment reassembly.

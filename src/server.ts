@@ -23,6 +23,7 @@ import { handleSyncObsidianVault } from "./tools/sync-obsidian-vault.js";
 import { handleGetObsidianSyncStatus } from "./tools/get-obsidian-sync-status.js";
 import { handleSaveEveningReview } from "./tools/save-evening-review.js";
 import { handleLogWeights } from "./tools/log-weights.js";
+import { handleDistillHnThread } from "./tools/distill-hn-thread.js";
 import { handleEveningReviewPrompt } from "./prompts/evening-review.js";
 
 export type McpSurface = "mcp-stdio" | "mcp-http";
@@ -52,6 +53,7 @@ export const toolHandlers: Record<string, ToolHandler> = {
   get_obsidian_sync_status: handleGetObsidianSyncStatus,
   save_evening_review: handleSaveEveningReview,
   log_weights: handleLogWeights,
+  distill_hn_thread: handleDistillHnThread,
 };
 
 export function createServer(

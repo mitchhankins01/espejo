@@ -1,5 +1,5 @@
-import nodemailer from "nodemailer";
 import { config } from "../../src/config.js";
+import { sendEmail } from "../../src/email/send.js";
 
 export interface SendParams {
   epubPath: string;
@@ -12,24 +12,7 @@ export async function sendToKindle({
   filename,
   subject,
 }: SendParams): Promise<void> {
-  if (!config.gmail.appPassword) {
-    throw new Error(
-      "GMAIL_APP_PASSWORD is not set. Add it to .env.local or run with --no-send."
-    );
-  }
-
-  const transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 465,
-    secure: true,
-    auth: {
-      user: config.gmail.fromEmail,
-      pass: config.gmail.appPassword,
-    },
-  });
-
-  await transporter.sendMail({
-    from: config.gmail.fromEmail,
+  await sendEmail({
     to: config.gmail.kindleEmail,
     subject,
     text: subject,

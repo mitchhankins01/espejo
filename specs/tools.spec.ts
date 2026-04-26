@@ -504,6 +504,43 @@ export const toolSpecs = {
     ],
   },
 
+  distill_hn_thread: {
+    name: "distill_hn_thread" as const,
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    } satisfies ToolAnnotations,
+    description:
+      "Distill a Hacker News thread into a signal-focused report and email it. " +
+      "Call this whenever the user shares a Hacker News URL " +
+      "(news.ycombinator.com/item?id=…) or a bare HN item id. " +
+      "Fetches the linked article + the full comment tree via the HN Algolia API, " +
+      "runs a single Claude Opus 4.7 distillation, emails the result (HTML + text), " +
+      "and saves a copy to Artifacts/Pending/Reference for vault review. " +
+      "Returns immediately; the user gets a Telegram follow-up when the email is sent.",
+    params: z.object({
+      url: z
+        .string()
+        .min(1)
+        .describe(
+          "HN thread URL (https://news.ycombinator.com/item?id=…) or a bare numeric item id"
+        ),
+    }),
+    examples: [
+      {
+        input: { url: "https://news.ycombinator.com/item?id=47892019" },
+        behavior:
+          "Kicks off distillation of item 47892019 in the background; replies 'Starting distillation…' immediately",
+      },
+      {
+        input: { url: "47892019" },
+        behavior: "Bare numeric id is also accepted",
+      },
+    ],
+  },
+
   save_evening_review: {
     name: "save_evening_review" as const,
     annotations: WRITE_IDEMPOTENT,
