@@ -1319,6 +1319,20 @@ const migrations: Migration[] = [
           ON agent_sessions USING GIN (tools_used);
     `,
   },
+  {
+    name: "043-agent-sessions-category",
+    getSql: () => `
+      ALTER TABLE agent_sessions
+        ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'mixed';
+
+      CREATE INDEX IF NOT EXISTS agent_sessions_category_idx
+          ON agent_sessions (category);
+
+      CREATE OR REPLACE VIEW reflection_sessions AS
+        SELECT * FROM agent_sessions
+         WHERE category IN ('reflection', 'mixed');
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

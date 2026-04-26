@@ -1,11 +1,13 @@
 import type pg from "pg";
 
 export type SessionSurface = "claude-code" | "opencode" | "codex";
+export type SessionCategory = "reflection" | "dev" | "automation" | "throwaway" | "mixed";
 
 export interface AgentSessionRow {
   surface: SessionSurface;
   session_id: string;
   project_path: string;
+  category: SessionCategory;
   started_at: Date;
   ended_at: Date | null;
   message_count: number;
@@ -31,17 +33,18 @@ export async function upsertSession(
 ): Promise<void> {
   await pool.query(
     `INSERT INTO agent_sessions
-       (surface, session_id, project_path, started_at, ended_at,
+       (surface, session_id, project_path, category, started_at, ended_at,
         message_count, user_msg_count, tool_call_count,
         tools_used, tool_calls, prompts, models,
         transcript_uri, source_mtime, ingested_at)
      VALUES
-       ($1, $2, $3, $4, $5,
-        $6, $7, $8,
-        $9, $10::jsonb, $11::jsonb, $12,
-        $13, $14, NOW())
+       ($1, $2, $3, $4, $5, $6,
+        $7, $8, $9,
+        $10, $11::jsonb, $12::jsonb, $13,
+        $14, $15, NOW())
      ON CONFLICT (surface, session_id) DO UPDATE SET
        project_path    = EXCLUDED.project_path,
+       category        = EXCLUDED.category,
        started_at      = EXCLUDED.started_at,
        ended_at        = EXCLUDED.ended_at,
        message_count   = EXCLUDED.message_count,
@@ -58,6 +61,7 @@ export async function upsertSession(
       row.surface,
       row.session_id,
       row.project_path,
+      row.category,
       row.started_at,
       row.ended_at,
       row.message_count,

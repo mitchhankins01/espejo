@@ -9,6 +9,7 @@ import {
   truncateArgs,
   truncateString,
   isEspejoPath,
+  categorizeSession,
   MAX_ERROR_BYTES,
   MAX_PROMPT_BYTES,
 } from "./types.js";
@@ -170,16 +171,28 @@ export async function parseClaudeCodeSessionFile(
   if (!firstTs) firstTs = fileMtime;
   if (!lastTs) lastTs = fileMtime;
 
+  const project_path = projectPath ?? "(unknown)";
+  const tools_used = [...tools].sort();
+  const category = categorizeSession({
+    project_path,
+    prompts,
+    tool_calls: toolCalls,
+    tools_used,
+    message_count: messageCount,
+    tool_call_count: toolCalls.length,
+  });
+
   return {
     surface: "claude-code",
     session_id: sessionId,
-    project_path: projectPath ?? "(unknown)",
+    project_path,
+    category,
     started_at: firstTs,
     ended_at: lastTs,
     message_count: messageCount,
     user_msg_count: userMsgCount,
     tool_call_count: toolCalls.length,
-    tools_used: [...tools].sort(),
+    tools_used,
     tool_calls: toolCalls,
     prompts,
     models: [...models].sort(),

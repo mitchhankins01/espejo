@@ -108,9 +108,10 @@ CREATE INDEX IF NOT EXISTS usage_logs_action_ts_idx
 
 CREATE TABLE IF NOT EXISTS agent_sessions (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    surface         TEXT NOT NULL,                  -- 'claude-code' | 'opencode'
+    surface         TEXT NOT NULL,                  -- 'claude-code' | 'opencode' | 'codex'
     session_id      TEXT NOT NULL,                  -- surface's native session UUID
     project_path    TEXT NOT NULL,                  -- decoded path the session was tied to
+    category        TEXT NOT NULL DEFAULT 'mixed',  -- 'reflection'|'dev'|'automation'|'throwaway'|'mixed'
     started_at      TIMESTAMPTZ NOT NULL,
     ended_at        TIMESTAMPTZ,
     message_count   INTEGER NOT NULL DEFAULT 0,
@@ -132,6 +133,16 @@ CREATE INDEX IF NOT EXISTS agent_sessions_project_idx
     ON agent_sessions (project_path);
 CREATE INDEX IF NOT EXISTS agent_sessions_tools_used_idx
     ON agent_sessions USING GIN (tools_used);
+CREATE INDEX IF NOT EXISTS agent_sessions_category_idx
+    ON agent_sessions (category);
+
+-- Canonical query surface for reflection/review/self-exploration analytics.
+-- Filters out dev work (touched src/ only), automation (programmatic invocations
+-- like dedup council legs), and throwaways. Use this view by default when
+-- querying for "how is espejo used".
+CREATE OR REPLACE VIEW reflection_sessions AS
+  SELECT * FROM agent_sessions
+   WHERE category IN ('reflection', 'mixed');
 
 CREATE TABLE IF NOT EXISTS _migrations (
     id SERIAL PRIMARY KEY,

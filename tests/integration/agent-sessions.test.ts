@@ -12,6 +12,7 @@ function makeRow(overrides: Partial<AgentSessionRow> = {}): AgentSessionRow {
     surface: "claude-code",
     session_id: "session-1",
     project_path: "/Users/mitch/Projects/espejo",
+    category: "reflection",
     started_at: new Date("2026-04-26T10:00:00.000Z"),
     ended_at: new Date("2026-04-26T10:30:00.000Z"),
     message_count: 5,

@@ -9,6 +9,7 @@ import {
   truncateArgs,
   truncateString,
   isEspejoPath,
+  categorizeSession,
   MAX_ERROR_BYTES,
   MAX_PROMPT_BYTES,
 } from "./types.js";
@@ -155,16 +156,27 @@ export function readOpencodeSessions(opts: {
         if (typeof model === "string" && model) models.add(model);
       }
 
+      const tools_used = [...tools].sort();
+      const category = categorizeSession({
+        project_path: projectPath,
+        prompts,
+        tool_calls: toolCalls,
+        tools_used,
+        message_count: messageCount,
+        tool_call_count: toolCalls.length,
+      });
+
       rows.push({
         surface: "opencode",
         session_id: s.id,
         project_path: projectPath,
+        category,
         started_at: startedAt,
         ended_at: endedAt,
         message_count: messageCount,
         user_msg_count: userMsgCount,
         tool_call_count: toolCalls.length,
-        tools_used: [...tools].sort(),
+        tools_used,
         tool_calls: toolCalls,
         prompts,
         models: [...models].sort(),

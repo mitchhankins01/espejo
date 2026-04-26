@@ -40,9 +40,12 @@ const has = (n: string) => args.includes(n);
 
 const dryRun = has("--dry-run");
 const force = has("--force");
+const includeNoise = has("--include-noise"); // keep dev/automation/throwaway rows
 const sinceArg = arg("--since");
 const surfaceArg = arg("--surface") as SessionSurface | null;
 const skipIfFresh = arg("--skip-if-fresh"); // e.g. "24h", "30m"
+
+const NOISE_CATEGORIES = new Set(["dev", "automation", "throwaway"]);
 
 function parseDuration(s: string): number {
   const m = s.match(/^(\d+)\s*([mhd])$/);
@@ -64,10 +67,16 @@ interface SurfaceStats {
   upserted: number;
   skipped: number;
   errors: number;
+  // Per-category counts of what we saw (whether kept or filtered)
+  categories: Record<string, number>;
+}
+
+function blankStats(): SurfaceStats {
+  return { scanned: 0, upserted: 0, skipped: 0, errors: 0, categories: {} };
 }
 
 async function ingestClaudeCode(sinceOverride: Date | null): Promise<SurfaceStats> {
-  const stats: SurfaceStats = { scanned: 0, upserted: 0, skipped: 0, errors: 0 };
+  const stats = blankStats();
   const since = sinceOverride ?? (force ? null : await latestSourceMtime(pool, "claude-code"));
   log(`claude-code: since = ${since?.toISOString() ?? "(beginning)"}`);
 
@@ -84,6 +93,11 @@ async function ingestClaudeCode(sinceOverride: Date | null): Promise<SurfaceStat
           stats.skipped++;
           continue;
         }
+        stats.categories[row.category] = (stats.categories[row.category] || 0) + 1;
+        if (!includeNoise && NOISE_CATEGORIES.has(row.category)) {
+          stats.skipped++;
+          continue;
+        }
         if (!dryRun) await upsertSession(pool, row);
         stats.upserted++;
       } catch (err) {
@@ -96,7 +110,7 @@ async function ingestClaudeCode(sinceOverride: Date | null): Promise<SurfaceStat
 }
 
 async function ingestCodex(sinceOverride: Date | null): Promise<SurfaceStats> {
-  const stats: SurfaceStats = { scanned: 0, upserted: 0, skipped: 0, errors: 0 };
+  const stats = blankStats();
   const since = sinceOverride ?? (force ? null : await latestSourceMtime(pool, "codex"));
   log(`codex: since = ${since?.toISOString() ?? "(beginning)"}`);
 
@@ -110,6 +124,11 @@ async function ingestCodex(sinceOverride: Date | null): Promise<SurfaceStats> {
         stats.skipped++; // not espejo or no session_meta
         continue;
       }
+      stats.categories[row.category] = (stats.categories[row.category] || 0) + 1;
+      if (!includeNoise && NOISE_CATEGORIES.has(row.category)) {
+        stats.skipped++;
+        continue;
+      }
       if (!dryRun) await upsertSession(pool, row);
       stats.upserted++;
     } catch (err) {
@@ -121,7 +140,7 @@ async function ingestCodex(sinceOverride: Date | null): Promise<SurfaceStats> {
 }
 
 async function ingestOpencode(sinceOverride: Date | null): Promise<SurfaceStats> {
-  const stats: SurfaceStats = { scanned: 0, upserted: 0, skipped: 0, errors: 0 };
+  const stats = blankStats();
   const since = sinceOverride ?? (force ? null : await latestSourceMtime(pool, "opencode"));
   log(`opencode: since (time_updated) = ${since?.toISOString() ?? "(beginning)"}`);
 
@@ -136,6 +155,11 @@ async function ingestOpencode(sinceOverride: Date | null): Promise<SurfaceStats>
   stats.scanned = rows.length;
   for (const row of rows) {
     try {
+      stats.categories[row.category] = (stats.categories[row.category] || 0) + 1;
+      if (!includeNoise && NOISE_CATEGORIES.has(row.category)) {
+        stats.skipped++;
+        continue;
+      }
       if (!dryRun) await upsertSession(pool, row);
       stats.upserted++;
     } catch (err) {
@@ -172,9 +196,9 @@ async function main(): Promise<void> {
   }
 
   const stats: Record<SessionSurface, SurfaceStats> = {
-    "claude-code": { scanned: 0, upserted: 0, skipped: 0, errors: 0 },
-    opencode: { scanned: 0, upserted: 0, skipped: 0, errors: 0 },
-    codex: { scanned: 0, upserted: 0, skipped: 0, errors: 0 },
+    "claude-code": blankStats(),
+    opencode: blankStats(),
+    codex: blankStats(),
   };
 
   if (!surfaceArg || surfaceArg === "claude-code") {

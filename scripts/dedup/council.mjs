@@ -126,6 +126,7 @@ function runProc(cmd, argv, stdinText, envOverride = {}) {
     proc.on("close", (code) => resolve({ code, stdout, stderr }));
     proc.on("error", (err) => resolve({ code: -1, stdout, stderr: String(err) }));
     if (stdinText) { proc.stdin.write(stdinText); proc.stdin.end(); }
+    else { proc.stdin.end(); }  // codex blocks forever on open-but-empty stdin
   });
 }
 
