@@ -153,33 +153,42 @@ src/
     search-results.ts — Ranked results with RRF score context.
 scripts/
   sync-dayone.ts    — DayOne.sqlite → PG. Idempotent (ON CONFLICT DO UPDATE).
-  embed-entries.ts  — Batch embed all entries missing embeddings.
-  migrate.ts        — Runs SQL files, tracks applied migrations in _migrations table.
-  import-verbs.ts   — Downloads Fred Jehle Spanish verb CSV, bulk inserts ~11k rows.
-  sync-weight.ts    — Sync weight data to production.
-  sync-oura.ts      — Backfill/sync Oura biometrics into Postgres (pnpm sync:oura).
   sync-obsidian.ts  — Trigger R2 → DB Obsidian sync on demand against prod (pnpm sync:obsidian). Callable by LLMs after vault edits.
+  sync-oura.ts      — Backfill/sync Oura biometrics into Postgres (pnpm sync:oura).
+  sync-weight.ts    — Sync weight data to production.
+  embed-entries.ts  — Batch embed all entries missing embeddings.
+  ingest-sessions.ts — Ingest Claude Code / OpenCode / Codex session metadata into agent_sessions (pnpm ingest:sessions). See specs/agent-sessions-ingestor.md.
+  import-lookups.ts — Bulk import Spanish verbs + Kindle lookups.
+  write-tomo.ts     — Write the Tomo prompt-doc artifact.
+  condense-insights.ts — Periodic condensation pass over insights.
+  reprocess-pending.ts — Re-run extraction on Artifacts/Pending entries.
+  migrate.ts        — Runs SQL files, tracks applied migrations in _migrations table.
+  migrate-entries-to-artifacts.ts — One-time migration of entries into knowledge artifacts.
+  migrate-llm-entries.ts — One-time migration for LLM-generated entries.
+  cleanup-llm-entries.ts — One-time cleanup for LLM-generated entries.
+  backfill-artifact-timestamps.ts — One-time backfill for artifact created_at/updated_at.
+  deploy-smoke.ts   — Post-deploy smoke test.
+  telegram-setup.ts — Set/check/delete Telegram webhook.
+  spec-plan.sh      — Wraps the planning workflow.
   dedup/
     retrieve.ts     — Stage 1: hybrid RRF over Insight ∪ Pending, emits dedup-plan.json (pnpm dedup:retrieve).
     council.mjs     — Stage 2: fans out Claude/Gemini/GPT in parallel, chunks GPT, validates JSON (pnpm dedup:council).
     synthesize.mjs  — Stage 3: tallies leg outputs, picks recommended merge bodies, writes synthesis.json + preview.md (pnpm dedup:synth).
     apply.mjs       — Stage 4: snapshot + inbound-wikilink rewrite + execute. Dry-run default; --apply to mutate (pnpm dedup:apply).
-  migrate-entries-to-artifacts.ts — One-time migration of entries into knowledge artifacts.
-  deploy-smoke.ts   — Post-deploy smoke test.
-  telegram-setup.ts — Set/check/delete Telegram webhook.
 specs/
   schema.sql        — Canonical DB schema.
   tools.spec.ts     — Tool contracts: params, types, descriptions, examples.
-  — Implemented specs:
-  spanish-learning.md, telegram-chatbot-plan.md, telegram-personality-plan.md,
+  — Implemented:
+  agent-sessions-ingestor.md, telegram-chatbot-plan.md, telegram-personality-plan.md,
   self-healing-organism.md, episodic-memory.md, memory-v2.md,
-  oura-integration-plan.md, knowledge-artifacts.md,
-  web-app.spec.md, web-quick-switcher.md,
-  web-semantic-links.md, web-graph-view.md, web-feature-rollout.md,
-  web-journaling.md
-  — Research: ltm-research.md
-  — Planned/Stub: aws-sst-migration-plan.md, chat-archive.md,
-  proactive-checkins.md, project-management.md
+  oura-integration-plan.md, knowledge-artifacts.md, insights-dedup-rewrite.md,
+  insight-engine.md
+  — Removed Features (specs kept for history; feature was removed in 2026-04):
+  web-app.spec.md, web-quick-switcher.md, web-semantic-links.md, web-graph-view.md,
+  web-feature-rollout.md, web-journaling.md, web-db-observability.md,
+  web-weight-tracking.md
+  — Research: ltm-research.md, refactor.md
+  — Planned/Stub: aws-sst-migration-plan.md, chat-archive.md, project-management.md
   fixtures/
     seed.ts         — Test data with pre-computed embeddings for determinism.
 docs/               — Deep documentation (see Deep Docs section below).
@@ -352,9 +361,24 @@ tags:
 - `status: pending` = excluded from semantic search until approved.
 - Tags are normalized to lowercase on sync.
 
-### User-defined slash commands
+### Reusable prompts (Artifacts/Prompt/)
 
-`Artifacts/Prompt/` is the canonical home for cross-tool prompts (`/load <topic>`, `/reflect`, `/evening-review`, dedup, midday parts checkin). When Mitch says "run the X prompt", read the matching file from `Artifacts/Prompt/` and execute — don't regenerate.
+`Artifacts/Prompt/` is the canonical home for cross-tool reusable prompts. Mitch invokes them by referring to the file in plain text — *"Run Artifacts/Prompt/Insights Dedup.md"* — not as slash commands. When you see that pattern, read the matching file and execute it; don't regenerate.
+
+Current inventory:
+
+| file | purpose |
+|---|---|
+| `Insights Dedup.md` | Stage-1-through-4 dedup pipeline orchestrator. References `scripts/dedup/`. |
+| `Insights Condense.md` | Periodic condensation of related insights into thematic clusters. |
+| `Evening Review.md` | End-of-day review prompt — closes the loop on the day's pulls/decisions. |
+| `Reviews.md` | Weekly/monthly review template (writes Review-kind artifacts). |
+| `Therapy.md` | Pre-therapy load + session-prep prompt. |
+| `Parts Check-in.md` | IFS midday parts checkin protocol. |
+| `Council Review.md` | Multi-model deliberation wrapper used by `Insights Dedup.md` and other workflows. |
+| `Write Tomo.md` | Generate the Tomo Spanish-tutor prompt-doc. |
+| `Import Kindle Lookups.md` | Pull Kindle vocab.db highlights into the vault. |
+| `Insights Dedup 1.md` | Legacy variant of the dedup prompt; superseded by `Insights Dedup.md`. |
 
 ### SOP: Pending → Insight dedup
 
