@@ -22,9 +22,12 @@ const HTML_SHELL = (title: string, body: string): string => `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
 <title>${escapeHtml(title)}</title>
 <style>
-  body { -webkit-text-size-adjust:100%; }
+  :root { color-scheme: light dark; supported-color-schemes: light dark; }
+  body { -webkit-text-size-adjust:100%; background:#ffffff; color:#1a1a1a; }
   h1 { font-size:19px; font-weight:600; line-height:1.3; margin:0 0 16px; letter-spacing:-0.01em; }
   h2 { font-size:16px; font-weight:600; line-height:1.3; margin:22px 0 8px; }
   h3 { font-size:15px; font-weight:600; line-height:1.3; margin:18px 0 6px; }
@@ -34,10 +37,22 @@ const HTML_SHELL = (title: string, body: string): string => `<!doctype html>
   hr { border:none; border-top:1px solid #d1d5db; margin:22px 0; }
   a { color:#2563eb; }
   blockquote { margin:0 0 12px; padding-left:12px; border-left:3px solid #d1d5db; color:#4b5563; }
-  code { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13.5px; }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13.5px; background:#f3f4f6; padding:1px 4px; border-radius:3px; }
+  .footer { font-size:12.5px; color:#6b7280; margin:0; }
+  .footer a { color:#6b7280; text-decoration:underline; }
+  @media (prefers-color-scheme: dark) {
+    body { background:#1c1c1e !important; color:#e5e7eb !important; }
+    h1, h2, h3 { color:#f3f4f6 !important; }
+    hr { border-top-color:#3f3f46 !important; }
+    a { color:#7aa7ff !important; }
+    blockquote { border-left-color:#3f3f46 !important; color:#9ca3af !important; }
+    code { background:#27272a !important; color:#e5e7eb !important; }
+    .footer { color:#9ca3af !important; }
+    .footer a { color:#9ca3af !important; }
+  }
 </style>
 </head>
-<body style="margin:0; padding:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; color:#1a1a1a; line-height:1.55; font-size:16px;">
+<body style="margin:0; padding:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; line-height:1.55; font-size:16px;">
   <div style="max-width:640px; margin:0 auto; padding:14px 16px;">
     <h1>${escapeHtml(title)}</h1>
     ${body}
@@ -55,21 +70,18 @@ function escapeHtml(s: string): string {
 }
 
 function buildFooterHtml(input: ComposeEmailInput): string {
-  const linkStyle = "color:#6b7280; text-decoration:underline;";
   const links: string[] = [];
-  links.push(
-    `<a href="${escapeHtml(input.hnUrl)}" style="${linkStyle}">HN thread</a>`
-  );
+  links.push(`<a href="${escapeHtml(input.hnUrl)}">HN thread</a>`);
   if (input.articleUrl) {
     links.push(
-      `<a href="${escapeHtml(input.articleUrl)}" style="${linkStyle}">Original article</a>`
+      `<a href="${escapeHtml(input.articleUrl)}">Original article</a>`
     );
   }
   const costLine =
     `${formatCost(input.cost.totalCostUsd)} ` +
     `(${input.usage.inputTokens.toLocaleString()} in / ${input.usage.outputTokens.toLocaleString()} out · ${escapeHtml(input.model)})`;
   return `<hr>
-    <p style="font-size:12.5px; color:#6b7280; margin:0;">
+    <p class="footer">
       ${links.join(" · ")}<br>
       <em>${escapeHtml(costLine)}</em>
     </p>`;
