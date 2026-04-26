@@ -148,6 +148,7 @@ scripts/
   import-verbs.ts   — Downloads Fred Jehle Spanish verb CSV, bulk inserts ~11k rows.
   sync-weight.ts    — Sync weight data to production.
   sync-oura.ts      — Backfill/sync Oura biometrics into Postgres (pnpm sync:oura).
+  sync-obsidian.ts  — Trigger R2 → DB Obsidian sync on demand against prod (pnpm sync:obsidian). Callable by LLMs after vault edits.
   migrate-entries-to-artifacts.ts — One-time migration of entries into knowledge artifacts.
   deploy-smoke.ts   — Post-deploy smoke test.
   telegram-setup.ts — Set/check/delete Telegram webhook.
@@ -374,7 +375,7 @@ Then `$PSQL "$PGURL"` + OpenAI embeddings API (`text-embedding-3-small` — same
 ### Vault ↔ DB sync
 
 - Vault → R2: Remotely Save auto-syncs on edit.
-- R2 → DB: `sync_obsidian_vault` MCP tool or the timer in `src/obsidian/sync.ts`.
+- R2 → DB: `sync_obsidian_vault` MCP tool, the timer in `src/obsidian/sync.ts`, or `pnpm sync:obsidian` (production, on-demand — preferred for LLM sessions that just edited the vault and want to land changes in DB without waiting for the timer).
 - Status: `get_obsidian_sync_status` MCP tool.
 
 ### Writing notes — don'ts

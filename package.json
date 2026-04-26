@@ -39,6 +39,7 @@
     "telegram:setup": "tsx scripts/telegram-setup.ts",
     "deploy:smoke": "tsx scripts/deploy-smoke.ts",
     "sync:oura": "tsx scripts/sync-oura.ts",
+    "sync:obsidian": "NODE_ENV=production tsx scripts/sync-obsidian.ts",
     "backup:prod": "source .env.production.local && pg_dump \"$DATABASE_URL\" --format=custom --file=backup_$(date +%Y%m%d).dump",
     "spec:plan": "bash scripts/spec-plan.sh",
     "write-tomo": "NODE_ENV=production tsx scripts/write-tomo.ts",
