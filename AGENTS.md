@@ -149,6 +149,11 @@ scripts/
   sync-weight.ts    — Sync weight data to production.
   sync-oura.ts      — Backfill/sync Oura biometrics into Postgres (pnpm sync:oura).
   sync-obsidian.ts  — Trigger R2 → DB Obsidian sync on demand against prod (pnpm sync:obsidian). Callable by LLMs after vault edits.
+  dedup/
+    retrieve.ts     — Stage 1: hybrid RRF over Insight ∪ Pending, emits dedup-plan.json (pnpm dedup:retrieve).
+    council.mjs     — Stage 2: fans out Claude/Gemini/GPT in parallel, chunks GPT, validates JSON (pnpm dedup:council).
+    synthesize.mjs  — Stage 3: tallies leg outputs, picks recommended merge bodies, writes synthesis.json + preview.md (pnpm dedup:synth).
+    apply.mjs       — Stage 4: snapshot + inbound-wikilink rewrite + execute. Dry-run default; --apply to mutate (pnpm dedup:apply).
   migrate-entries-to-artifacts.ts — One-time migration of entries into knowledge artifacts.
   deploy-smoke.ts   — Post-deploy smoke test.
   telegram-setup.ts — Set/check/delete Telegram webhook.
