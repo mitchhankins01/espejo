@@ -269,6 +269,30 @@ const STREAM_EDIT_INTERVAL_MS = 1200;
 const STREAM_EDIT_MAX_CHARS = 4000;
 
 /**
+ * Sanitize a streaming snapshot for plain-text display. Mid-flight, the
+ * model may have emitted half-formed HTML tags (`<b`, `</i`) or entities
+ * (`&am`) that Telegram would render as literal junk since we deliberately
+ * send streaming edits without `parse_mode` (final edit applies HTML).
+ * Strip complete tags, decode common entities, and trim any trailing
+ * partials so the user only ever sees clean text.
+ */
+export function normalizeStreamSnapshot(text: string): string {
+  let out = text.replace(/<\/?[a-zA-Z][^<>]*>/g, "");
+  // Strip trailing partial entity BEFORE decoding so a literal "&" produced
+  // by an earlier decode (e.g. "R&D" from "R&amp;D") isn't re-eaten.
+  out = out.replace(/&[a-zA-Z#0-9]{0,6}$/, "");
+  out = out
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+  out = out.replace(/<\/?[a-zA-Z][^<>]*$/, "");
+  out = out.replace(/<\/?$/, "");
+  return out;
+}
+
+/**
  * Build a throttled editor for an in-flight Telegram message. Calls to the
  * returned `update(text)` are coalesced — at most one edit per
  * STREAM_EDIT_INTERVAL_MS, with the latest snapshot. `flush()` forces the
@@ -310,13 +334,16 @@ export function createStreamEditor(
   }
 
   function update(text: string): void {
+    // Sanitize partial HTML/entities first — the streaming preview goes
+    // out without parse_mode, so half-tags must not be visible.
+    const cleaned = normalizeStreamSnapshot(text);
     // Telegram caps message text at 4096 chars; clip preview so partial
     // streams never blow the limit. Final flush from caller passes the
     // full text (still subject to clip — practice replies are short).
     const clipped =
-      text.length > STREAM_EDIT_MAX_CHARS
-        ? text.slice(0, STREAM_EDIT_MAX_CHARS) + "…"
-        : text;
+      cleaned.length > STREAM_EDIT_MAX_CHARS
+        ? cleaned.slice(0, STREAM_EDIT_MAX_CHARS) + "…"
+        : cleaned;
     if (clipped === lastSent) return;
     pendingText = clipped;
     scheduleSend();

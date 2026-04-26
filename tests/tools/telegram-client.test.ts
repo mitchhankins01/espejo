@@ -18,6 +18,7 @@ import {
   sendTelegramMessageReturningId,
   editTelegramMessageText,
   createStreamEditor,
+  normalizeStreamSnapshot,
 } from "../../src/telegram/client.js";
 
 let fetchSpy: ReturnType<typeof vi.spyOn>;
@@ -452,6 +453,37 @@ describe("editTelegramMessageText", () => {
   });
 });
 
+describe("normalizeStreamSnapshot", () => {
+  it("strips complete tags inline", () => {
+    expect(normalizeStreamSnapshot("Hola, <b>qué</b> tal")).toBe("Hola, qué tal");
+    expect(normalizeStreamSnapshot("<i>vale</i> <b>bien</b>")).toBe("vale bien");
+  });
+
+  it("strips a trailing partial open tag", () => {
+    expect(normalizeStreamSnapshot("Hola, <b")).toBe("Hola, ");
+    expect(normalizeStreamSnapshot("Hola <a hr")).toBe("Hola ");
+    expect(normalizeStreamSnapshot("Mid </")).toBe("Mid ");
+    expect(normalizeStreamSnapshot("Trail <")).toBe("Trail ");
+  });
+
+  it("decodes common HTML entities", () => {
+    expect(normalizeStreamSnapshot("R&amp;D")).toBe("R&D");
+    expect(normalizeStreamSnapshot("a &lt;b&gt; c")).toBe("a <b> c");
+    expect(normalizeStreamSnapshot("&quot;hola&quot;")).toBe('"hola"');
+    expect(normalizeStreamSnapshot("It&#39;s fine")).toBe("It's fine");
+  });
+
+  it("strips a trailing partial entity", () => {
+    expect(normalizeStreamSnapshot("Tail &")).toBe("Tail ");
+    expect(normalizeStreamSnapshot("Tail &am")).toBe("Tail ");
+    expect(normalizeStreamSnapshot("Tail &lt")).toBe("Tail ");
+  });
+
+  it("leaves clean text untouched", () => {
+    expect(normalizeStreamSnapshot("Hola, ¿cómo estás?")).toBe("Hola, ¿cómo estás?");
+  });
+});
+
 describe("createStreamEditor", () => {
   it("sends the first update immediately and coalesces rapid follow-ups", async () => {
     fetchSpy.mockResolvedValue(okResponse());
@@ -516,6 +548,19 @@ describe("createStreamEditor", () => {
     update("hi");
     await vi.advanceTimersByTimeAsync(2000);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    await flush();
+  });
+
+  it("sanitizes partial HTML before sending an edit", async () => {
+    fetchSpy.mockResolvedValue(okResponse());
+    const { update, flush } = createStreamEditor("12345", 7777, 1000);
+
+    update("Hola, <b>qué tal");
+    await vi.advanceTimersByTimeAsync(0);
+
+    const body = JSON.parse(fetchSpy.mock.calls[0][1]!.body as string);
+    expect(body.text).toBe("Hola, qué tal");
 
     await flush();
   });
