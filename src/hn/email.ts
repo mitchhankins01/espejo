@@ -23,10 +23,23 @@ const HTML_SHELL = (title: string, body: string): string => `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
+<style>
+  body { -webkit-text-size-adjust:100%; }
+  h1 { font-size:19px; font-weight:600; line-height:1.3; margin:0 0 16px; letter-spacing:-0.01em; }
+  h2 { font-size:16px; font-weight:600; line-height:1.3; margin:22px 0 8px; }
+  h3 { font-size:15px; font-weight:600; line-height:1.3; margin:18px 0 6px; }
+  p { margin:0 0 12px; }
+  ul, ol { margin:0 0 12px; padding-left:22px; }
+  li { margin:0 0 4px; }
+  hr { border:none; border-top:1px solid #d1d5db; margin:22px 0; }
+  a { color:#2563eb; }
+  blockquote { margin:0 0 12px; padding-left:12px; border-left:3px solid #d1d5db; color:#4b5563; }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13.5px; }
+</style>
 </head>
-<body style="margin:0; padding:24px; background:#f6f7f9; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; color:#1a1a1a; -webkit-text-size-adjust:100%;">
-  <div style="max-width:680px; margin:0 auto; background:#ffffff; padding:32px 36px; border-radius:10px; box-shadow:0 1px 3px rgba(0,0,0,0.06); line-height:1.6; font-size:16px;">
-    <h1 style="margin:0 0 24px; font-size:22px; line-height:1.3; font-weight:600; letter-spacing:-0.01em;">${escapeHtml(title)}</h1>
+<body style="margin:0; padding:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; color:#1a1a1a; line-height:1.55; font-size:16px;">
+  <div style="max-width:640px; margin:0 auto; padding:14px 16px;">
+    <h1>${escapeHtml(title)}</h1>
     ${body}
   </div>
 </body>
@@ -55,8 +68,8 @@ function buildFooterHtml(input: ComposeEmailInput): string {
   const costLine =
     `${formatCost(input.cost.totalCostUsd)} ` +
     `(${input.usage.inputTokens.toLocaleString()} in / ${input.usage.outputTokens.toLocaleString()} out · ${escapeHtml(input.model)})`;
-  return `<hr style="border:none; border-top:1px solid #e5e7eb; margin:32px 0 16px;">
-    <p style="font-size:13px; color:#6b7280; margin:0;">
+  return `<hr>
+    <p style="font-size:12.5px; color:#6b7280; margin:0;">
       ${links.join(" · ")}<br>
       <em>${escapeHtml(costLine)}</em>
     </p>`;
