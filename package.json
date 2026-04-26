@@ -40,6 +40,7 @@
     "deploy:smoke": "tsx scripts/deploy-smoke.ts",
     "sync:oura": "tsx scripts/sync-oura.ts",
     "sync:obsidian": "NODE_ENV=production tsx scripts/sync-obsidian.ts",
+    "ingest:sessions": "NODE_ENV=production tsx scripts/ingest-sessions.ts",
     "dedup:retrieve": "NODE_ENV=production tsx scripts/dedup/retrieve.ts",
     "dedup:council": "node scripts/dedup/council.mjs",
     "dedup:synth": "node scripts/dedup/synthesize.mjs",

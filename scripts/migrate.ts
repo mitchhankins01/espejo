@@ -1288,6 +1288,37 @@ const migrations: Migration[] = [
           ON usage_logs (action, ts DESC);
     `,
   },
+  {
+    name: "042-agent-sessions",
+    getSql: () => `
+      CREATE TABLE IF NOT EXISTS agent_sessions (
+          id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          surface         TEXT NOT NULL,
+          session_id      TEXT NOT NULL,
+          project_path    TEXT NOT NULL,
+          started_at      TIMESTAMPTZ NOT NULL,
+          ended_at        TIMESTAMPTZ,
+          message_count   INTEGER NOT NULL DEFAULT 0,
+          user_msg_count  INTEGER NOT NULL DEFAULT 0,
+          tool_call_count INTEGER NOT NULL DEFAULT 0,
+          tools_used      TEXT[]  NOT NULL DEFAULT '{}',
+          tool_calls      JSONB   NOT NULL DEFAULT '[]',
+          prompts         JSONB   NOT NULL DEFAULT '[]',
+          models          TEXT[]  NOT NULL DEFAULT '{}',
+          transcript_uri  TEXT,
+          source_mtime    TIMESTAMPTZ,
+          ingested_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (surface, session_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS agent_sessions_started_at_idx
+          ON agent_sessions (started_at DESC);
+      CREATE INDEX IF NOT EXISTS agent_sessions_project_idx
+          ON agent_sessions (project_path);
+      CREATE INDEX IF NOT EXISTS agent_sessions_tools_used_idx
+          ON agent_sessions USING GIN (tools_used);
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

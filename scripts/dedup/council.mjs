@@ -181,8 +181,13 @@ async function legGpt() {
   const all = [];
   for (let i = 0; i < chunks.length; i++) {
     const input = buildInput(chunks[i]);
+    // Override user's xhigh reasoning effort — pair classification is a simple
+    // JSON-out task and xhigh stalls past 15min on ~12-item chunks.
     const r = await runProc("codex", [
-      "exec", "--skip-git-repo-check", "-m", "gpt-5.5", input,
+      "exec", "--skip-git-repo-check",
+      "-m", "gpt-5.5",
+      "-c", "model_reasoning_effort=\"medium\"",
+      input,
     ], null);
     writeFileSync(`${outDir}/gpt-chunk-${i}.raw.txt`, r.stdout);
     if (r.code !== 0) {

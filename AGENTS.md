@@ -2,6 +2,16 @@
 
 MCP server + Telegram chatbot for semantic journal search over Day One exports in PostgreSQL + pgvector.
 
+## Session Init — Run This First
+
+When you (Claude Code, OpenCode, Codex, or any other agent) open or start working in this directory, run:
+
+```bash
+pnpm ingest:sessions --skip-if-fresh 24h
+```
+
+This is a no-op if a successful run completed in the last 24 hours. Otherwise it captures Claude Code and OpenCode session logs into the `agent_sessions` table so usage analytics ("how is espejo used? what value does it provide?") have data to draw on. See `specs/agent-sessions-ingestor.md`.
+
 ## Development Loop
 
 After EVERY code change, run:

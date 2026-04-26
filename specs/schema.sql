@@ -101,6 +101,38 @@ CREATE INDEX IF NOT EXISTS usage_logs_source_ts_idx
 CREATE INDEX IF NOT EXISTS usage_logs_action_ts_idx
     ON usage_logs (action, ts DESC);
 
+-- ============================================================================
+-- agent_sessions: Claude Code / OpenCode session metadata for usage analytics.
+-- See specs/agent-sessions-ingestor.md.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS agent_sessions (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    surface         TEXT NOT NULL,                  -- 'claude-code' | 'opencode'
+    session_id      TEXT NOT NULL,                  -- surface's native session UUID
+    project_path    TEXT NOT NULL,                  -- decoded path the session was tied to
+    started_at      TIMESTAMPTZ NOT NULL,
+    ended_at        TIMESTAMPTZ,
+    message_count   INTEGER NOT NULL DEFAULT 0,
+    user_msg_count  INTEGER NOT NULL DEFAULT 0,
+    tool_call_count INTEGER NOT NULL DEFAULT 0,
+    tools_used      TEXT[]  NOT NULL DEFAULT '{}',  -- distinct tool names
+    tool_calls      JSONB   NOT NULL DEFAULT '[]',  -- [{name, args, ok, ts, error?, truncated?}]
+    prompts         JSONB   NOT NULL DEFAULT '[]',  -- [{ts, text}] user messages only
+    models          TEXT[]  NOT NULL DEFAULT '{}',
+    transcript_uri  TEXT,
+    source_mtime    TIMESTAMPTZ,
+    ingested_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (surface, session_id)
+);
+
+CREATE INDEX IF NOT EXISTS agent_sessions_started_at_idx
+    ON agent_sessions (started_at DESC);
+CREATE INDEX IF NOT EXISTS agent_sessions_project_idx
+    ON agent_sessions (project_path);
+CREATE INDEX IF NOT EXISTS agent_sessions_tools_used_idx
+    ON agent_sessions USING GIN (tools_used);
+
 CREATE TABLE IF NOT EXISTS _migrations (
     id SERIAL PRIMARY KEY,
     name TEXT UNIQUE NOT NULL,
