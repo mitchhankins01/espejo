@@ -38,6 +38,15 @@ import { buildSpanishPracticeSystemPrompt } from "../prompts/spanish-practice.js
 
 const TYPING_HEARTBEAT_MS = 4500;
 const ACTIVITY_DETAIL_CALLBACK_PREFIX = "activity_detail:";
+const END_PRACTICE_ALIASES = new Set([
+  "done",
+  "end",
+  "stop",
+  "finish",
+  "terminar",
+  "listo",
+  "fin",
+]);
 
 interface InlineKeyboardButton {
   text: string;
@@ -408,7 +417,7 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
     }
 
     // Handle /done command — end active Spanish practice session and run extraction
-    if (command?.name === "done") {
+    if (command?.name && END_PRACTICE_ALIASES.has(command.name)) {
       const session = endPracticeSession(chatId);
       if (!session) {
         await sendAndStoreResponse(

@@ -857,6 +857,17 @@ describe("/done command", () => {
       expect.stringContaining("Extraction failed: LLM down")
     );
   });
+
+  it.each(["/end", "/stop", "/finish", "/terminar", "/listo", "/fin"])(
+    "treats %s as an alias for /done",
+    async (alias) => {
+      const handler = getHandler();
+      await handler({ chatId: 100, text: alias, messageId: 1, date: 1000 });
+
+      expect(mockEndPracticeSession).toHaveBeenCalledWith("100");
+      expect(mockRunPracticeExtraction).toHaveBeenCalled();
+    }
+  );
 });
 
 describe("active practice session routing", () => {

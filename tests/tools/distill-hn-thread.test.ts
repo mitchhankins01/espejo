@@ -55,4 +55,16 @@ describe("handleDistillHnThread", () => {
     ).rejects.toThrow(/Not a Hacker News URL/);
     expect(runHnDistillWorkflow).not.toHaveBeenCalled();
   });
+
+  it("dedupes a re-fire of the same itemId within the TTL window", async () => {
+    const url = "https://news.ycombinator.com/item?id=99999001";
+
+    const first = await handleDistillHnThread(mockPool, { url });
+    expect(first).toContain("Starting distillation");
+    expect(runHnDistillWorkflow).toHaveBeenCalledTimes(1);
+
+    const second = await handleDistillHnThread(mockPool, { url });
+    expect(second).toContain("already being distilled");
+    expect(runHnDistillWorkflow).toHaveBeenCalledTimes(1);
+  });
 });
