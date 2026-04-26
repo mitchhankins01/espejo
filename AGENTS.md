@@ -276,8 +276,26 @@ Any time you commit and push directly to `main`, follow this order:
    ```bash
    NODE_ENV=production DATABASE_URL=<railway_url> pnpm migrate
    ```
-3. Push `main`.
-4. Watch Railway deployment to completion immediately after push (Railway dashboard/logs) and confirm it succeeds.
+3. Push `main`. Capture the SHA: `SHA=$(git rev-parse HEAD)`.
+4. Watch Railway deployment to completion. Match by **commit SHA**, not by log timestamps:
+   ```bash
+   # Poll until the latest deployment matches the pushed SHA and reaches a terminal state.
+   # Statuses: SUCCESS | FAILED | CRASHED | REMOVED | BUILDING | DEPLOYING | INITIALIZING | QUEUED
+   until out=$(railway deployment list --json --limit 1 2>/dev/null) \
+     && [ "$(jq -r '.[0].meta.commitHash' <<<"$out")" = "$SHA" ] \
+     && jq -e '.[0].status | IN("SUCCESS","FAILED","CRASHED")' <<<"$out" >/dev/null; do
+     sleep 10
+   done
+   jq -r '.[0] | "\(.status) \(.id) commit=\(.meta.commitHash[0:7])"' <<<"$out"
+   ```
+   On `SUCCESS`, hit `/health` to confirm: `curl -s https://espejo-production.up.railway.app/health`.
+   On `FAILED` / `CRASHED`, pull build + deploy logs for that exact deployment ID:
+   ```bash
+   railway logs --build <id> --lines 200
+   railway logs --deployment <id> --lines 200
+   ```
+
+   Why match on SHA: `railway logs --deployment` (no ID) streams the *currently active* container, which until cutover is still the *previous* deploy. Comparing log-line timestamps against `date -u` is brittle (already-booted prior deploys look "recent"). The deployment list is the canonical state: each row carries `meta.commitHash` and a `status` field, so SHA equality + terminal status is unambiguous.
 
 ## Code Style
 
