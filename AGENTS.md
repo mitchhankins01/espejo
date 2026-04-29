@@ -462,6 +462,8 @@ Then `$PSQL "$PGURL"` + OpenAI embeddings API (`text-embedding-3-small` — same
   - Claude Code prompt history: `~/.claude/history.jsonl` (filter by `project`)
   - OpenCode DB: `~/.local/share/opencode/opencode.db` (tables: `session`, `message`, `part`)
   - OpenCode prompt history: `~/.local/state/opencode/prompt-history.jsonl`
+- **Slash commands need a session restart.** New `.claude/commands/*.md` files don't register until Claude Code reloads — `/name` returns "Unknown command" until then. Same for edits to existing command files (the body is read at registration time).
+- **`CLAUDE.md` is a symlink to `AGENTS.md`.** Edits to "CLAUDE.md" land in AGENTS.md and that's where `git diff` shows them. Edit AGENTS.md directly to avoid confusion.
 
 ## Deep Docs
 
