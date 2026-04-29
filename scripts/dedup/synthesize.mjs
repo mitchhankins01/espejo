@@ -26,6 +26,9 @@ if (!outDir) { console.error("usage: synthesize.mjs <outDir>"); process.exit(1);
 
 const manifest = JSON.parse(readFileSync(`${outDir}/manifest.json`, "utf8"));
 const planFull = JSON.parse(readFileSync(manifest.plan_path, "utf8"));
+// Mode A (pending): Distinct = promote Pending→Insight (`mv` + emoji 📤)
+// Mode B (existing): Distinct = no-op, both files stay as-is
+const modeIsB = planFull.mode === "existing";
 
 // Vault root for reading body files (referenced in preview)
 const VAULT = "/Users/mitch/Projects/espejo/Artifacts";
@@ -170,14 +173,19 @@ md += `| # | Action | Source | Target | Consensus | C/G/T | ⭐ |\n|---:|---|---
 let i = 0;
 for (const s of synth) {
   i++;
-  const emoji = { Duplicate: "🗑️ delete", Merge: "🔀 merge", Distinct: "📤 promote" }[s.final_action];
+  const distinctLabel = modeIsB ? "📋 keep both" : "📤 promote";
+  const emoji = { Duplicate: "🗑️ delete", Merge: "🔀 merge", Distinct: distinctLabel }[s.final_action];
   const tally = activeLegs.map(l => (s.classifications[l]?.class || "–")[0]).join("/");
   const star = s.final_action === "Merge" ? (s.recommended_pick === "DEFER" ? "⚠️ defer" : (s.recommended_pick || "?")) : "";
   md += `| ${i} | ${emoji} | \`${shortSrc(s.source_path)}\` | \`${shortSrc(s.final_target)}\` | ${s.consensus} | ${tally} | ${star} |\n`;
 }
 md += `\n**Counts:** auto-safe ${counts.auto_safe_dup + counts.auto_safe_merge + counts.auto_safe_distinct} (${counts.auto_safe_dup} dup + ${counts.auto_safe_merge} merge + ${counts.auto_safe_distinct} distinct) | likely-safe ${counts.likely_safe_dup + counts.likely_safe_merge + counts.likely_safe_distinct} | needs-review ${counts.needs_review}\n\n`;
 
-md += `**Legend:** 🗑️ = delete source, 📤 = mv Pending → Insight, 🔀 = rewrite target body + delete source. ⭐ column = which model's merge body is recommended (heuristic: most wikilinks).\n\n---\n\n`;
+const distinctLegend = modeIsB
+  ? "📋 = no action (Mode B: both files already in Insight/, stay as-is)"
+  : "📤 = mv Pending → Insight";
+md += `**Mode:** ${modeIsB ? "B (existing-pairwise sweep within Insight/)" : "A (pending → Insight)"}\n\n`;
+md += `**Legend:** 🗑️ = delete source, ${distinctLegend}, 🔀 = rewrite target body + delete source. ⭐ column = which model's merge body is recommended (heuristic: most wikilinks).\n\n---\n\n`;
 
 // Phase tables — non-Merge actions need no body
 const dupActions = synth.filter(s => s.final_action === "Duplicate");
@@ -193,12 +201,21 @@ for (const s of dupActions) {
 }
 md += `\n---\n\n`;
 
-md += `## Promotions (${distActions.length}) — Distinct\n\n`;
-md += `Each is \`mv Pending/<x>.md → Insight/<x>.md\` (collision-checked).\n\n`;
-md += `| # | Source | Consensus |\n|---:|---|---|\n`;
+if (modeIsB) {
+  md += `## Distinct (${distActions.length}) — NO ACTION\n\n`;
+  md += `Mode B sweep within \`Insight/\`. These pairs were judged covering different points despite overlap. Both files stay as-is.\n\n`;
+  md += `| # | Source (kept) | Consensus |\n|---:|---|---|\n`;
+} else {
+  md += `## Promotions (${distActions.length}) — Distinct\n\n`;
+  md += `Each is \`mv Pending/<x>.md → Insight/<x>.md\` (collision-checked).\n\n`;
+  md += `| # | Source | Consensus |\n|---:|---|---|\n`;
+}
 i = 0;
 for (const s of distActions) {
   i++;
+  // In Mode B, final_target is null for Distinct (no merge target chosen); the
+  // pair member is implicit in the retrieval plan but not preserved per-case.
+  // Leave as a single-column listing.
   md += `| ${i} | \`${shortSrc(s.source_path)}\` | ${s.consensus} |\n`;
 }
 md += `\n---\n\n`;

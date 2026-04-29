@@ -148,6 +148,10 @@ function rm(rel) {
 
 function mv(srcRel, dstRel) {
   if (!existsSync(fp(srcRel))) { log(`  SKIP mv (gone): ${srcRel}`); return; }
+  // No-op when src and dst are identical (e.g. Mode B Distinct case where the
+  // Pending→Insight prefix swap is a no-op). Without this guard, the collision
+  // branch below would rename the file to itself with a -1 suffix.
+  if (srcRel === dstRel) { log(`  SKIP mv (src == dst): ${srcRel}`); return; }
   let target = dstRel;
   if (existsSync(fp(target))) {
     target = target.replace(/\.md$/, "-1.md");
@@ -163,15 +167,18 @@ const plan = synth.plan.filter(s => skipLikely ? s.consensus === "auto_safe" : s
 console.log(`Plan: ${plan.length}/${synth.plan.length} actions (${dryRun ? "DRY RUN" : "APPLY"}${skipLikely ? ", auto-safe only" : ""})`);
 takeSnapshot(plan);
 
-const promotes = plan.filter(s => s.final_action === "Distinct");
-const dups     = plan.filter(s => s.final_action === "Duplicate");
-const merges   = plan.filter(s => s.final_action === "Merge");
+const distincts = plan.filter(s => s.final_action === "Distinct");
+const dups      = plan.filter(s => s.final_action === "Duplicate");
+const merges    = plan.filter(s => s.final_action === "Merge");
 
 console.log();
-console.log(`=== Promotions (${promotes.length}) ===`);
-for (const s of promotes) {
-  log(`Promote ${s.source_path}`);
-  // Promote = mv Pending → Insight (or keep folder if source is Pending vs Pending dup'd elsewhere)
+// In Mode A, Distinct sources live in Pending/ and the Pending→Insight rewrite
+// promotes them. In Mode B, sources are already in Insight/ so the prefix swap
+// is a no-op and the file is left in place. Same code path covers both — the
+// `mv` helper detects src == dst and skips.
+console.log(`=== Distinct (${distincts.length}) — promote Pending→Insight, no-op in Mode B ===`);
+for (const s of distincts) {
+  log(`Distinct ${s.source_path}`);
   const dst = s.source_path.replace(/^Pending\//, "Insight/");
   mv(s.source_path, dst);
 }
