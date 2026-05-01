@@ -234,7 +234,7 @@ CREATE TABLE IF NOT EXISTS oura_sleep_sessions (
     average_hrv DOUBLE PRECISION,
     average_heart_rate DOUBLE PRECISION,
     lowest_heart_rate INT,
-    average_breath NUMERIC(5,2),
+    average_breath DOUBLE PRECISION,
     total_sleep_duration_seconds INT,
     time_in_bed_seconds INT,
     awake_seconds INT,
@@ -379,6 +379,8 @@ CREATE TABLE IF NOT EXISTS oura_rest_mode_periods (
     oura_id TEXT PRIMARY KEY,
     start_day DATE,
     end_day DATE,
+    start_time TIMESTAMPTZ,
+    end_time TIMESTAMPTZ,
     episodes JSONB,
     raw_json JSONB NOT NULL
 );

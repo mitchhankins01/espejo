@@ -1642,6 +1642,29 @@ const migrations: Migration[] = [
         ON oura_ring_configurations(set_up_at DESC);
     `,
   },
+  // 047 fixes data-quality issues found by scripts/verify-oura-coverage.ts:
+  //   1. oura_sleep_sessions.average_breath was NUMERIC(5,2) — raw API value
+  //      has 3 decimals (e.g. 14.375), so half of all rows were silently
+  //      rounded. Widen to DOUBLE PRECISION and re-promote from raw_json.
+  //   2. oura_rest_mode_periods didn't promote start_time / end_time from
+  //      raw_json — add columns and populate.
+  {
+    name: "047-oura-verify-fixes",
+    getSql: () => `
+      ALTER TABLE oura_sleep_sessions
+        ALTER COLUMN average_breath TYPE DOUBLE PRECISION
+        USING NULLIF(raw_json->>'average_breath','')::double precision;
+
+      ALTER TABLE oura_rest_mode_periods
+        ADD COLUMN IF NOT EXISTS start_time TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS end_time TIMESTAMPTZ;
+
+      UPDATE oura_rest_mode_periods SET
+        start_time = NULLIF(raw_json->>'start_time','')::timestamptz,
+        end_time = NULLIF(raw_json->>'end_time','')::timestamptz
+      WHERE start_time IS NULL OR end_time IS NULL;
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {
