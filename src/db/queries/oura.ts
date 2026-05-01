@@ -69,32 +69,26 @@ export async function upsertOuraSyncState(pool: pg.Pool, endpoint: string, lastS
 export async function upsertOuraDailySleep(pool: pg.Pool, row: Record<string, unknown>): Promise<void> {
   const contributors = (row.contributors ?? null) as unknown;
   await pool.query(
-    `INSERT INTO oura_daily_sleep (
-      day, score, total_sleep_duration_seconds, deep_sleep_duration_seconds, rem_sleep_duration_seconds,
-      light_sleep_duration_seconds, efficiency, contributors, raw_json
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-    ON CONFLICT (day) DO UPDATE SET
-      score = EXCLUDED.score,
-      total_sleep_duration_seconds = EXCLUDED.total_sleep_duration_seconds,
-      deep_sleep_duration_seconds = EXCLUDED.deep_sleep_duration_seconds,
-      rem_sleep_duration_seconds = EXCLUDED.rem_sleep_duration_seconds,
-      light_sleep_duration_seconds = EXCLUDED.light_sleep_duration_seconds,
-      efficiency = EXCLUDED.efficiency,
-      contributors = EXCLUDED.contributors,
-      raw_json = EXCLUDED.raw_json`,
-    [row.day, row.score ?? null, row.total_sleep_duration ?? null, row.deep_sleep_duration ?? null, row.rem_sleep_duration ?? null, row.light_sleep_duration ?? null, row.efficiency ?? null, contributors, row]
+    `INSERT INTO oura_daily_sleep (day, score, contributors, raw_json)
+     VALUES ($1,$2,$3,$4)
+     ON CONFLICT (day) DO UPDATE SET
+       score = EXCLUDED.score,
+       contributors = EXCLUDED.contributors,
+       raw_json = EXCLUDED.raw_json`,
+    [row.day, row.score ?? null, contributors, row]
   );
 }
 
 export async function upsertOuraSleepSession(pool: pg.Pool, row: Record<string, unknown>): Promise<void> {
   await pool.query(
     `INSERT INTO oura_sleep_sessions (
-      oura_id, day, period, bedtime_start, bedtime_end, average_hrv, average_heart_rate,
+      oura_id, day, period, sleep_type, bedtime_start, bedtime_end, average_hrv, average_heart_rate,
       total_sleep_duration_seconds, efficiency, raw_json
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
     ON CONFLICT (oura_id) DO UPDATE SET
       day = EXCLUDED.day,
       period = EXCLUDED.period,
+      sleep_type = EXCLUDED.sleep_type,
       bedtime_start = EXCLUDED.bedtime_start,
       bedtime_end = EXCLUDED.bedtime_end,
       average_hrv = EXCLUDED.average_hrv,
@@ -102,7 +96,7 @@ export async function upsertOuraSleepSession(pool: pg.Pool, row: Record<string, 
       total_sleep_duration_seconds = EXCLUDED.total_sleep_duration_seconds,
       efficiency = EXCLUDED.efficiency,
       raw_json = EXCLUDED.raw_json`,
-    [row.id, row.day, row.period ?? null, row.bedtime_start ?? null, row.bedtime_end ?? null, row.average_hrv ?? null, row.average_heart_rate ?? null, row.total_sleep_duration ?? null, row.efficiency ?? null, row]
+    [row.id, row.day, row.period ?? null, row.type ?? null, row.bedtime_start ?? null, row.bedtime_end ?? null, row.average_hrv ?? null, row.average_heart_rate ?? null, row.total_sleep_duration ?? null, row.efficiency ?? null, row]
   );
 }
 
@@ -172,6 +166,17 @@ export async function upsertOuraWorkout(pool: pg.Pool, row: Record<string, unkno
   );
 }
 
+// All sleep queries source stages and durations from oura_sleep_sessions where
+// sleep_type='long_sleep' (the main night session). The /daily_sleep endpoint
+// only returns score+contributors, so oura_daily_sleep can't be the source for
+// duration/stages — it's just the daily score.
+const longSleepLateral = `LEFT JOIN LATERAL (
+  SELECT total_sleep_duration_seconds, efficiency, average_hrv, average_heart_rate, bedtime_start, bedtime_end, raw_json
+  FROM oura_sleep_sessions
+  WHERE day = d.day AND sleep_type = 'long_sleep'
+  LIMIT 1
+) ss ON TRUE`;
+
 export async function getOuraSummaryByDay(pool: pg.Pool, day: string): Promise<OuraSummaryRow | null> {
   const result = await pool.query<OuraSummaryRow>(
     `SELECT d.day,
@@ -182,16 +187,16 @@ export async function getOuraSummaryByDay(pool: pg.Pool, day: string): Promise<O
             st.day_summary AS stress,
             ss.average_hrv,
             ss.average_heart_rate,
-            d.total_sleep_duration_seconds AS sleep_duration_seconds,
-            d.deep_sleep_duration_seconds,
-            d.rem_sleep_duration_seconds,
-            d.efficiency,
+            ss.total_sleep_duration_seconds AS sleep_duration_seconds,
+            (ss.raw_json->>'deep_sleep_duration')::int AS deep_sleep_duration_seconds,
+            (ss.raw_json->>'rem_sleep_duration')::int AS rem_sleep_duration_seconds,
+            ss.efficiency,
             COALESCE(w.workout_count, 0)::int AS workout_count
       FROM oura_daily_sleep d
       LEFT JOIN oura_daily_readiness r ON r.day = d.day
       LEFT JOIN oura_daily_activity a ON a.day = d.day
       LEFT JOIN oura_daily_stress st ON st.day = d.day
-      LEFT JOIN oura_sleep_sessions ss ON ss.day = d.day AND COALESCE(ss.period, 0) = 0
+      ${longSleepLateral}
       LEFT JOIN (
         SELECT day, COUNT(*) AS workout_count FROM oura_workouts GROUP BY day
       ) w ON w.day = d.day
@@ -211,16 +216,16 @@ export async function getOuraWeeklyRows(pool: pg.Pool, endDay: string): Promise<
             st.day_summary AS stress,
             ss.average_hrv,
             ss.average_heart_rate,
-            d.total_sleep_duration_seconds AS sleep_duration_seconds,
-            d.deep_sleep_duration_seconds,
-            d.rem_sleep_duration_seconds,
-            d.efficiency,
+            ss.total_sleep_duration_seconds AS sleep_duration_seconds,
+            (ss.raw_json->>'deep_sleep_duration')::int AS deep_sleep_duration_seconds,
+            (ss.raw_json->>'rem_sleep_duration')::int AS rem_sleep_duration_seconds,
+            ss.efficiency,
             COALESCE(w.workout_count, 0)::int AS workout_count
       FROM oura_daily_sleep d
       LEFT JOIN oura_daily_readiness r ON r.day = d.day
       LEFT JOIN oura_daily_activity a ON a.day = d.day
       LEFT JOIN oura_daily_stress st ON st.day = d.day
-      LEFT JOIN oura_sleep_sessions ss ON ss.day = d.day AND COALESCE(ss.period, 0) = 0
+      ${longSleepLateral}
       LEFT JOIN (SELECT day, COUNT(*) AS workout_count FROM oura_workouts GROUP BY day) w ON w.day = d.day
       WHERE d.day BETWEEN ($1::date - INTERVAL '6 days')::date AND $1::date
       ORDER BY d.day ASC`,
@@ -237,13 +242,13 @@ const ouraTrendColumnSql: Record<OuraTrendMetric, string> = {
   readiness: "r.score",
   activity: "a.score",
   steps: "a.steps",
-  sleep_duration: "d.total_sleep_duration_seconds",
+  sleep_duration: "ss.total_sleep_duration_seconds",
   stress: "st.stress_high_seconds",
   resting_heart_rate: "r.resting_heart_rate",
   temperature: "r.temperature_deviation",
   active_calories: "a.active_calories",
   heart_rate: "ss.average_heart_rate",
-  efficiency: "d.efficiency",
+  efficiency: "ss.efficiency",
 };
 
 const stressJoinMetrics: Set<OuraTrendMetric> = new Set(["stress"]);
@@ -263,7 +268,7 @@ export async function getOuraTrendMetric(
      FROM oura_daily_sleep d
      LEFT JOIN oura_daily_readiness r ON r.day = d.day
      LEFT JOIN oura_daily_activity a ON a.day = d.day
-     LEFT JOIN oura_sleep_sessions ss ON ss.day = d.day AND COALESCE(ss.period, 0) = 0
+     ${longSleepLateral}
      ${stressJoin}
      WHERE d.day >= (CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day')
        AND ${ouraTrendColumnSql[metric]} IS NOT NULL
@@ -285,7 +290,7 @@ export async function getOuraTrendMetricForRange(
      FROM oura_daily_sleep d
      LEFT JOIN oura_daily_readiness r ON r.day = d.day
      LEFT JOIN oura_daily_activity a ON a.day = d.day
-     LEFT JOIN oura_sleep_sessions ss ON ss.day = d.day AND COALESCE(ss.period, 0) = 0
+     ${longSleepLateral}
      ${stressJoin}
      WHERE d.day >= $1::date AND d.day <= $2::date
        AND ${ouraTrendColumnSql[metric]} IS NOT NULL
@@ -317,13 +322,17 @@ export async function getOuraSleepDetailForRange(
   days: number
 ): Promise<OuraSleepDetailRow[]> {
   const result = await pool.query<OuraSleepDetailRow>(
-    `SELECT d.day, d.score, d.total_sleep_duration_seconds, d.deep_sleep_duration_seconds,
-            d.rem_sleep_duration_seconds, d.light_sleep_duration_seconds, d.efficiency,
+    `SELECT d.day, d.score,
+            ss.total_sleep_duration_seconds,
+            (ss.raw_json->>'deep_sleep_duration')::int AS deep_sleep_duration_seconds,
+            (ss.raw_json->>'rem_sleep_duration')::int AS rem_sleep_duration_seconds,
+            (ss.raw_json->>'light_sleep_duration')::int AS light_sleep_duration_seconds,
+            ss.efficiency,
             ss.average_hrv, ss.average_heart_rate, ss.bedtime_start, ss.bedtime_end,
             a.steps, a.score AS activity_score,
             COALESCE(w.workout_count, 0)::int AS workout_count
      FROM oura_daily_sleep d
-     LEFT JOIN oura_sleep_sessions ss ON ss.day = d.day AND COALESCE(ss.period, 0) = 0
+     ${longSleepLateral}
      LEFT JOIN oura_daily_activity a ON a.day = d.day
      LEFT JOIN (SELECT day, COUNT(*) AS workout_count FROM oura_workouts GROUP BY day) w ON w.day = d.day
      WHERE d.day >= (CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day')

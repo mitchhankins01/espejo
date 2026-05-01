@@ -386,11 +386,20 @@ export async function seedFixtures(pool: pg.Pool): Promise<void> {
     { day: "2025-03-15", sleep: 75, readiness: 70, activity: 66, steps: 7020, hrv: 39, hr: 58, duration: 24600, deep: 3900, rem: 5100, efficiency: 88 },
   ];
   for (const o of ouraFixtures) {
-    await pool.query(`INSERT INTO oura_daily_sleep (day, score, total_sleep_duration_seconds, deep_sleep_duration_seconds, rem_sleep_duration_seconds, light_sleep_duration_seconds, efficiency, contributors, raw_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [o.day, o.sleep, o.duration, o.deep, o.rem, o.duration - o.deep - o.rem, o.efficiency, {}, { day: o.day }]);
+    const light = o.duration - o.deep - o.rem;
+    const sleepRaw = {
+      day: o.day,
+      type: "long_sleep",
+      total_sleep_duration: o.duration,
+      deep_sleep_duration: o.deep,
+      rem_sleep_duration: o.rem,
+      light_sleep_duration: light,
+    };
+    await pool.query(`INSERT INTO oura_daily_sleep (day, score, contributors, raw_json) VALUES ($1,$2,$3,$4)`, [o.day, o.sleep, {}, { day: o.day }]);
     await pool.query(`INSERT INTO oura_daily_readiness (day, score, temperature_deviation, resting_heart_rate, hrv_balance, contributors, raw_json) VALUES ($1,$2,$3,$4,$5,$6,$7)`, [o.day, o.readiness, 0.1, o.hr, o.hrv, {}, { day: o.day }]);
     await pool.query(`INSERT INTO oura_daily_activity (day, score, steps, active_calories, total_calories, medium_activity_seconds, high_activity_seconds, low_activity_seconds, raw_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [o.day, o.activity, o.steps, 600, 2200, 1800, 900, 6000, { day: o.day }]);
     await pool.query(`INSERT INTO oura_daily_stress (day, stress_high_seconds, recovery_high_seconds, day_summary, raw_json) VALUES ($1,$2,$3,$4,$5)`, [o.day, 7200, 5400, "normal", { day: o.day }]);
-    await pool.query(`INSERT INTO oura_sleep_sessions (oura_id, day, period, average_hrv, average_heart_rate, total_sleep_duration_seconds, efficiency, raw_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [`sleep-${o.day}`, o.day, 0, o.hrv, o.hr, o.duration, o.efficiency, { day: o.day }]);
+    await pool.query(`INSERT INTO oura_sleep_sessions (oura_id, day, period, sleep_type, average_hrv, average_heart_rate, total_sleep_duration_seconds, efficiency, raw_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [`sleep-${o.day}`, o.day, 1, "long_sleep", o.hrv, o.hr, o.duration, o.efficiency, sleepRaw]);
     await pool.query(`INSERT INTO oura_workouts (oura_id, day, activity, calories, distance, duration_seconds, average_heart_rate, max_heart_rate, raw_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [`workout-${o.day}`, o.day, "running", 450, 6.2, 2400, 132, 164, { day: o.day }]);
   }
 

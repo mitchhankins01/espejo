@@ -218,19 +218,18 @@ CREATE TABLE IF NOT EXISTS oura_sync_runs (
 CREATE TABLE IF NOT EXISTS oura_daily_sleep (
     day DATE PRIMARY KEY,
     score INT,
-    total_sleep_duration_seconds INT,
-    deep_sleep_duration_seconds INT,
-    rem_sleep_duration_seconds INT,
-    light_sleep_duration_seconds INT,
-    efficiency DOUBLE PRECISION,
     contributors JSONB,
     raw_json JSONB NOT NULL
 );
 
+-- sleep_type values: 'long_sleep' (main night sleep), 'late_nap', 'sleep'.
+-- Stage durations (deep/rem/light/awake) live in raw_json — the /sleep endpoint
+-- returns them per session, not aggregated per day.
 CREATE TABLE IF NOT EXISTS oura_sleep_sessions (
     oura_id TEXT PRIMARY KEY,
     day DATE NOT NULL,
     period INT,
+    sleep_type TEXT,
     bedtime_start TIMESTAMPTZ,
     bedtime_end TIMESTAMPTZ,
     average_hrv DOUBLE PRECISION,
@@ -240,6 +239,7 @@ CREATE TABLE IF NOT EXISTS oura_sleep_sessions (
     raw_json JSONB NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_oura_sleep_sessions_day ON oura_sleep_sessions(day DESC);
+CREATE INDEX IF NOT EXISTS idx_oura_sleep_sessions_day_type ON oura_sleep_sessions(day, sleep_type);
 
 CREATE TABLE IF NOT EXISTS oura_daily_readiness (
     day DATE PRIMARY KEY,
@@ -408,5 +408,10 @@ FROM oura_daily_sleep d
 LEFT JOIN oura_daily_readiness r ON r.day = d.day
 LEFT JOIN oura_daily_activity a ON a.day = d.day
 LEFT JOIN oura_daily_stress st ON st.day = d.day
-LEFT JOIN oura_sleep_sessions ss ON ss.day = d.day AND COALESCE(ss.period, 0) = 0
+LEFT JOIN LATERAL (
+    SELECT average_hrv, average_heart_rate
+    FROM oura_sleep_sessions
+    WHERE day = d.day AND sleep_type = 'long_sleep'
+    LIMIT 1
+) ss ON TRUE
 LEFT JOIN daily_metrics m ON m.date = d.day;

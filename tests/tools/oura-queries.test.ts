@@ -81,12 +81,13 @@ describe("upsertOuraDailySleep", () => {
 });
 
 describe("upsertOuraSleepSession", () => {
-  it("upserts sleep session data", async () => {
+  it("upserts sleep session data with sleep_type from row.type", async () => {
     const pool = mockPool();
     const row = {
       id: "session-1",
       day: "2025-01-15",
-      period: 0,
+      period: 1,
+      type: "long_sleep",
       bedtime_start: "2025-01-15T22:00:00Z",
       bedtime_end: "2025-01-16T06:00:00Z",
       average_hrv: 42,
@@ -95,20 +96,24 @@ describe("upsertOuraSleepSession", () => {
       efficiency: 90,
     };
     await upsertOuraSleepSession(pool, row);
+    const args = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1] as unknown[];
     expect(pool.query).toHaveBeenCalledWith(
       expect.stringContaining("oura_sleep_sessions"),
       expect.arrayContaining(["session-1"])
     );
+    expect(args[3]).toBe("long_sleep");
   });
 
   it("handles missing optional fields with null fallback", async () => {
     const pool = mockPool();
     await upsertOuraSleepSession(pool, { id: "s-1", day: "2025-01-15" });
     const args = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1] as unknown[];
-    // period, bedtime_start, bedtime_end, average_hrv, average_heart_rate, total_sleep_duration, efficiency → null
+    // [0]=id, [1]=day, [2]=period, [3]=sleep_type, [4]=bedtime_start, [5]=bedtime_end,
+    // [6]=average_hrv, [7]=average_heart_rate, [8]=total_sleep_duration, [9]=efficiency
     expect(args[2]).toBeNull(); // period
-    expect(args[3]).toBeNull(); // bedtime_start
-    expect(args[5]).toBeNull(); // average_hrv
+    expect(args[3]).toBeNull(); // sleep_type
+    expect(args[4]).toBeNull(); // bedtime_start
+    expect(args[6]).toBeNull(); // average_hrv
   });
 });
 

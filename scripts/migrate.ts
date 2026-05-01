@@ -1333,6 +1333,52 @@ const migrations: Migration[] = [
          WHERE category IN ('reflection', 'mixed');
     `,
   },
+  // The Oura /daily_sleep v2 endpoint only returns id/day/score/timestamp/contributors.
+  // The 5 duration/efficiency columns on oura_daily_sleep have been NULL for every row
+  // (1748+ rows) because upsertOuraDailySleep reads keys that don't exist on the response.
+  // Stage data lives in oura_sleep_sessions.raw_json (from /sleep). Promote raw_json->>'type'
+  // to a real column so we can filter on 'long_sleep' (the main night session) instead of
+  // the meaningless period number.
+  {
+    name: "044-oura-sleep-stages-fix",
+    getSql: () => `
+      ALTER TABLE oura_sleep_sessions ADD COLUMN IF NOT EXISTS sleep_type TEXT;
+      UPDATE oura_sleep_sessions SET sleep_type = raw_json->>'type' WHERE sleep_type IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_oura_sleep_sessions_day_type
+        ON oura_sleep_sessions (day, sleep_type);
+
+      ALTER TABLE oura_daily_sleep
+        DROP COLUMN IF EXISTS total_sleep_duration_seconds,
+        DROP COLUMN IF EXISTS deep_sleep_duration_seconds,
+        DROP COLUMN IF EXISTS rem_sleep_duration_seconds,
+        DROP COLUMN IF EXISTS light_sleep_duration_seconds,
+        DROP COLUMN IF EXISTS efficiency;
+
+      -- Rebuild the view to pull HRV/HR from the long_sleep session, not period=0
+      -- (which matched naps).
+      CREATE OR REPLACE VIEW daily_health_snapshot AS
+      SELECT d.day,
+             d.score AS sleep_score,
+             r.score AS readiness_score,
+             a.score AS activity_score,
+             a.steps,
+             st.day_summary AS stress,
+             ss.average_hrv,
+             ss.average_heart_rate,
+             m.weight_kg
+      FROM oura_daily_sleep d
+      LEFT JOIN oura_daily_readiness r ON r.day = d.day
+      LEFT JOIN oura_daily_activity a ON a.day = d.day
+      LEFT JOIN oura_daily_stress st ON st.day = d.day
+      LEFT JOIN LATERAL (
+        SELECT average_hrv, average_heart_rate
+        FROM oura_sleep_sessions
+        WHERE day = d.day AND sleep_type = 'long_sleep'
+        LIMIT 1
+      ) ss ON TRUE
+      LEFT JOIN daily_metrics m ON m.date = d.day;
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {
