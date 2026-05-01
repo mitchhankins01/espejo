@@ -595,25 +595,36 @@ export async function upsertOuraSession(pool: pg.Pool, row: Record<string, unkno
   );
 }
 
+// Postgres caps a single Bind message at 65,535 parameters (16-bit count).
+// At 3 params per row that's 21,845 rows max. We use a much smaller chunk so
+// the 30-day routine-sync window — which can pull 150k+ samples — and the
+// per-day backfill chunks both go through without hitting wire-protocol limits.
+const HEARTRATE_BATCH_CHUNK = 5000;
+
 // Heartrate is bulk-inserted in chunks; one row per (ts, source).
 export async function insertOuraHeartrateBatch(
   pool: pg.Pool,
   rows: Array<{ ts: string; bpm: number; source: string }>
 ): Promise<number> {
   if (rows.length === 0) return 0;
-  const values: string[] = [];
-  const params: (string | number)[] = [];
-  rows.forEach((r, i) => {
-    const base = i * 3;
-    values.push(`($${base + 1},$${base + 2},$${base + 3})`);
-    params.push(r.ts, r.bpm, r.source);
-  });
-  const result = await pool.query(
-    `INSERT INTO oura_heartrate (ts, bpm, source) VALUES ${values.join(",")}
-     ON CONFLICT (ts, source) DO NOTHING`,
-    params
-  );
-  return result.rowCount ?? 0;
+  let total = 0;
+  for (let start = 0; start < rows.length; start += HEARTRATE_BATCH_CHUNK) {
+    const chunk = rows.slice(start, start + HEARTRATE_BATCH_CHUNK);
+    const values: string[] = [];
+    const params: (string | number)[] = [];
+    chunk.forEach((r, i) => {
+      const base = i * 3;
+      values.push(`($${base + 1},$${base + 2},$${base + 3})`);
+      params.push(r.ts, r.bpm, r.source);
+    });
+    const result = await pool.query(
+      `INSERT INTO oura_heartrate (ts, bpm, source) VALUES ${values.join(",")}
+       ON CONFLICT (ts, source) DO NOTHING`,
+      params
+    );
+    total += result.rowCount ?? 0;
+  }
+  return total;
 }
 
 // ─── New read queries ──────────────────────────────────────────────────────

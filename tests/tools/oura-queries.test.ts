@@ -542,6 +542,21 @@ describe("insertOuraHeartrateBatch", () => {
     ]);
     expect(inserted).toBe(0);
   });
+
+  it("chunks oversized batches to stay under Postgres' 65,535-param Bind limit", async () => {
+    const queryFn = vi.fn().mockResolvedValue({ rows: [], rowCount: 5000 });
+    const pool = { query: queryFn } as unknown as pg.Pool;
+    const rows = Array.from({ length: 12000 }, (_, i) => ({
+      ts: `2025-01-15T${String(Math.floor(i / 3600)).padStart(2, "0")}:00:00Z`,
+      bpm: 60 + (i % 30),
+      source: "rest",
+    }));
+    const inserted = await insertOuraHeartrateBatch(pool, rows);
+    // 12000 rows / 5000 chunk = 3 calls.
+    expect(queryFn).toHaveBeenCalledTimes(3);
+    // Each chunk reports rowCount=5000 in mock.
+    expect(inserted).toBe(15000);
+  });
 });
 
 describe("getOuraIntraNightHrv", () => {
