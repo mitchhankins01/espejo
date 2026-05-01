@@ -17,6 +17,8 @@ import { handleOuraComparePeriods } from "./tools/oura-compare-periods.js";
 import { handleOuraCorrelate } from "./tools/oura-correlate.js";
 import { handleGetArtifact } from "./tools/get-artifact.js";
 import { handleListArtifacts } from "./tools/list-artifacts.js";
+import { handleGetOuraIntraNightHrv } from "./tools/get-oura-intra-night-hrv.js";
+import { handleGetOuraHeartrateSlice } from "./tools/get-oura-heartrate-slice.js";
 import { handleSearchArtifacts } from "./tools/search-artifacts.js";
 import { handleSearchContent } from "./tools/search-content.js";
 import { handleSyncObsidianVault } from "./tools/sync-obsidian-vault.js";
@@ -45,6 +47,8 @@ export const toolHandlers: Record<string, ToolHandler> = {
   get_oura_analysis: handleGetOuraAnalysis,
   oura_compare_periods: handleOuraComparePeriods,
   oura_correlate: handleOuraCorrelate,
+  get_oura_intra_night_hrv: handleGetOuraIntraNightHrv,
+  get_oura_heartrate_slice: handleGetOuraHeartrateSlice,
   get_artifact: handleGetArtifact,
   list_artifacts: handleListArtifacts,
   search_artifacts: handleSearchArtifacts,

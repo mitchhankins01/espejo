@@ -17,7 +17,19 @@ export async function buildOuraContextPrompt(pool: pg.Pool): Promise<string> {
 
   if (summary.sleep_duration_seconds) {
     lines.push(
-      `Sleep: ${fmtDuration(summary.sleep_duration_seconds)} (efficiency ${summary.efficiency ?? "n/a"}%) | Deep ${fmtDuration(summary.deep_sleep_duration_seconds)} | REM ${fmtDuration(summary.rem_sleep_duration_seconds)}`
+      `Sleep: ${fmtDuration(summary.sleep_duration_seconds)} (efficiency ${summary.efficiency ?? "n/a"}%) | Deep ${fmtDuration(summary.deep_sleep_duration_seconds)} | REM ${fmtDuration(summary.rem_sleep_duration_seconds)} | RHR ${summary.lowest_heart_rate ?? "n/a"} | Breath ${summary.average_breath != null ? Number(summary.average_breath).toFixed(1) : "n/a"}/min`
+    );
+  }
+
+  if (summary.spo2 != null || summary.breathing_disturbance_index != null) {
+    lines.push(
+      `SpO2 ${summary.spo2 != null ? Number(summary.spo2).toFixed(1) : "n/a"}% | Breathing disturbance ${summary.breathing_disturbance_index ?? "n/a"}`
+    );
+  }
+
+  if (summary.resilience_level || summary.vascular_age != null) {
+    lines.push(
+      `Resilience: ${summary.resilience_level ?? "n/a"} | Vascular age: ${summary.vascular_age ?? "n/a"}`
     );
   }
 

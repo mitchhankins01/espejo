@@ -13,13 +13,21 @@ function formatDay(day: Date | string): string {
 }
 
 export function formatOuraSummary(row: OuraSummaryRow): string {
-  return [
+  const lines = [
     `📅 ${formatDay(row.day)}`,
     `Sleep ${row.sleep_score ?? "n/a"} | Readiness ${row.readiness_score ?? "n/a"} | Activity ${row.activity_score ?? "n/a"}`,
-    `HRV ${row.average_hrv != null ? Math.round(row.average_hrv) : "n/a"}ms | Steps ${row.steps?.toLocaleString() ?? "n/a"} | Stress ${row.stress ?? "n/a"}`,
-    `Sleep: ${fmtDuration(row.sleep_duration_seconds)} (Deep ${fmtDuration(row.deep_sleep_duration_seconds)}, REM ${fmtDuration(row.rem_sleep_duration_seconds)}) | Efficiency ${row.efficiency ?? "n/a"}%`,
-    `Workouts: ${row.workout_count}`,
-  ].join("\n");
+    `HRV ${row.average_hrv != null ? Math.round(row.average_hrv) : "n/a"}ms | RHR ${row.lowest_heart_rate ?? "n/a"} | Breath ${row.average_breath != null ? Number(row.average_breath).toFixed(1) : "n/a"}/min`,
+    `Steps ${row.steps?.toLocaleString() ?? "n/a"} | Stress ${row.stress ?? "n/a"}`,
+    `Sleep: ${fmtDuration(row.sleep_duration_seconds)} (Deep ${fmtDuration(row.deep_sleep_duration_seconds)}, REM ${fmtDuration(row.rem_sleep_duration_seconds)}, Awake ${fmtDuration(row.awake_seconds)}) | Efficiency ${row.efficiency ?? "n/a"}%`,
+  ];
+  if (row.spo2 != null || row.breathing_disturbance_index != null) {
+    lines.push(`SpO2 ${row.spo2 != null ? Number(row.spo2).toFixed(1) : "n/a"}% | Breathing disturbance ${row.breathing_disturbance_index ?? "n/a"}`);
+  }
+  if (row.resilience_level || row.vascular_age != null) {
+    lines.push(`Resilience: ${row.resilience_level ?? "n/a"} | Vascular age: ${row.vascular_age ?? "n/a"}`);
+  }
+  lines.push(`Workouts: ${row.workout_count}`);
+  return lines.join("\n");
 }
 
 export function formatOuraWeekly(rows: OuraSummaryRow[]): string {
