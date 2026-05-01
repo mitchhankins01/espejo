@@ -5,24 +5,28 @@ const HISTORY_PATH = "books/history.json";
 
 export type TomoDomain =
   | "neuroscience"
+  | "cognition"
   | "psychology"
+  | "philosophy"
+  | "hermeticism"
   | "physics"
   | "psychedelics"
-  | "robotics"
   | "ai"
+  | "robotics"
   | "technology"
   | "none";
 
 export interface TomoRecord {
   n: number;
   title: string;
-  format: "fiction" | "essay";
+  format?: "fiction" | "essay";
   domain: TomoDomain;
   topic: string;
   source_uuids: string[];
   date: string;
   word_count: number;
   series_seed?: boolean;
+  bilingual?: boolean;
 }
 
 export async function readHistory(): Promise<TomoRecord[]> {

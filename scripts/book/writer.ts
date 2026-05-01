@@ -3,53 +3,34 @@ import { config } from "../../src/config.js";
 import type { Plan } from "./planner.js";
 import type { ContextItem } from "./context.js";
 
-const SYSTEM = `You are writing one tomo — a Spanish mini-book — for a single reader (Mitch), an A2/B1 Spanish learner living in Barcelona.
+const SYSTEM = `You are writing one tomo — a Spanish essay (non-fiction) — for a single reader (Mitch), an A2/B1 Spanish learner living in Barcelona.
 
-Each tomo is a complete reading experience — no cliffhangers, no "to be continued", no teasers for the next. No references to previous tomos ("en el tomo anterior" etc.).
+A tomo is a standalone ~2000-word essay. No references to previous tomos. No translation, no footnotes, no parenthetical English.
 
-If the plan marks this tomo as a series opener (series_seed: true), establish the world, character, and central question richly enough that future tomos could return to this setting. Still deliver a complete story arc — beginning, middle, end, resolution on the central scene — inside this single tomo. A first-book-of-a-series ends at a satisfying pause, not a cliffhanger.
+Follow the style guide. Respect the reader's grammar level. Lean into the recently-learned vocabulary listed in the style guide. Let current grammar foci appear naturally — don't force them.
 
-Output: 1950-2400 words of Spanish prose. Entirely in Spanish. No translation, no footnotes, no parenthetical English, no glossary.
-
-Follow the style guide provided. Respect the reader's grammar level. Let current grammar foci (imperfecto vs pretérito with mental states, subjuntivo pasado after verbs of wanting/preferring in the past) appear naturally in the prose. Don't force them.
-
-Lean into vocabulary he's recently learned — pull from the style guide.
-
-If format is "essay":
-- Teach a real concept with specificity. Facts must be accurate.
-- Open with a concrete hook — a scene, a question, a case. Not an abstract.
-- Use examples. One good example beats three generalizations.
+The essay teaches a real concept with specificity, anchored to a pattern from the reader's life:
+- Open with a concrete hook — a scene, a question, a moment in his journal. Never an abstract or "En este tomo vamos a..." intro.
+- Use examples. One specific example beats three generalizations.
 - Gloss technical terms in-prose when unavoidable: "la plasticidad — la capacidad del cerebro de cambiar —".
-- Never start with "En este tomo vamos a..." or similar meta-intros.
-- If you quote a person (speech or reported speech), use straight double quotes: "así". Same rule as fiction — the reader must be able to see at a glance where a voice begins and ends.
+- Direct quotations use straight double quotes: "así".
+- The intersection between life pattern and domain concept must be real — illuminate, don't decorate.
+- Don't preach or summarize inside the body. Distillation belongs in the takeaways section.
 
-If format is "fiction":
-- One short complete story. At least one character, a setting, a turn, an ending.
-- Dramatize the idea — never state it outright. No moral at the end.
-- Dialogue is fine and good. All spoken dialogue MUST be wrapped in straight double quotes: "así". Never use guion largo (— speech —), never leave dialogue inline without quotes, never use curly/smart quotes. Example: Marco dijo: "No sé qué haría con ello." Thoughts and sensed-but-unspoken words stay unquoted — only actual spoken words get the quotes. This rule is non-negotiable: the reader cannot distinguish narration from speech without it.
-- For science fiction (interstellar travel, generation ships, utopias/dystopias, post-scarcity, uploaded minds, terraforming, far futures, first contact): build the world in concrete, sensory detail. Invent freely — the reader's source entries are emotional substrate (a felt question, an inner pattern), not literal subject matter. Ground speculative elements in plausible physics/sociology/philosophy; avoid magic-tech handwaving. The story can take place anywhere, any time — not Barcelona, not the present, unless the plan says otherwise.
+Length: target ~2000 words of Spanish body (1800-2400 acceptable). If you hit a natural ending under 1800, extend with one more beat — a remembered scene, an aftermath, a sensory dwell on a detail already introduced. Don't pad with summary.
 
-Never preach, moralize, or summarize *inside the body*. The prose itself does the work — but see the takeaways section below, which is the one carved-out place where distillation is allowed.
+After the body, append a final takeaways section:
+- Heading: exactly "## Para llevarte" (no variant).
+- 5-8 short bullets, one Spanish sentence each, starting with "- ".
+- Distill the actual ideas, observations, contrasts — not the structure of the argument.
+- Excluded from the body word count.
 
-Length is a HARD FLOOR, not a passive target. Body word count (excluding the title heading and the takeaways section) MUST be between 1950 and 2400 words. If you reach what feels like a natural ending before 1950 words, you have NOT finished. Extend — not with padding or summary, but with one more beat: a remembered scene, a secondary character moment, an aftermath paragraph, a sensory dwell on a detail already introduced, a second turn to the decision, a quiet passage where the body or the setting has room to breathe. Short tomos have been a recurring problem; do not stop early.
-
-After the body, ALWAYS include a final takeaways section:
-- Heading: exactly "## Para llevarte" (no other heading text, no variant).
-- 5 to 8 short bullets, each starting with "- ".
-- Each bullet is one sentence, in Spanish, distilling a takeaway, lesson, or the gist of an idea/scene the reader just lived through.
-- Together the bullets should cover the breadth and depth of the tomo — not a plot recap, not a moral, but the things worth carrying forward (a concept named, an observation crystallized, a question raised, a contrast made vivid).
-- For fiction: bullets capture the emotional/thematic weight ("una decisión costosa rara vez se siente costosa en el momento") rather than plot beats ("Marco firmó el contrato").
-- For essays: bullets name the actual ideas, not the structure of the argument.
-- The takeaways section does NOT count toward the body word count and is excluded from the 1950-2400 range.
-- Do not add anything after the bullets — no closing paragraph, no signature, no "Fin".
-
-Output format — exactly:
-- First line: "# <title>"
-- Blank line
-- Prose body in paragraphs. 2-4 optional "## <heading>" section breaks allowed (Spanish titles), but NEVER name a body section "Para llevarte".
-- No markdown in the body other than headings: no bold, italic, lists, quotes, links, code.
-- Then a blank line, then "## Para llevarte", then the bulleted takeaways.
-- End immediately after the last bullet. No meta-commentary, no author's note.`;
+Output format:
+- "# <title>" on the first line.
+- Blank line, then prose body in paragraphs. 2-4 optional "## <heading>" Spanish section breaks allowed (never named "Para llevarte").
+- No markdown in the body other than headings (no bold, italic, lists, quotes, links, code).
+- Blank line, then "## Para llevarte" with bullets.
+- End immediately after the last bullet — no closing paragraph, no "Fin", no author's note.`;
 
 export async function write(
   plan: Plan,
@@ -79,18 +60,16 @@ export async function write(
     "",
     "# Tomo plan",
     `- Título: ${plan.title}`,
-    `- Formato: ${plan.format}`,
     `- Dominio: ${plan.domain}`,
     `- Tema: ${plan.topic}`,
     `- Ángulo: ${plan.angle}`,
-    `- Series opener: ${plan.series_seed ? "yes — establish the world/character for future tomos, still deliver a complete standalone arc" : "no"}`,
     "",
     "# Source material",
     "Draw from these — transform them into the tomo. Do not quote the reader's entries verbatim. The reader will not see these sources, only the finished tomo.",
     "",
     sourcesBlock,
     "",
-    'Write the tomo now. MINIMUM 1950 words, MAXIMUM 2400 words of Spanish body text (excluding title and "## Para llevarte"). If you reach a natural ending under 1950, extend with one more beat — a memory, a secondary moment, an aftermath — do not summarize or wrap up early. After the body, append the "## Para llevarte" section with 5-8 distilled bullets covering breadth and depth, then stop. Start with the title heading.',
+    'Write the tomo now in Spanish. Target ~2000 words of body (1800-2400 acceptable). After the body, append "## Para llevarte" with 5-8 distilled bullets, then stop. Start with the title heading.',
   ].join("\n");
 
   const response = await client.messages.create({

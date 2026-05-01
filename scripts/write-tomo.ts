@@ -2,10 +2,14 @@
  * Write the next tomo of the Espejo series.
  *
  * Usage:
- *   pnpm tsx scripts/write-tomo.ts             # normal: (reuse saved plan if present) plan + write + epub + email
- *   pnpm tsx scripts/write-tomo.ts --plan-only # stop after planner, print plan, save to books/next-plan.json
- *   pnpm tsx scripts/write-tomo.ts --dry       # plan + write, print to stdout, no files, no email
- *   pnpm tsx scripts/write-tomo.ts --no-send   # everything except the email
+ *   pnpm tsx scripts/write-tomo.ts                  # normal: (reuse saved plan if present) plan + write + epub + email
+ *   pnpm tsx scripts/write-tomo.ts --plan-only      # stop after planner, print plan, save to books/next-plan.json
+ *   pnpm tsx scripts/write-tomo.ts --dry            # plan + write, print to stdout, no files, no email
+ *   pnpm tsx scripts/write-tomo.ts --no-send        # everything except the email
+ *   pnpm tsx scripts/write-tomo.ts --bilingual      # render ES + EN side-by-side without prompting
+ *   pnpm tsx scripts/write-tomo.ts --no-bilingual   # skip the bilingual prompt, ship ES-only
+ *
+ * If neither --bilingual nor --no-bilingual is passed, a TTY prompt asks after the tomo is written.
  *
  * Plan persistence: `--plan-only` writes books/next-plan.json. A subsequent normal run
  * reuses that plan (matching on tomo number) and deletes the file after a successful write.
@@ -24,9 +28,10 @@ import {
   recentSourceUuids,
   recentTomoSummaries,
 } from "./book/state.js";
-import { gatherContext } from "./book/context.js";
+import { gatherContext, gatherLongArcContext } from "./book/context.js";
 import { plan, type Plan } from "./book/planner.js";
 import { write, countWords } from "./book/writer.js";
+import { interleave } from "./book/bilingual.js";
 import {
   formatGrammarFlagsForWriter,
   formatLookupsForWriter,
@@ -81,18 +86,40 @@ interface Args {
   dry: boolean;
   send: boolean;
   steer?: string;
+  bilingual?: boolean;
 }
 
 function parseArgs(): Args {
   const argv = process.argv;
   const steerIdx = argv.indexOf("--steer");
   const steer = steerIdx >= 0 ? argv[steerIdx + 1] : process.env.STEER;
+  let bilingual: boolean | undefined;
+  if (argv.includes("--bilingual")) bilingual = true;
+  else if (argv.includes("--no-bilingual")) bilingual = false;
   return {
     planOnly: argv.includes("--plan-only"),
     dry: argv.includes("--dry"),
     send: !argv.includes("--no-send"),
     steer,
+    bilingual,
   };
+}
+
+async function askBilingual(): Promise<boolean> {
+  if (!process.stdin.isTTY) return false;
+  const readline = await import("readline/promises");
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  try {
+    const answer = await rl.question(
+      "[bilingual] Render this tomo as ES + EN sentence-by-sentence? [y/N] "
+    );
+    return answer.trim().toLowerCase().startsWith("y");
+  } finally {
+    rl.close();
+  }
 }
 
 async function main(): Promise<void> {
@@ -110,11 +137,14 @@ async function main(): Promise<void> {
     `      tomo #${n}, ${history.length} prior, ${excluded.size} UUIDs excluded`
   );
 
-  console.log("[3/6] gathering context (last 14 days)");
+  console.log("[3/6] gathering context (recent 14d + long-arc 365d)");
   const context = await gatherContext(excluded, 14);
+  const recentUuids = new Set(context.map((c) => c.uuid));
+  const longArc = await gatherLongArcContext(excluded, recentUuids, 365);
   console.log(
-    `      ${context.length} items (${context.filter((c) => c.kind === "entry").length} entries, ${context.filter((c) => c.kind === "insight").length} insights)`
+    `      recent: ${context.length} items (${context.filter((c) => c.kind === "entry").length} entries, ${context.filter((c) => c.kind === "insight").length} insights)`
   );
+  console.log(`      long-arc: ${longArc.length} insights from last 365d`);
   if (context.length < 3) {
     throw new Error(
       `Only ${context.length} usable context items in the last 14 days. ` +
@@ -127,20 +157,21 @@ async function main(): Promise<void> {
   if (args.steer && !saved) {
     console.log(`      steering planner with: ${args.steer.slice(0, 80)}${args.steer.length > 80 ? "..." : ""}`);
   }
-  const p = saved ?? (await plan(style, recent, context, args.steer));
+  const p = saved ?? (await plan(style, recent, longArc, context, args.steer));
   if (saved) {
     console.log(`      reusing saved plan from ${PLAN_PATH}`);
   }
-  console.log(`      ${p.format}/${p.domain} — "${p.title}"`);
+  console.log(`      essay/${p.domain} — "${p.title}"`);
   console.log(`      angle: ${p.angle}`);
   console.log(`      sources: ${p.source_refs.length}`);
 
+  const allContext = [...longArc, ...context];
   if (saved) {
-    const validUuids = new Set(context.map((c) => c.uuid));
+    const validUuids = new Set(allContext.map((c) => c.uuid));
     const missing = p.source_refs.filter((u) => !validUuids.has(u));
     if (missing.length > 0) {
       throw new Error(
-        `Saved plan references ${missing.length} source UUIDs no longer in the 14-day context: ${missing.join(", ")}. Delete ${PLAN_PATH} and re-plan.`
+        `Saved plan references ${missing.length} source UUIDs no longer in the context pool: ${missing.join(", ")}. Delete ${PLAN_PATH} and re-plan.`
       );
     }
   }
@@ -171,11 +202,11 @@ async function main(): Promise<void> {
       `      injecting ${Math.min(grammarFlags.length, 15)} grammar uncertainties (${grammarFlags.length} total)`
     );
   }
-  const markdown = await write(p, style, context, lookupsBlock, grammarBlock);
+  const markdown = await write(p, style, allContext, lookupsBlock, grammarBlock);
   const words = countWords(markdown);
   console.log(`      ${words} words`);
   if (words < 1700 || words > 2700) {
-    console.warn(`      WARN: word count ${words} is outside 1950-2400 target`);
+    console.warn(`      WARN: word count ${words} is outside 1800-2400 target`);
   }
 
   if (args.dry) {
@@ -185,36 +216,47 @@ async function main(): Promise<void> {
     return;
   }
 
+  const wantsBilingual =
+    args.bilingual !== undefined ? args.bilingual : await askBilingual();
+
   console.log("[6/6] packaging epub + recording history");
   const padded = String(n).padStart(4, "0");
   const tomoPath = join(TOMOS_DIR, `${padded}.md`);
-  const filename = tomoFilename(n, p.title);
-  const epubPath = join(BUILD_DIR, filename);
-
   await mkdir(TOMOS_DIR, { recursive: true });
   await mkdir(BUILD_DIR, { recursive: true });
   await writeFile(tomoPath, markdown, "utf-8");
+
+  let epubMarkdown = markdown;
+  let filename = tomoFilename(n, p.title);
+  if (wantsBilingual) {
+    console.log("[bilingual] interleaving ES + EN");
+    epubMarkdown = await interleave(markdown);
+    const biPath = join(TOMOS_DIR, `${padded}-bilingual.md`);
+    await writeFile(biPath, epubMarkdown, "utf-8");
+    filename = filename.replace(/\.epub$/, " (bilingual).epub");
+  }
+  const epubPath = join(BUILD_DIR, filename);
+
   await buildEpub({
     tomoNum: n,
     title: p.title,
-    markdown,
+    markdown: epubMarkdown,
     outPath: epubPath,
   });
 
   await appendHistory({
     n,
     title: p.title,
-    format: p.format,
     domain: p.domain,
     topic: p.topic,
     source_uuids: p.source_refs,
     date: new Date().toISOString().slice(0, 10),
     word_count: words,
-    series_seed: p.series_seed,
+    bilingual: wantsBilingual,
   });
   await clearSavedPlan();
 
-  const subject = `Espejo — Tomo ${padded} — ${p.title}`;
+  const subject = `Espejo — Tomo ${padded} — ${p.title}${wantsBilingual ? " (bilingual)" : ""}`;
 
   if (args.send) {
     console.log(`[send] emailing ${filename} to ${config.gmail.kindleEmail}`);

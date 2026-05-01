@@ -12,6 +12,9 @@ const ENTRY_LIMIT = 50;
 const INSIGHT_LIMIT = 40;
 const MIN_ENTRY_CHARS = 120;
 
+const LONG_ARC_LIMIT = 25;
+const LONG_ARC_DAYS = 365;
+
 export async function gatherContext(
   excludeUuids: Set<string>,
   daysBack = 14
@@ -67,5 +70,43 @@ export async function gatherContext(
     });
   }
 
+  return items;
+}
+
+export async function gatherLongArcContext(
+  excludeUuids: Set<string>,
+  excludeRecentUuids: Set<string>,
+  daysBack = LONG_ARC_DAYS
+): Promise<ContextItem[]> {
+  const sinceDate = new Date(Date.now() - daysBack * 86400000)
+    .toISOString()
+    .slice(0, 10);
+
+  const insights = await pool.query(
+    `SELECT id, title, body, updated_at
+     FROM knowledge_artifacts
+     WHERE kind = 'insight'
+       AND deleted_at IS NULL
+       AND (source_path IS NULL OR source_path NOT LIKE '%Pending/%')
+       AND updated_at >= $1
+     ORDER BY updated_at DESC
+     LIMIT $2`,
+    [sinceDate, LONG_ARC_LIMIT * 4]
+  );
+
+  const items: ContextItem[] = [];
+  for (const r of insights.rows) {
+    const id = r.id as string;
+    if (excludeUuids.has(id)) continue;
+    if (excludeRecentUuids.has(id)) continue;
+    items.push({
+      uuid: id,
+      kind: "insight",
+      date: (r.updated_at as Date).toISOString().slice(0, 10),
+      title: r.title as string,
+      text: r.body as string,
+    });
+    if (items.length >= LONG_ARC_LIMIT) break;
+  }
   return items;
 }

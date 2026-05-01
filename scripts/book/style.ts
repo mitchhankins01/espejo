@@ -1,12 +1,11 @@
-import { readFile, writeFile, stat } from "fs/promises";
-import { existsSync } from "fs";
+import { readFile, writeFile } from "fs/promises";
 import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../../src/config.js";
 
 const VIVO_PATH = "Artifacts/Project/Español Vivo.md";
 const STYLE_PATH = "books/style.md";
 
-const DISTILL_PROMPT = `You are distilling a Spanish-learning state machine (YAML) into a compact style guide for a writer who will produce 1950-2400 word Spanish tomos (mini-books) for the learner. The guide must be actionable inside a prompt — no meta-commentary, no "this document contains".
+const DISTILL_PROMPT = `You are distilling a Spanish-learning state machine (YAML) into a compact style guide for a writer who will produce ~2000 word Spanish tomos (mini-books) for the learner. The guide must be actionable inside a prompt — no meta-commentary, no "this document contains".
 
 The input YAML has these fields: level, profile, tenses (per-tense status: solid | comfortable | learning | not_yet), focus (topic, mental_model, trigger_phrases, common_traps, status), recurring_errors (with last_seen dates), open_questions, active_vocab (with seen dates), audit_log.
 
@@ -36,23 +35,11 @@ Bullet list paraphrased from recurring_errors — the patterns to steer clear of
 Output pure markdown starting with the first "## Reader". No preamble. No closing note. Keep it under 700 words total.`;
 
 export async function ensureStyle(): Promise<string> {
-  if (await isStyleFresh()) {
-    return readFile(STYLE_PATH, "utf-8");
-  }
   console.log("[style] regenerating books/style.md from Español Vivo.md");
   const vivo = await readFile(VIVO_PATH, "utf-8");
   const style = await distill(vivo);
   await writeFile(STYLE_PATH, style, "utf-8");
   return style;
-}
-
-async function isStyleFresh(): Promise<boolean> {
-  if (!existsSync(STYLE_PATH)) return false;
-  const [vivoStat, styleStat] = await Promise.all([
-    stat(VIVO_PATH),
-    stat(STYLE_PATH),
-  ]);
-  return styleStat.mtimeMs >= vivoStat.mtimeMs;
 }
 
 async function distill(vivo: string): Promise<string> {
