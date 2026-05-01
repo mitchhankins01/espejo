@@ -223,8 +223,7 @@ CREATE TABLE IF NOT EXISTS oura_daily_sleep (
 );
 
 -- sleep_type values: 'long_sleep' (main night sleep), 'late_nap', 'sleep'.
--- Stage durations (deep/rem/light/awake) live in raw_json — the /sleep endpoint
--- returns them per session, not aggregated per day.
+-- Stage durations and intra-night HRV/HR time series come from /v2/sleep per session.
 CREATE TABLE IF NOT EXISTS oura_sleep_sessions (
     oura_id TEXT PRIMARY KEY,
     day DATE NOT NULL,
@@ -234,19 +233,40 @@ CREATE TABLE IF NOT EXISTS oura_sleep_sessions (
     bedtime_end TIMESTAMPTZ,
     average_hrv DOUBLE PRECISION,
     average_heart_rate DOUBLE PRECISION,
+    lowest_heart_rate INT,
+    average_breath NUMERIC(5,2),
     total_sleep_duration_seconds INT,
+    time_in_bed_seconds INT,
+    awake_seconds INT,
+    latency_seconds INT,
+    deep_sleep_seconds INT,
+    rem_sleep_seconds INT,
+    light_sleep_seconds INT,
+    restless_periods INT,
     efficiency DOUBLE PRECISION,
+    -- Intra-night time series. Storing as JSONB keeps each row bounded (~1KB)
+    -- and avoids a samples-per-night fanout table; queries use jsonb operators.
+    hrv_5min JSONB,                  -- { interval: 300, items: [number|null, ...] }
+    heart_rate_5min JSONB,           -- same shape as hrv_5min
+    sleep_phase_5min TEXT,           -- per-5-min phase code string
+    sleep_phase_30sec TEXT,          -- per-30-sec phase code string
+    movement_30sec TEXT,             -- per-30-sec movement code string
     raw_json JSONB NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_oura_sleep_sessions_day ON oura_sleep_sessions(day DESC);
 CREATE INDEX IF NOT EXISTS idx_oura_sleep_sessions_day_type ON oura_sleep_sessions(day, sleep_type);
 
+-- Note: resting_heart_rate_score and hrv_balance_score are 0-100 contributor
+-- scores from Oura, NOT raw RHR/HRV values. The actual RHR for a day is
+-- oura_sleep_sessions.lowest_heart_rate or .average_heart_rate joined on
+-- sleep_type='long_sleep'.
 CREATE TABLE IF NOT EXISTS oura_daily_readiness (
     day DATE PRIMARY KEY,
     score INT,
     temperature_deviation DOUBLE PRECISION,
-    resting_heart_rate DOUBLE PRECISION,
-    hrv_balance DOUBLE PRECISION,
+    temperature_trend_deviation DOUBLE PRECISION,
+    resting_heart_rate_score INT,
+    hrv_balance_score INT,
     contributors JSONB,
     raw_json JSONB NOT NULL
 );
@@ -257,9 +277,20 @@ CREATE TABLE IF NOT EXISTS oura_daily_activity (
     steps INT,
     active_calories INT,
     total_calories INT,
+    sedentary_seconds INT,
+    resting_seconds INT,
+    non_wear_seconds INT,
     medium_activity_seconds INT,
     high_activity_seconds INT,
     low_activity_seconds INT,
+    sedentary_met_minutes INT,
+    low_met_minutes INT,
+    medium_met_minutes INT,
+    high_met_minutes INT,
+    average_met_minutes DOUBLE PRECISION,
+    equivalent_walking_distance_m INT,
+    class_5min TEXT,
+    met JSONB,
     raw_json JSONB NOT NULL
 );
 
@@ -278,11 +309,101 @@ CREATE TABLE IF NOT EXISTS oura_workouts (
     calories DOUBLE PRECISION,
     distance DOUBLE PRECISION,
     duration_seconds INT,
+    start_time TIMESTAMPTZ,
+    end_time TIMESTAMPTZ,
+    intensity TEXT,
+    label TEXT,
+    source TEXT,
     average_heart_rate DOUBLE PRECISION,
     max_heart_rate DOUBLE PRECISION,
     raw_json JSONB NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_oura_workouts_day ON oura_workouts(day DESC);
+
+-- Nightly SpO2 + breathing disturbance (added by Oura Aug 2022).
+CREATE TABLE IF NOT EXISTS oura_daily_spo2 (
+    day DATE PRIMARY KEY,
+    average_spo2 DOUBLE PRECISION,
+    breathing_disturbance_index INT,
+    raw_json JSONB NOT NULL
+);
+
+-- Resilience score components (added by Oura Nov 2023).
+CREATE TABLE IF NOT EXISTS oura_daily_resilience (
+    day DATE PRIMARY KEY,
+    level TEXT,                      -- limited|adequate|solid|strong|exceptional
+    sleep_recovery DOUBLE PRECISION,
+    daytime_recovery DOUBLE PRECISION,
+    stress DOUBLE PRECISION,
+    raw_json JSONB NOT NULL
+);
+
+-- Cardiovascular age (added by Oura Mar 2024).
+CREATE TABLE IF NOT EXISTS oura_daily_cardiovascular_age (
+    day DATE PRIMARY KEY,
+    vascular_age INT,
+    pulse_wave_velocity DOUBLE PRECISION,
+    raw_json JSONB NOT NULL
+);
+
+-- Optimal bedtime recommendations.
+CREATE TABLE IF NOT EXISTS oura_sleep_time (
+    day DATE PRIMARY KEY,
+    status TEXT,
+    recommendation TEXT,
+    optimal_bedtime JSONB,
+    raw_json JSONB NOT NULL
+);
+
+-- Manual tags / annotations.
+CREATE TABLE IF NOT EXISTS oura_enhanced_tags (
+    oura_id TEXT PRIMARY KEY,
+    start_day DATE,
+    end_day DATE,
+    start_time TIMESTAMPTZ,
+    end_time TIMESTAMPTZ,
+    tag_type_code TEXT,
+    custom_name TEXT,
+    comment TEXT,
+    raw_json JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_oura_enhanced_tags_start_day ON oura_enhanced_tags(start_day DESC);
+
+-- Rest-mode windows (when Oura suggests recovery).
+CREATE TABLE IF NOT EXISTS oura_rest_mode_periods (
+    oura_id INT PRIMARY KEY,
+    start_day DATE,
+    end_day DATE,
+    episodes JSONB,
+    raw_json JSONB NOT NULL
+);
+
+-- Meditation / rest sessions with intra-session HRV+HR time series.
+CREATE TABLE IF NOT EXISTS oura_sessions (
+    oura_id TEXT PRIMARY KEY,
+    day DATE NOT NULL,
+    type TEXT,                       -- meditation | rest | breathing | etc.
+    start_time TIMESTAMPTZ,
+    end_time TIMESTAMPTZ,
+    mood TEXT,
+    motion_count JSONB,
+    hrv JSONB,                       -- { interval, items: [...] }
+    heart_rate JSONB,                -- same shape
+    raw_json JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_oura_sessions_day ON oura_sessions(day DESC);
+
+-- Continuous heart rate samples (rest, awake, workout, live).
+-- 5-min interval at rest/awake, per-second during workouts.
+-- Volume: ~3M+ rows back to 2022-09. Indexed for time-range scans and per-source slices.
+CREATE TABLE IF NOT EXISTS oura_heartrate (
+    ts TIMESTAMPTZ NOT NULL,
+    bpm INT NOT NULL,
+    source TEXT NOT NULL,
+    PRIMARY KEY (ts, source)
+);
+CREATE INDEX IF NOT EXISTS idx_oura_heartrate_ts ON oura_heartrate(ts DESC);
+CREATE INDEX IF NOT EXISTS idx_oura_heartrate_source_ts ON oura_heartrate(source, ts DESC);
 
 -- ============================================================================
 -- Knowledge artifacts

@@ -9,10 +9,17 @@ export interface OuraSummaryRow {
   stress: string | null;
   average_hrv: number | null;
   average_heart_rate: number | null;
+  lowest_heart_rate: number | null;
+  average_breath: number | null;
   sleep_duration_seconds: number | null;
   deep_sleep_duration_seconds: number | null;
   rem_sleep_duration_seconds: number | null;
+  awake_seconds: number | null;
   efficiency: number | null;
+  spo2: number | null;
+  breathing_disturbance_index: number | null;
+  resilience_level: string | null;
+  vascular_age: number | null;
   workout_count: number;
 }
 
@@ -82,9 +89,13 @@ export async function upsertOuraDailySleep(pool: pg.Pool, row: Record<string, un
 export async function upsertOuraSleepSession(pool: pg.Pool, row: Record<string, unknown>): Promise<void> {
   await pool.query(
     `INSERT INTO oura_sleep_sessions (
-      oura_id, day, period, sleep_type, bedtime_start, bedtime_end, average_hrv, average_heart_rate,
-      total_sleep_duration_seconds, efficiency, raw_json
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      oura_id, day, period, sleep_type, bedtime_start, bedtime_end,
+      average_hrv, average_heart_rate, lowest_heart_rate, average_breath,
+      total_sleep_duration_seconds, time_in_bed_seconds, awake_seconds, latency_seconds,
+      deep_sleep_seconds, rem_sleep_seconds, light_sleep_seconds, restless_periods, efficiency,
+      hrv_5min, heart_rate_5min, sleep_phase_5min, sleep_phase_30sec, movement_30sec,
+      raw_json
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
     ON CONFLICT (oura_id) DO UPDATE SET
       day = EXCLUDED.day,
       period = EXCLUDED.period,
@@ -93,45 +104,109 @@ export async function upsertOuraSleepSession(pool: pg.Pool, row: Record<string, 
       bedtime_end = EXCLUDED.bedtime_end,
       average_hrv = EXCLUDED.average_hrv,
       average_heart_rate = EXCLUDED.average_heart_rate,
+      lowest_heart_rate = EXCLUDED.lowest_heart_rate,
+      average_breath = EXCLUDED.average_breath,
       total_sleep_duration_seconds = EXCLUDED.total_sleep_duration_seconds,
+      time_in_bed_seconds = EXCLUDED.time_in_bed_seconds,
+      awake_seconds = EXCLUDED.awake_seconds,
+      latency_seconds = EXCLUDED.latency_seconds,
+      deep_sleep_seconds = EXCLUDED.deep_sleep_seconds,
+      rem_sleep_seconds = EXCLUDED.rem_sleep_seconds,
+      light_sleep_seconds = EXCLUDED.light_sleep_seconds,
+      restless_periods = EXCLUDED.restless_periods,
       efficiency = EXCLUDED.efficiency,
+      hrv_5min = EXCLUDED.hrv_5min,
+      heart_rate_5min = EXCLUDED.heart_rate_5min,
+      sleep_phase_5min = EXCLUDED.sleep_phase_5min,
+      sleep_phase_30sec = EXCLUDED.sleep_phase_30sec,
+      movement_30sec = EXCLUDED.movement_30sec,
       raw_json = EXCLUDED.raw_json`,
-    [row.id, row.day, row.period ?? null, row.type ?? null, row.bedtime_start ?? null, row.bedtime_end ?? null, row.average_hrv ?? null, row.average_heart_rate ?? null, row.total_sleep_duration ?? null, row.efficiency ?? null, row]
+    [
+      row.id, row.day, row.period ?? null, row.type ?? null,
+      row.bedtime_start ?? null, row.bedtime_end ?? null,
+      row.average_hrv ?? null, row.average_heart_rate ?? null,
+      row.lowest_heart_rate ?? null, row.average_breath ?? null,
+      row.total_sleep_duration ?? null, row.time_in_bed ?? null,
+      row.awake_time ?? null, row.latency ?? null,
+      row.deep_sleep_duration ?? null, row.rem_sleep_duration ?? null,
+      row.light_sleep_duration ?? null, row.restless_periods ?? null,
+      row.efficiency ?? null,
+      row.hrv ?? null, row.heart_rate ?? null,
+      row.sleep_phase_5_min ?? null, row.sleep_phase_30_sec ?? null, row.movement_30_sec ?? null,
+      row,
+    ]
   );
 }
 
 export async function upsertOuraDailyReadiness(pool: pg.Pool, row: Record<string, unknown>): Promise<void> {
+  const contributors = (row.contributors ?? {}) as Record<string, unknown>;
   await pool.query(
     `INSERT INTO oura_daily_readiness (
-      day, score, temperature_deviation, resting_heart_rate, hrv_balance, contributors, raw_json
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7)
+      day, score, temperature_deviation, temperature_trend_deviation,
+      resting_heart_rate_score, hrv_balance_score, contributors, raw_json
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
     ON CONFLICT (day) DO UPDATE SET
       score = EXCLUDED.score,
       temperature_deviation = EXCLUDED.temperature_deviation,
-      resting_heart_rate = EXCLUDED.resting_heart_rate,
-      hrv_balance = EXCLUDED.hrv_balance,
+      temperature_trend_deviation = EXCLUDED.temperature_trend_deviation,
+      resting_heart_rate_score = EXCLUDED.resting_heart_rate_score,
+      hrv_balance_score = EXCLUDED.hrv_balance_score,
       contributors = EXCLUDED.contributors,
       raw_json = EXCLUDED.raw_json`,
-    [row.day, row.score ?? null, row.temperature_deviation ?? null, row.resting_heart_rate ?? null, row.hrv_balance ?? null, row.contributors ?? null, row]
+    [
+      row.day, row.score ?? null,
+      row.temperature_deviation ?? null,
+      row.temperature_trend_deviation ?? null,
+      contributors.resting_heart_rate ?? null,
+      contributors.hrv_balance ?? null,
+      row.contributors ?? null,
+      row,
+    ]
   );
 }
 
 export async function upsertOuraDailyActivity(pool: pg.Pool, row: Record<string, unknown>): Promise<void> {
   await pool.query(
     `INSERT INTO oura_daily_activity (
-      day, score, steps, active_calories, total_calories, medium_activity_seconds, high_activity_seconds,
-      low_activity_seconds, raw_json
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      day, score, steps, active_calories, total_calories,
+      sedentary_seconds, resting_seconds, non_wear_seconds,
+      medium_activity_seconds, high_activity_seconds, low_activity_seconds,
+      sedentary_met_minutes, low_met_minutes, medium_met_minutes, high_met_minutes,
+      average_met_minutes, equivalent_walking_distance_m, class_5min, met,
+      raw_json
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
     ON CONFLICT (day) DO UPDATE SET
       score = EXCLUDED.score,
       steps = EXCLUDED.steps,
       active_calories = EXCLUDED.active_calories,
       total_calories = EXCLUDED.total_calories,
+      sedentary_seconds = EXCLUDED.sedentary_seconds,
+      resting_seconds = EXCLUDED.resting_seconds,
+      non_wear_seconds = EXCLUDED.non_wear_seconds,
       medium_activity_seconds = EXCLUDED.medium_activity_seconds,
       high_activity_seconds = EXCLUDED.high_activity_seconds,
       low_activity_seconds = EXCLUDED.low_activity_seconds,
+      sedentary_met_minutes = EXCLUDED.sedentary_met_minutes,
+      low_met_minutes = EXCLUDED.low_met_minutes,
+      medium_met_minutes = EXCLUDED.medium_met_minutes,
+      high_met_minutes = EXCLUDED.high_met_minutes,
+      average_met_minutes = EXCLUDED.average_met_minutes,
+      equivalent_walking_distance_m = EXCLUDED.equivalent_walking_distance_m,
+      class_5min = EXCLUDED.class_5min,
+      met = EXCLUDED.met,
       raw_json = EXCLUDED.raw_json`,
-    [row.day, row.score ?? null, row.steps ?? null, row.active_calories ?? null, row.total_calories ?? null, row.medium_activity_time ?? null, row.high_activity_time ?? null, row.low_activity_time ?? null, row]
+    [
+      row.day, row.score ?? null, row.steps ?? null,
+      row.active_calories ?? null, row.total_calories ?? null,
+      row.sedentary_time ?? null, row.resting_time ?? null, row.non_wear_time ?? null,
+      row.medium_activity_time ?? null, row.high_activity_time ?? null, row.low_activity_time ?? null,
+      row.sedentary_met_minutes ?? null, row.low_activity_met_minutes ?? null,
+      row.medium_activity_met_minutes ?? null, row.high_activity_met_minutes ?? null,
+      row.average_met_minutes ?? null,
+      row.equivalent_walking_distance ?? null,
+      row.class_5_min ?? null, row.met ?? null,
+      row,
+    ]
   );
 }
 
@@ -149,20 +224,41 @@ export async function upsertOuraDailyStress(pool: pg.Pool, row: Record<string, u
 }
 
 export async function upsertOuraWorkout(pool: pg.Pool, row: Record<string, unknown>): Promise<void> {
+  // The /workout endpoint returns start_datetime + end_datetime but no top-level
+  // duration field. Compute duration from the timestamps when available.
+  const start = row.start_datetime ? new Date(row.start_datetime as string) : null;
+  const end = row.end_datetime ? new Date(row.end_datetime as string) : null;
+  const computedDuration =
+    start && end ? Math.round((end.getTime() - start.getTime()) / 1000) : null;
+
   await pool.query(
     `INSERT INTO oura_workouts (
-      oura_id, day, activity, calories, distance, duration_seconds, average_heart_rate, max_heart_rate, raw_json
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      oura_id, day, activity, calories, distance, duration_seconds,
+      start_time, end_time, intensity, label, source,
+      average_heart_rate, max_heart_rate, raw_json
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
     ON CONFLICT (oura_id) DO UPDATE SET
       day = EXCLUDED.day,
       activity = EXCLUDED.activity,
       calories = EXCLUDED.calories,
       distance = EXCLUDED.distance,
       duration_seconds = EXCLUDED.duration_seconds,
+      start_time = EXCLUDED.start_time,
+      end_time = EXCLUDED.end_time,
+      intensity = EXCLUDED.intensity,
+      label = EXCLUDED.label,
+      source = EXCLUDED.source,
       average_heart_rate = EXCLUDED.average_heart_rate,
       max_heart_rate = EXCLUDED.max_heart_rate,
       raw_json = EXCLUDED.raw_json`,
-    [row.id, row.day, row.activity ?? null, row.calories ?? null, row.distance ?? null, row.duration ?? null, row.average_heart_rate ?? null, row.max_heart_rate ?? null, row]
+    [
+      row.id, row.day, row.activity ?? null,
+      row.calories ?? null, row.distance ?? null, computedDuration,
+      row.start_datetime ?? null, row.end_datetime ?? null,
+      row.intensity ?? null, row.label ?? null, row.source ?? null,
+      row.average_heart_rate ?? null, row.max_heart_rate ?? null,
+      row,
+    ]
   );
 }
 
@@ -171,35 +267,50 @@ export async function upsertOuraWorkout(pool: pg.Pool, row: Record<string, unkno
 // only returns score+contributors, so oura_daily_sleep can't be the source for
 // duration/stages — it's just the daily score.
 const longSleepLateral = `LEFT JOIN LATERAL (
-  SELECT total_sleep_duration_seconds, efficiency, average_hrv, average_heart_rate, bedtime_start, bedtime_end, raw_json
+  SELECT total_sleep_duration_seconds, time_in_bed_seconds, awake_seconds, latency_seconds,
+         deep_sleep_seconds, rem_sleep_seconds, light_sleep_seconds, restless_periods,
+         efficiency, average_hrv, average_heart_rate, lowest_heart_rate, average_breath,
+         bedtime_start, bedtime_end, hrv_5min, heart_rate_5min, raw_json
   FROM oura_sleep_sessions
   WHERE day = d.day AND sleep_type = 'long_sleep'
   LIMIT 1
 ) ss ON TRUE`;
 
-export async function getOuraSummaryByDay(pool: pg.Pool, day: string): Promise<OuraSummaryRow | null> {
-  const result = await pool.query<OuraSummaryRow>(
-    `SELECT d.day,
-            d.score AS sleep_score,
-            r.score AS readiness_score,
-            a.score AS activity_score,
-            a.steps,
-            st.day_summary AS stress,
-            ss.average_hrv,
-            ss.average_heart_rate,
-            ss.total_sleep_duration_seconds AS sleep_duration_seconds,
-            (ss.raw_json->>'deep_sleep_duration')::int AS deep_sleep_duration_seconds,
-            (ss.raw_json->>'rem_sleep_duration')::int AS rem_sleep_duration_seconds,
-            ss.efficiency,
-            COALESCE(w.workout_count, 0)::int AS workout_count
-      FROM oura_daily_sleep d
-      LEFT JOIN oura_daily_readiness r ON r.day = d.day
+const summarySelect = `d.day,
+        d.score AS sleep_score,
+        r.score AS readiness_score,
+        a.score AS activity_score,
+        a.steps,
+        st.day_summary AS stress,
+        ss.average_hrv,
+        ss.average_heart_rate,
+        ss.lowest_heart_rate,
+        ss.average_breath,
+        ss.total_sleep_duration_seconds AS sleep_duration_seconds,
+        ss.deep_sleep_seconds AS deep_sleep_duration_seconds,
+        ss.rem_sleep_seconds AS rem_sleep_duration_seconds,
+        ss.awake_seconds,
+        ss.efficiency,
+        sp.average_spo2 AS spo2,
+        sp.breathing_disturbance_index,
+        rs.level AS resilience_level,
+        cv.vascular_age,
+        COALESCE(w.workout_count, 0)::int AS workout_count`;
+
+const summaryJoins = `LEFT JOIN oura_daily_readiness r ON r.day = d.day
       LEFT JOIN oura_daily_activity a ON a.day = d.day
       LEFT JOIN oura_daily_stress st ON st.day = d.day
       ${longSleepLateral}
-      LEFT JOIN (
-        SELECT day, COUNT(*) AS workout_count FROM oura_workouts GROUP BY day
-      ) w ON w.day = d.day
+      LEFT JOIN oura_daily_spo2 sp ON sp.day = d.day
+      LEFT JOIN oura_daily_resilience rs ON rs.day = d.day
+      LEFT JOIN oura_daily_cardiovascular_age cv ON cv.day = d.day
+      LEFT JOIN (SELECT day, COUNT(*) AS workout_count FROM oura_workouts GROUP BY day) w ON w.day = d.day`;
+
+export async function getOuraSummaryByDay(pool: pg.Pool, day: string): Promise<OuraSummaryRow | null> {
+  const result = await pool.query<OuraSummaryRow>(
+    `SELECT ${summarySelect}
+      FROM oura_daily_sleep d
+      ${summaryJoins}
       WHERE d.day = $1`,
     [day]
   );
@@ -208,25 +319,9 @@ export async function getOuraSummaryByDay(pool: pg.Pool, day: string): Promise<O
 
 export async function getOuraWeeklyRows(pool: pg.Pool, endDay: string): Promise<OuraSummaryRow[]> {
   const result = await pool.query<OuraSummaryRow>(
-    `SELECT d.day,
-            d.score AS sleep_score,
-            r.score AS readiness_score,
-            a.score AS activity_score,
-            a.steps,
-            st.day_summary AS stress,
-            ss.average_hrv,
-            ss.average_heart_rate,
-            ss.total_sleep_duration_seconds AS sleep_duration_seconds,
-            (ss.raw_json->>'deep_sleep_duration')::int AS deep_sleep_duration_seconds,
-            (ss.raw_json->>'rem_sleep_duration')::int AS rem_sleep_duration_seconds,
-            ss.efficiency,
-            COALESCE(w.workout_count, 0)::int AS workout_count
+    `SELECT ${summarySelect}
       FROM oura_daily_sleep d
-      LEFT JOIN oura_daily_readiness r ON r.day = d.day
-      LEFT JOIN oura_daily_activity a ON a.day = d.day
-      LEFT JOIN oura_daily_stress st ON st.day = d.day
-      ${longSleepLateral}
-      LEFT JOIN (SELECT day, COUNT(*) AS workout_count FROM oura_workouts GROUP BY day) w ON w.day = d.day
+      ${summaryJoins}
       WHERE d.day BETWEEN ($1::date - INTERVAL '6 days')::date AND $1::date
       ORDER BY d.day ASC`,
     [endDay]
@@ -234,8 +329,20 @@ export async function getOuraWeeklyRows(pool: pg.Pool, endDay: string): Promise<
   return result.rows;
 }
 
-export type OuraTrendMetric = "sleep_score" | "hrv" | "readiness" | "activity" | "steps" | "sleep_duration" | "stress" | "resting_heart_rate" | "temperature" | "active_calories" | "heart_rate" | "efficiency";
+export type OuraTrendMetric =
+  | "sleep_score" | "hrv" | "readiness" | "activity" | "steps"
+  | "sleep_duration" | "stress" | "resting_heart_rate" | "temperature"
+  | "active_calories" | "heart_rate" | "efficiency"
+  | "deep_sleep" | "rem_sleep" | "light_sleep" | "awake_time" | "latency"
+  | "breath_rate" | "lowest_heart_rate"
+  | "spo2" | "breathing_disturbance"
+  | "resilience_sleep_recovery" | "resilience_daytime_recovery" | "resilience_stress"
+  | "vascular_age" | "pulse_wave_velocity"
+  | "non_wear_seconds";
 
+// Maps metric → column expression. Joined tables: d=daily_sleep, r=readiness,
+// a=daily_activity, ss=sleep_session(long_sleep), st=stress, sp=spo2,
+// rs=resilience, cv=cv_age.
 const ouraTrendColumnSql: Record<OuraTrendMetric, string> = {
   sleep_score: "d.score",
   hrv: "ss.average_hrv",
@@ -244,17 +351,38 @@ const ouraTrendColumnSql: Record<OuraTrendMetric, string> = {
   steps: "a.steps",
   sleep_duration: "ss.total_sleep_duration_seconds",
   stress: "st.stress_high_seconds",
-  resting_heart_rate: "r.resting_heart_rate",
+  // resting_heart_rate is the canonical Oura RHR — lowest HR during sleep.
+  // Pre-045 this returned r.resting_heart_rate which was actually a 0–100
+  // contributor score, NULL for every row (column misnamed).
+  resting_heart_rate: "ss.lowest_heart_rate",
   temperature: "r.temperature_deviation",
   active_calories: "a.active_calories",
   heart_rate: "ss.average_heart_rate",
   efficiency: "ss.efficiency",
+  deep_sleep: "ss.deep_sleep_seconds",
+  rem_sleep: "ss.rem_sleep_seconds",
+  light_sleep: "ss.light_sleep_seconds",
+  awake_time: "ss.awake_seconds",
+  latency: "ss.latency_seconds",
+  breath_rate: "ss.average_breath",
+  lowest_heart_rate: "ss.lowest_heart_rate",
+  spo2: "sp.average_spo2",
+  breathing_disturbance: "sp.breathing_disturbance_index",
+  resilience_sleep_recovery: "rs.sleep_recovery",
+  resilience_daytime_recovery: "rs.daytime_recovery",
+  resilience_stress: "rs.stress",
+  vascular_age: "cv.vascular_age",
+  pulse_wave_velocity: "cv.pulse_wave_velocity",
+  non_wear_seconds: "a.non_wear_seconds",
 };
 
-const stressJoinMetrics: Set<OuraTrendMetric> = new Set(["stress"]);
-
-function needsStressJoin(metric: OuraTrendMetric): boolean {
-  return stressJoinMetrics.has(metric);
+function joinClausesFor(metric: OuraTrendMetric): string {
+  const clauses: string[] = [];
+  if (metric === "stress") clauses.push("LEFT JOIN oura_daily_stress st ON st.day = d.day");
+  if (metric === "spo2" || metric === "breathing_disturbance") clauses.push("LEFT JOIN oura_daily_spo2 sp ON sp.day = d.day");
+  if (metric.startsWith("resilience_")) clauses.push("LEFT JOIN oura_daily_resilience rs ON rs.day = d.day");
+  if (metric === "vascular_age" || metric === "pulse_wave_velocity") clauses.push("LEFT JOIN oura_daily_cardiovascular_age cv ON cv.day = d.day");
+  return clauses.join("\n     ");
 }
 
 export async function getOuraTrendMetric(
@@ -262,14 +390,13 @@ export async function getOuraTrendMetric(
   metric: OuraTrendMetric,
   days: number
 ): Promise<Array<{ day: Date; value: number }>> {
-  const stressJoin = needsStressJoin(metric) ? "LEFT JOIN oura_daily_stress st ON st.day = d.day" : "";
   const result = await pool.query<{ day: Date; value: number }>(
     `SELECT d.day, ${ouraTrendColumnSql[metric]}::double precision AS value
      FROM oura_daily_sleep d
      LEFT JOIN oura_daily_readiness r ON r.day = d.day
      LEFT JOIN oura_daily_activity a ON a.day = d.day
      ${longSleepLateral}
-     ${stressJoin}
+     ${joinClausesFor(metric)}
      WHERE d.day >= (CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day')
        AND ${ouraTrendColumnSql[metric]} IS NOT NULL
      ORDER BY d.day ASC`,
@@ -284,14 +411,13 @@ export async function getOuraTrendMetricForRange(
   startDate: string,
   endDate: string
 ): Promise<Array<{ day: Date; value: number }>> {
-  const stressJoin = needsStressJoin(metric) ? "LEFT JOIN oura_daily_stress st ON st.day = d.day" : "";
   const result = await pool.query<{ day: Date; value: number }>(
     `SELECT d.day, ${ouraTrendColumnSql[metric]}::double precision AS value
      FROM oura_daily_sleep d
      LEFT JOIN oura_daily_readiness r ON r.day = d.day
      LEFT JOIN oura_daily_activity a ON a.day = d.day
      ${longSleepLateral}
-     ${stressJoin}
+     ${joinClausesFor(metric)}
      WHERE d.day >= $1::date AND d.day <= $2::date
        AND ${ouraTrendColumnSql[metric]} IS NOT NULL
      ORDER BY d.day ASC`,
@@ -353,6 +479,235 @@ export async function getOuraTemperatureData(
        AND temperature_deviation IS NOT NULL
      ORDER BY day ASC`,
     [days]
+  );
+  return result.rows;
+}
+
+// ─── New endpoint upserts ───────────────────────────────────────────────────
+
+export async function upsertOuraDailySpo2(pool: pg.Pool, row: Record<string, unknown>): Promise<void> {
+  const spo2 = (row.spo2_percentage ?? null) as Record<string, unknown> | null;
+  await pool.query(
+    `INSERT INTO oura_daily_spo2 (day, average_spo2, breathing_disturbance_index, raw_json)
+     VALUES ($1,$2,$3,$4)
+     ON CONFLICT (day) DO UPDATE SET
+       average_spo2 = EXCLUDED.average_spo2,
+       breathing_disturbance_index = EXCLUDED.breathing_disturbance_index,
+       raw_json = EXCLUDED.raw_json`,
+    [row.day, spo2?.average ?? null, row.breathing_disturbance_index ?? null, row]
+  );
+}
+
+export async function upsertOuraDailyResilience(pool: pg.Pool, row: Record<string, unknown>): Promise<void> {
+  const c = (row.contributors ?? {}) as Record<string, unknown>;
+  await pool.query(
+    `INSERT INTO oura_daily_resilience (day, level, sleep_recovery, daytime_recovery, stress, raw_json)
+     VALUES ($1,$2,$3,$4,$5,$6)
+     ON CONFLICT (day) DO UPDATE SET
+       level = EXCLUDED.level,
+       sleep_recovery = EXCLUDED.sleep_recovery,
+       daytime_recovery = EXCLUDED.daytime_recovery,
+       stress = EXCLUDED.stress,
+       raw_json = EXCLUDED.raw_json`,
+    [row.day, row.level ?? null, c.sleep_recovery ?? null, c.daytime_recovery ?? null, c.stress ?? null, row]
+  );
+}
+
+export async function upsertOuraDailyCardiovascularAge(pool: pg.Pool, row: Record<string, unknown>): Promise<void> {
+  await pool.query(
+    `INSERT INTO oura_daily_cardiovascular_age (day, vascular_age, pulse_wave_velocity, raw_json)
+     VALUES ($1,$2,$3,$4)
+     ON CONFLICT (day) DO UPDATE SET
+       vascular_age = EXCLUDED.vascular_age,
+       pulse_wave_velocity = EXCLUDED.pulse_wave_velocity,
+       raw_json = EXCLUDED.raw_json`,
+    [row.day, row.vascular_age ?? null, row.pulse_wave_velocity ?? null, row]
+  );
+}
+
+export async function upsertOuraSleepTime(pool: pg.Pool, row: Record<string, unknown>): Promise<void> {
+  await pool.query(
+    `INSERT INTO oura_sleep_time (day, status, recommendation, optimal_bedtime, raw_json)
+     VALUES ($1,$2,$3,$4,$5)
+     ON CONFLICT (day) DO UPDATE SET
+       status = EXCLUDED.status,
+       recommendation = EXCLUDED.recommendation,
+       optimal_bedtime = EXCLUDED.optimal_bedtime,
+       raw_json = EXCLUDED.raw_json`,
+    [row.day, row.status ?? null, row.recommendation ?? null, row.optimal_bedtime ?? null, row]
+  );
+}
+
+export async function upsertOuraEnhancedTag(pool: pg.Pool, row: Record<string, unknown>): Promise<void> {
+  await pool.query(
+    `INSERT INTO oura_enhanced_tags (oura_id, start_day, end_day, start_time, end_time, tag_type_code, custom_name, comment, raw_json)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+     ON CONFLICT (oura_id) DO UPDATE SET
+       start_day = EXCLUDED.start_day,
+       end_day = EXCLUDED.end_day,
+       start_time = EXCLUDED.start_time,
+       end_time = EXCLUDED.end_time,
+       tag_type_code = EXCLUDED.tag_type_code,
+       custom_name = EXCLUDED.custom_name,
+       comment = EXCLUDED.comment,
+       raw_json = EXCLUDED.raw_json`,
+    [
+      row.id, row.start_day ?? null, row.end_day ?? null,
+      row.start_time ?? null, row.end_time ?? null,
+      row.tag_type_code ?? null, row.custom_name ?? null, row.comment ?? null, row,
+    ]
+  );
+}
+
+export async function upsertOuraRestModePeriod(pool: pg.Pool, row: Record<string, unknown>): Promise<void> {
+  await pool.query(
+    `INSERT INTO oura_rest_mode_periods (oura_id, start_day, end_day, episodes, raw_json)
+     VALUES ($1,$2,$3,$4,$5)
+     ON CONFLICT (oura_id) DO UPDATE SET
+       start_day = EXCLUDED.start_day,
+       end_day = EXCLUDED.end_day,
+       episodes = EXCLUDED.episodes,
+       raw_json = EXCLUDED.raw_json`,
+    [row.id, row.start_day ?? null, row.end_day ?? null, row.episodes ?? null, row]
+  );
+}
+
+export async function upsertOuraSession(pool: pg.Pool, row: Record<string, unknown>): Promise<void> {
+  await pool.query(
+    `INSERT INTO oura_sessions (oura_id, day, type, start_time, end_time, mood, motion_count, hrv, heart_rate, raw_json)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     ON CONFLICT (oura_id) DO UPDATE SET
+       day = EXCLUDED.day,
+       type = EXCLUDED.type,
+       start_time = EXCLUDED.start_time,
+       end_time = EXCLUDED.end_time,
+       mood = EXCLUDED.mood,
+       motion_count = EXCLUDED.motion_count,
+       hrv = EXCLUDED.hrv,
+       heart_rate = EXCLUDED.heart_rate,
+       raw_json = EXCLUDED.raw_json`,
+    [
+      row.id, row.day, row.type ?? null,
+      row.start_datetime ?? null, row.end_datetime ?? null,
+      row.mood ?? null, row.motion_count ?? null,
+      row.hrv ?? null, row.heart_rate ?? null, row,
+    ]
+  );
+}
+
+// Heartrate is bulk-inserted in chunks; one row per (ts, source).
+export async function insertOuraHeartrateBatch(
+  pool: pg.Pool,
+  rows: Array<{ ts: string; bpm: number; source: string }>
+): Promise<number> {
+  if (rows.length === 0) return 0;
+  const values: string[] = [];
+  const params: (string | number)[] = [];
+  rows.forEach((r, i) => {
+    const base = i * 3;
+    values.push(`($${base + 1},$${base + 2},$${base + 3})`);
+    params.push(r.ts, r.bpm, r.source);
+  });
+  const result = await pool.query(
+    `INSERT INTO oura_heartrate (ts, bpm, source) VALUES ${values.join(",")}
+     ON CONFLICT (ts, source) DO NOTHING`,
+    params
+  );
+  return result.rowCount ?? 0;
+}
+
+// ─── New read queries ──────────────────────────────────────────────────────
+
+export interface OuraIntraNightHrvRow {
+  day: Date;
+  bedtime_start: Date | null;
+  hrv_5min: { interval: number; items: Array<number | null> } | null;
+  heart_rate_5min: { interval: number; items: Array<number | null> } | null;
+}
+
+// Pulls the long_sleep session for a given day, including the per-5-minute
+// HRV and HR time series. Used by the get_oura_intra_night_hrv tool to answer
+// "when does HRV recover during sleep" questions.
+export async function getOuraIntraNightHrv(pool: pg.Pool, day: string): Promise<OuraIntraNightHrvRow | null> {
+  const result = await pool.query<OuraIntraNightHrvRow>(
+    `SELECT day, bedtime_start, hrv_5min, heart_rate_5min
+     FROM oura_sleep_sessions
+     WHERE day = $1 AND sleep_type = 'long_sleep'
+     LIMIT 1`,
+    [day]
+  );
+  return result.rows[0] ?? null;
+}
+
+export interface OuraDailySpo2Row {
+  day: Date;
+  average_spo2: number | null;
+  breathing_disturbance_index: number | null;
+}
+export async function getOuraDailySpo2(pool: pg.Pool, day: string): Promise<OuraDailySpo2Row | null> {
+  const result = await pool.query<OuraDailySpo2Row>(
+    `SELECT day, average_spo2, breathing_disturbance_index FROM oura_daily_spo2 WHERE day = $1`,
+    [day]
+  );
+  return result.rows[0] ?? null;
+}
+
+export interface OuraResilienceRow {
+  day: Date;
+  level: string | null;
+  sleep_recovery: number | null;
+  daytime_recovery: number | null;
+  stress: number | null;
+}
+export async function getOuraResilience(pool: pg.Pool, day: string): Promise<OuraResilienceRow | null> {
+  const result = await pool.query<OuraResilienceRow>(
+    `SELECT day, level, sleep_recovery, daytime_recovery, stress FROM oura_daily_resilience WHERE day = $1`,
+    [day]
+  );
+  return result.rows[0] ?? null;
+}
+
+export interface OuraCardiovascularAgeRow {
+  day: Date;
+  vascular_age: number | null;
+  pulse_wave_velocity: number | null;
+}
+export async function getOuraCardiovascularAge(pool: pg.Pool, day: string): Promise<OuraCardiovascularAgeRow | null> {
+  const result = await pool.query<OuraCardiovascularAgeRow>(
+    `SELECT day, vascular_age, pulse_wave_velocity FROM oura_daily_cardiovascular_age WHERE day = $1`,
+    [day]
+  );
+  return result.rows[0] ?? null;
+}
+
+export interface OuraHeartrateRow {
+  ts: Date;
+  bpm: number;
+  source: string;
+}
+// Returns continuous heart rate samples in the requested window. Caller must
+// keep windows reasonable — at workout density (1 sample/sec) a single hour is
+// 3,600 rows.
+export async function getOuraHeartrateRange(
+  pool: pg.Pool,
+  startTs: string,
+  endTs: string,
+  source?: string
+): Promise<OuraHeartrateRow[]> {
+  if (source) {
+    const result = await pool.query<OuraHeartrateRow>(
+      `SELECT ts, bpm, source FROM oura_heartrate
+       WHERE ts >= $1::timestamptz AND ts < $2::timestamptz AND source = $3
+       ORDER BY ts ASC`,
+      [startTs, endTs, source]
+    );
+    return result.rows;
+  }
+  const result = await pool.query<OuraHeartrateRow>(
+    `SELECT ts, bpm, source FROM oura_heartrate
+     WHERE ts >= $1::timestamptz AND ts < $2::timestamptz
+     ORDER BY ts ASC`,
+    [startTs, endTs]
   );
   return result.rows;
 }

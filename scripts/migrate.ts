@@ -1379,6 +1379,215 @@ const migrations: Migration[] = [
       LEFT JOIN daily_metrics m ON m.date = d.day;
     `,
   },
+  // Oura data expansion: promote raw_json fields to typed columns (no API refetch
+  // needed — full responses have been stored in raw_json all along), add tables
+  // for endpoints we never synced (spo2, resilience, cv_age, sleep_time, tags,
+  // rest_mode, sessions, continuous heartrate), and rename misnamed readiness
+  // columns that stored 0–100 contributor scores under raw-value names.
+  {
+    name: "045-oura-data-expansion",
+    getSql: () => `
+      ALTER TABLE oura_sleep_sessions
+        ADD COLUMN IF NOT EXISTS lowest_heart_rate INT,
+        ADD COLUMN IF NOT EXISTS average_breath NUMERIC(5,2),
+        ADD COLUMN IF NOT EXISTS time_in_bed_seconds INT,
+        ADD COLUMN IF NOT EXISTS awake_seconds INT,
+        ADD COLUMN IF NOT EXISTS latency_seconds INT,
+        ADD COLUMN IF NOT EXISTS deep_sleep_seconds INT,
+        ADD COLUMN IF NOT EXISTS rem_sleep_seconds INT,
+        ADD COLUMN IF NOT EXISTS light_sleep_seconds INT,
+        ADD COLUMN IF NOT EXISTS restless_periods INT,
+        ADD COLUMN IF NOT EXISTS hrv_5min JSONB,
+        ADD COLUMN IF NOT EXISTS heart_rate_5min JSONB,
+        ADD COLUMN IF NOT EXISTS sleep_phase_5min TEXT,
+        ADD COLUMN IF NOT EXISTS sleep_phase_30sec TEXT,
+        ADD COLUMN IF NOT EXISTS movement_30sec TEXT;
+
+      UPDATE oura_sleep_sessions SET
+        lowest_heart_rate = NULLIF(raw_json->>'lowest_heart_rate','')::int,
+        average_breath = NULLIF(raw_json->>'average_breath','')::numeric,
+        time_in_bed_seconds = NULLIF(raw_json->>'time_in_bed','')::int,
+        awake_seconds = NULLIF(raw_json->>'awake_time','')::int,
+        latency_seconds = NULLIF(raw_json->>'latency','')::int,
+        deep_sleep_seconds = NULLIF(raw_json->>'deep_sleep_duration','')::int,
+        rem_sleep_seconds = NULLIF(raw_json->>'rem_sleep_duration','')::int,
+        light_sleep_seconds = NULLIF(raw_json->>'light_sleep_duration','')::int,
+        restless_periods = NULLIF(raw_json->>'restless_periods','')::int,
+        hrv_5min = raw_json->'hrv',
+        heart_rate_5min = raw_json->'heart_rate',
+        sleep_phase_5min = raw_json->>'sleep_phase_5_min',
+        sleep_phase_30sec = raw_json->>'sleep_phase_30_sec',
+        movement_30sec = raw_json->>'movement_30_sec'
+      WHERE deep_sleep_seconds IS NULL;
+
+      ALTER TABLE oura_workouts
+        ADD COLUMN IF NOT EXISTS start_time TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS end_time TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS intensity TEXT,
+        ADD COLUMN IF NOT EXISTS label TEXT,
+        ADD COLUMN IF NOT EXISTS source TEXT;
+
+      UPDATE oura_workouts SET
+        start_time = NULLIF(raw_json->>'start_datetime','')::timestamptz,
+        end_time = NULLIF(raw_json->>'end_datetime','')::timestamptz,
+        duration_seconds = COALESCE(
+          duration_seconds,
+          EXTRACT(EPOCH FROM (
+            NULLIF(raw_json->>'end_datetime','')::timestamptz
+            - NULLIF(raw_json->>'start_datetime','')::timestamptz
+          ))::int
+        ),
+        distance = COALESCE(distance, NULLIF(raw_json->>'distance','')::double precision),
+        intensity = raw_json->>'intensity',
+        label = raw_json->>'label',
+        source = raw_json->>'source'
+      WHERE start_time IS NULL;
+
+      ALTER TABLE oura_daily_activity
+        ADD COLUMN IF NOT EXISTS sedentary_seconds INT,
+        ADD COLUMN IF NOT EXISTS resting_seconds INT,
+        ADD COLUMN IF NOT EXISTS non_wear_seconds INT,
+        ADD COLUMN IF NOT EXISTS sedentary_met_minutes INT,
+        ADD COLUMN IF NOT EXISTS low_met_minutes INT,
+        ADD COLUMN IF NOT EXISTS medium_met_minutes INT,
+        ADD COLUMN IF NOT EXISTS high_met_minutes INT,
+        ADD COLUMN IF NOT EXISTS average_met_minutes DOUBLE PRECISION,
+        ADD COLUMN IF NOT EXISTS equivalent_walking_distance_m INT,
+        ADD COLUMN IF NOT EXISTS class_5min TEXT,
+        ADD COLUMN IF NOT EXISTS met JSONB;
+
+      UPDATE oura_daily_activity SET
+        sedentary_seconds = NULLIF(raw_json->>'sedentary_time','')::int,
+        resting_seconds = NULLIF(raw_json->>'resting_time','')::int,
+        non_wear_seconds = NULLIF(raw_json->>'non_wear_time','')::int,
+        sedentary_met_minutes = NULLIF(raw_json->>'sedentary_met_minutes','')::int,
+        low_met_minutes = NULLIF(raw_json->>'low_activity_met_minutes','')::int,
+        medium_met_minutes = NULLIF(raw_json->>'medium_activity_met_minutes','')::int,
+        high_met_minutes = NULLIF(raw_json->>'high_activity_met_minutes','')::int,
+        average_met_minutes = NULLIF(raw_json->>'average_met_minutes','')::double precision,
+        equivalent_walking_distance_m = NULLIF(raw_json->>'equivalent_walking_distance','')::int,
+        class_5min = raw_json->>'class_5_min',
+        met = raw_json->'met'
+      WHERE non_wear_seconds IS NULL;
+
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='oura_daily_readiness' AND column_name='resting_heart_rate') THEN
+          ALTER TABLE oura_daily_readiness RENAME COLUMN resting_heart_rate TO resting_heart_rate_score;
+        END IF;
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='oura_daily_readiness' AND column_name='hrv_balance') THEN
+          ALTER TABLE oura_daily_readiness RENAME COLUMN hrv_balance TO hrv_balance_score;
+        END IF;
+        ALTER TABLE oura_daily_readiness ALTER COLUMN resting_heart_rate_score TYPE INT USING resting_heart_rate_score::int;
+        ALTER TABLE oura_daily_readiness ALTER COLUMN hrv_balance_score TYPE INT USING hrv_balance_score::int;
+      END $$;
+      ALTER TABLE oura_daily_readiness
+        ADD COLUMN IF NOT EXISTS temperature_trend_deviation DOUBLE PRECISION;
+
+      UPDATE oura_daily_readiness SET
+        resting_heart_rate_score = COALESCE(resting_heart_rate_score, NULLIF(contributors->>'resting_heart_rate','')::int),
+        hrv_balance_score = COALESCE(hrv_balance_score, NULLIF(contributors->>'hrv_balance','')::int),
+        temperature_trend_deviation = NULLIF(raw_json->>'temperature_trend_deviation','')::double precision
+      WHERE temperature_trend_deviation IS NULL OR resting_heart_rate_score IS NULL;
+
+      CREATE TABLE IF NOT EXISTS oura_daily_spo2 (
+          day DATE PRIMARY KEY,
+          average_spo2 DOUBLE PRECISION,
+          breathing_disturbance_index INT,
+          raw_json JSONB NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS oura_daily_resilience (
+          day DATE PRIMARY KEY,
+          level TEXT,
+          sleep_recovery DOUBLE PRECISION,
+          daytime_recovery DOUBLE PRECISION,
+          stress DOUBLE PRECISION,
+          raw_json JSONB NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS oura_daily_cardiovascular_age (
+          day DATE PRIMARY KEY,
+          vascular_age INT,
+          pulse_wave_velocity DOUBLE PRECISION,
+          raw_json JSONB NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS oura_sleep_time (
+          day DATE PRIMARY KEY,
+          status TEXT,
+          recommendation TEXT,
+          optimal_bedtime JSONB,
+          raw_json JSONB NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS oura_enhanced_tags (
+          oura_id TEXT PRIMARY KEY,
+          start_day DATE,
+          end_day DATE,
+          start_time TIMESTAMPTZ,
+          end_time TIMESTAMPTZ,
+          tag_type_code TEXT,
+          custom_name TEXT,
+          comment TEXT,
+          raw_json JSONB NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_oura_enhanced_tags_start_day ON oura_enhanced_tags(start_day DESC);
+
+      CREATE TABLE IF NOT EXISTS oura_rest_mode_periods (
+          oura_id INT PRIMARY KEY,
+          start_day DATE,
+          end_day DATE,
+          episodes JSONB,
+          raw_json JSONB NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS oura_sessions (
+          oura_id TEXT PRIMARY KEY,
+          day DATE NOT NULL,
+          type TEXT,
+          start_time TIMESTAMPTZ,
+          end_time TIMESTAMPTZ,
+          mood TEXT,
+          motion_count JSONB,
+          hrv JSONB,
+          heart_rate JSONB,
+          raw_json JSONB NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_oura_sessions_day ON oura_sessions(day DESC);
+
+      CREATE TABLE IF NOT EXISTS oura_heartrate (
+          ts TIMESTAMPTZ NOT NULL,
+          bpm INT NOT NULL,
+          source TEXT NOT NULL,
+          PRIMARY KEY (ts, source)
+      );
+      CREATE INDEX IF NOT EXISTS idx_oura_heartrate_ts ON oura_heartrate(ts DESC);
+      CREATE INDEX IF NOT EXISTS idx_oura_heartrate_source_ts ON oura_heartrate(source, ts DESC);
+
+      CREATE OR REPLACE VIEW daily_health_snapshot AS
+      SELECT d.day,
+             d.score AS sleep_score,
+             r.score AS readiness_score,
+             a.score AS activity_score,
+             a.steps,
+             st.day_summary AS stress,
+             ss.average_hrv,
+             ss.average_heart_rate,
+             m.weight_kg
+      FROM oura_daily_sleep d
+      LEFT JOIN oura_daily_readiness r ON r.day = d.day
+      LEFT JOIN oura_daily_activity a ON a.day = d.day
+      LEFT JOIN oura_daily_stress st ON st.day = d.day
+      LEFT JOIN LATERAL (
+        SELECT average_hrv, average_heart_rate
+        FROM oura_sleep_sessions
+        WHERE day = d.day AND sleep_type = 'long_sleep'
+        LIMIT 1
+      ) ss ON TRUE
+      LEFT JOIN daily_metrics m ON m.date = d.day;
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {
@@ -1414,8 +1623,18 @@ async function migrate(): Promise<void> {
         const statements = splitSqlStatements(sql);
         for (const stmt of statements) {
           const trimmed = stmt.trim();
-          if (trimmed && !trimmed.startsWith("--")) {
-            await pool.query(trimmed);
+          // Strip leading SQL line-comments before deciding whether to skip —
+          // a statement that begins with `-- foo\nALTER TABLE ...` was being
+          // silently dropped (caught when 044's view rebuild never ran in prod).
+          const codeOnly = trimmed.replace(/^(--[^\n]*\n\s*)+/, "");
+          if (codeOnly) {
+            try {
+              await pool.query(trimmed);
+            } catch (err) {
+              console.error(`In migration ${migration.name}, statement failed:`);
+              console.error(trimmed.substring(0, 500));
+              throw err;
+            }
           }
         }
 
@@ -1448,9 +1667,17 @@ function splitSqlStatements(sql: string): string[] {
   let current = "";
   let inParens = 0;
   let inDollarQuote = false;
+  let inLineComment = false;
 
   for (let i = 0; i < sql.length; i++) {
     const char = sql[i];
+
+    // End of line comment
+    if (inLineComment) {
+      current += char;
+      if (char === "\n") inLineComment = false;
+      continue;
+    }
 
     // Handle $$ dollar quoting (toggle on/off)
     if (char === "$" && i + 1 < sql.length && sql[i + 1] === "$") {
@@ -1461,6 +1688,14 @@ function splitSqlStatements(sql: string): string[] {
     }
 
     if (!inDollarQuote) {
+      // Detect line comment start. A `;` inside a comment must NOT be treated
+      // as a statement terminator.
+      if (char === "-" && i + 1 < sql.length && sql[i + 1] === "-") {
+        inLineComment = true;
+        current += char;
+        continue;
+      }
+
       if (char === "(") inParens++;
       if (char === ")") inParens--;
 

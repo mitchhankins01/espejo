@@ -2,12 +2,20 @@ import type pg from "pg";
 import { config } from "../config.js";
 import {
   completeOuraSyncRun,
+  insertOuraHeartrateBatch,
   insertOuraSyncRun,
   upsertOuraDailyActivity,
+  upsertOuraDailyCardiovascularAge,
   upsertOuraDailyReadiness,
+  upsertOuraDailyResilience,
   upsertOuraDailySleep,
+  upsertOuraDailySpo2,
   upsertOuraDailyStress,
+  upsertOuraEnhancedTag,
+  upsertOuraRestModePeriod,
+  upsertOuraSession,
   upsertOuraSleepSession,
+  upsertOuraSleepTime,
   upsertOuraSyncState,
   upsertOuraWorkout,
 } from "../db/queries.js";
@@ -28,6 +36,14 @@ export interface OuraSyncResult {
     activity: number;
     stress: number;
     workouts: number;
+    spo2: number;
+    resilience: number;
+    cv_age: number;
+    sleep_time: number;
+    enhanced_tags: number;
+    rest_mode: number;
+    meditation_sessions: number;
+    heartrate: number;
   };
   durationMs: number;
 }
@@ -44,13 +60,23 @@ export async function runOuraSync(pool: pg.Pool, lookbackDays: number): Promise<
   const t0 = Date.now();
 
   try {
-    const [dailySleep, sleepSessions, readiness, activity, stress, workouts] = await Promise.all([
+    const [
+      dailySleep, sleepSessions, readiness, activity, stress, workouts,
+      spo2, resilience, cvAge, sleepTime, enhancedTags, restModePeriods, meditationSessions,
+    ] = await Promise.all([
       client.getDailySleep(startDate, endDate),
       client.getSleepSessions(startDate, endDate),
       client.getDailyReadiness(startDate, endDate),
       client.getDailyActivity(startDate, endDate),
       client.getDailyStress(startDate, endDate),
       client.getWorkouts(startDate, endDate),
+      client.getDailySpo2(startDate, endDate),
+      client.getDailyResilience(startDate, endDate),
+      client.getDailyCardiovascularAge(startDate, endDate),
+      client.getSleepTime(startDate, endDate),
+      client.getEnhancedTags(startDate, endDate),
+      client.getRestModePeriods(startDate, endDate),
+      client.getSessions(startDate, endDate),
     ]);
 
     await Promise.all(dailySleep.map((row) => upsertOuraDailySleep(pool, row)));
@@ -59,6 +85,25 @@ export async function runOuraSync(pool: pg.Pool, lookbackDays: number): Promise<
     await Promise.all(activity.map((row) => upsertOuraDailyActivity(pool, row)));
     await Promise.all(stress.map((row) => upsertOuraDailyStress(pool, row)));
     await Promise.all(workouts.map((row) => upsertOuraWorkout(pool, row)));
+    await Promise.all(spo2.map((row) => upsertOuraDailySpo2(pool, row)));
+    await Promise.all(resilience.map((row) => upsertOuraDailyResilience(pool, row)));
+    await Promise.all(cvAge.map((row) => upsertOuraDailyCardiovascularAge(pool, row)));
+    await Promise.all(sleepTime.map((row) => upsertOuraSleepTime(pool, row)));
+    await Promise.all(enhancedTags.map((row) => upsertOuraEnhancedTag(pool, row)));
+    await Promise.all(restModePeriods.map((row) => upsertOuraRestModePeriod(pool, row)));
+    await Promise.all(meditationSessions.map((row) => upsertOuraSession(pool, row)));
+
+    // Continuous heart rate (5-min rest/awake + per-second workout). Bounded by
+    // lookback window. Backfill is a separate script.
+    const heartrateRows = await client.getHeartrate(`${startDate}T00:00:00Z`, `${endDate}T23:59:59Z`);
+    const heartrateBatch = heartrateRows
+      .map((r) => ({
+        ts: r.timestamp as string,
+        bpm: typeof r.bpm === "number" ? Math.round(r.bpm) : 0,
+        source: (r.source as string) ?? "unknown",
+      }))
+      .filter((r) => r.ts && r.bpm > 0);
+    const heartrateInserted = (await insertOuraHeartrateBatch(pool, heartrateBatch)) ?? 0;
 
     await upsertOuraSyncState(pool, "all", endDate);
     const counts = {
@@ -68,8 +113,16 @@ export async function runOuraSync(pool: pg.Pool, lookbackDays: number): Promise<
       activity: activity.length,
       stress: stress.length,
       workouts: workouts.length,
+      spo2: spo2.length,
+      resilience: resilience.length,
+      cv_age: cvAge.length,
+      sleep_time: sleepTime.length,
+      enhanced_tags: enhancedTags.length,
+      rest_mode: restModePeriods.length,
+      meditation_sessions: meditationSessions.length,
+      heartrate: heartrateInserted,
     };
-    const total = counts.sleep + counts.sessions + counts.readiness + counts.activity + counts.stress + counts.workouts;
+    const total = Object.values(counts).reduce((a, b) => a + b, 0);
     await completeOuraSyncRun(pool, runId, "success", total, null);
     return { runId, total, counts, durationMs: Date.now() - t0 };
   } catch (err) {

@@ -64,7 +64,24 @@ const limitParam = (defaultVal: number, max: number) =>
     .describe(`Max results to return (default: ${defaultVal}, max: ${max})`);
 
 
-const ouraMetricParam = z.enum(["sleep_score", "hrv", "readiness", "activity", "steps", "sleep_duration", "stress", "resting_heart_rate", "temperature", "active_calories", "heart_rate", "efficiency"]).describe("Oura metric: sleep_score, hrv, readiness, activity, steps, sleep_duration, stress, resting_heart_rate, temperature, active_calories, heart_rate, efficiency");
+const ouraMetricParam = z.enum([
+  "sleep_score", "hrv", "readiness", "activity", "steps", "sleep_duration",
+  "stress", "resting_heart_rate", "temperature", "active_calories",
+  "heart_rate", "efficiency",
+  "deep_sleep", "rem_sleep", "light_sleep", "awake_time", "latency",
+  "breath_rate", "lowest_heart_rate",
+  "spo2", "breathing_disturbance",
+  "resilience_sleep_recovery", "resilience_daytime_recovery", "resilience_stress",
+  "vascular_age", "pulse_wave_velocity",
+  "non_wear_seconds",
+]).describe(
+  "Oura metric. Core: sleep_score | hrv | readiness | activity | steps | sleep_duration | stress | " +
+  "resting_heart_rate (canonical RHR from sleep, post-045) | temperature | active_calories | heart_rate | efficiency. " +
+  "Sleep stages: deep_sleep | rem_sleep | light_sleep | awake_time | latency | breath_rate | lowest_heart_rate. " +
+  "Health markers: spo2 (since 2022-08) | breathing_disturbance | resilience_sleep_recovery | resilience_daytime_recovery | " +
+  "resilience_stress (since 2023-11) | vascular_age | pulse_wave_velocity (since 2024-03). " +
+  "Activity meta: non_wear_seconds (use to interpret step counts honestly — historical days where ring was off look sedentary)."
+);
 
 const ouraAnalysisTypeParam = z.enum(["sleep_quality", "anomalies", "hrv_trend", "temperature", "best_sleep"]);
 
@@ -345,13 +362,40 @@ export const toolSpecs = {
   oura_correlate: {
     name: "oura_correlate" as const,
     annotations: READ_ONLY,
-    description: "Compute correlation between two Oura metrics over N days. Supports all trendable metrics including stress, resting HR, temperature, calories, heart rate, and efficiency.",
+    description: "Compute correlation between two Oura metrics over N days. Supports all trendable metrics including stress, resting HR, temperature, calories, heart rate, efficiency, sleep stages, SpO2, breathing disturbance, resilience scores, and vascular age.",
     params: z.object({
       metric_a: ouraMetricParam,
       metric_b: ouraMetricParam,
       days: z.number().int().min(7).max(180).default(60),
     }),
     examples: [{ input: { metric_a: "hrv", metric_b: "sleep_duration", days: 60 }, behavior: "Returns Pearson correlation." }],
+  },
+  get_oura_intra_night_hrv: {
+    name: "get_oura_intra_night_hrv" as const,
+    annotations: READ_ONLY,
+    description:
+      "Get the per-5-minute HRV and HR time series for a single night's main sleep. " +
+      "Use this to answer 'when does HRV recover during the night' and to spot late-night drops " +
+      "from alcohol, late meals, or training. Returns null if no long_sleep was recorded.",
+    params: z.object({
+      date: dateString.describe("Day of the sleep session (YYYY-MM-DD)"),
+    }),
+    examples: [{ input: { date: "2026-04-29" }, behavior: "Returns intra-night HRV/HR arrays for that night." }],
+  },
+  get_oura_heartrate_slice: {
+    name: "get_oura_heartrate_slice" as const,
+    annotations: READ_ONLY,
+    description:
+      "Get continuous heart rate samples in a time window. 5-minute interval at rest/awake, per-second during workouts. " +
+      "Source filter: 'rest' | 'awake' | 'workout' | 'live'. " +
+      "Available since 2022-09 (Gen3 ring). Use for daytime sympathetic load patterns.",
+    params: z.object({
+      start: z.string().describe("ISO timestamp (inclusive)"),
+      end: z.string().describe("ISO timestamp (exclusive)"),
+      source: z.enum(["rest", "awake", "workout", "live"]).nullable().optional()
+        .describe("Optional source filter"),
+    }),
+    examples: [{ input: { start: "2026-04-29T08:00:00Z", end: "2026-04-29T12:00:00Z" }, behavior: "Returns HR samples in that window." }],
   },
 
   get_artifact: {

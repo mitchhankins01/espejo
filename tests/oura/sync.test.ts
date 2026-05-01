@@ -9,6 +9,14 @@ const mockQueries = vi.hoisted(() => ({
   upsertOuraDailyActivity: vi.fn().mockResolvedValue(undefined),
   upsertOuraDailyStress: vi.fn().mockResolvedValue(undefined),
   upsertOuraWorkout: vi.fn().mockResolvedValue(undefined),
+  upsertOuraDailySpo2: vi.fn().mockResolvedValue(undefined),
+  upsertOuraDailyResilience: vi.fn().mockResolvedValue(undefined),
+  upsertOuraDailyCardiovascularAge: vi.fn().mockResolvedValue(undefined),
+  upsertOuraSleepTime: vi.fn().mockResolvedValue(undefined),
+  upsertOuraEnhancedTag: vi.fn().mockResolvedValue(undefined),
+  upsertOuraRestModePeriod: vi.fn().mockResolvedValue(undefined),
+  upsertOuraSession: vi.fn().mockResolvedValue(undefined),
+  insertOuraHeartrateBatch: vi.fn().mockResolvedValue(0),
   upsertOuraSyncState: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -27,6 +35,14 @@ const mockClientInstance = vi.hoisted(() => ({
   getDailyActivity: vi.fn().mockResolvedValue([]),
   getDailyStress: vi.fn().mockResolvedValue([]),
   getWorkouts: vi.fn().mockResolvedValue([]),
+  getDailySpo2: vi.fn().mockResolvedValue([]),
+  getDailyResilience: vi.fn().mockResolvedValue([]),
+  getDailyCardiovascularAge: vi.fn().mockResolvedValue([]),
+  getSleepTime: vi.fn().mockResolvedValue([]),
+  getEnhancedTags: vi.fn().mockResolvedValue([]),
+  getRestModePeriods: vi.fn().mockResolvedValue([]),
+  getSessions: vi.fn().mockResolvedValue([]),
+  getHeartrate: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("../../src/db/queries.js", () => mockQueries);
@@ -42,6 +58,14 @@ vi.mock("../../src/oura/client.js", () => ({
     getDailyActivity = mockClientInstance.getDailyActivity;
     getDailyStress = mockClientInstance.getDailyStress;
     getWorkouts = mockClientInstance.getWorkouts;
+    getDailySpo2 = mockClientInstance.getDailySpo2;
+    getDailyResilience = mockClientInstance.getDailyResilience;
+    getDailyCardiovascularAge = mockClientInstance.getDailyCardiovascularAge;
+    getSleepTime = mockClientInstance.getSleepTime;
+    getEnhancedTags = mockClientInstance.getEnhancedTags;
+    getRestModePeriods = mockClientInstance.getRestModePeriods;
+    getSessions = mockClientInstance.getSessions;
+    getHeartrate = mockClientInstance.getHeartrate;
   },
 }));
 
@@ -66,6 +90,7 @@ beforeEach(() => {
   for (const fn of Object.values(mockQueries)) fn.mockClear();
   for (const fn of Object.values(mockClientInstance)) fn.mockClear().mockResolvedValue([]);
   mockQueries.insertOuraSyncRun.mockResolvedValue(1);
+  mockQueries.insertOuraHeartrateBatch.mockResolvedValue(0);
   mockConfig.config.oura.accessToken = "test-token";
   mockConfig.config.telegram.botToken = "test-bot-token";
   mockConfig.config.telegram.allowedChatId = "100";
@@ -99,6 +124,8 @@ describe("runOuraSync", () => {
     const result = await runOuraSync(pool, 7);
 
     expect(result).not.toBeNull();
+    // 6 of the original endpoints each return 1 row; new endpoints stay empty
+    // for the default mock; heartrate stays at 0 (insertOuraHeartrateBatch mock).
     expect(result!.total).toBe(6);
     expect(result!.counts.sleep).toBe(1);
     expect(result!.runId).toBe(1);
