@@ -569,15 +569,18 @@ export async function upsertOuraEnhancedTag(pool: pg.Pool, row: Record<string, u
 
 export async function upsertOuraRestModePeriod(pool: pg.Pool, row: Record<string, unknown>): Promise<void> {
   await pool.query(
-    `INSERT INTO oura_rest_mode_periods (oura_id, start_day, end_day, episodes, raw_json)
-     VALUES ($1,$2,$3,$4,$5)
+    `INSERT INTO oura_rest_mode_periods (oura_id, start_day, end_day, start_time, end_time, episodes, raw_json)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)
      ON CONFLICT (oura_id) DO UPDATE SET
        start_day = EXCLUDED.start_day,
        end_day = EXCLUDED.end_day,
+       start_time = EXCLUDED.start_time,
+       end_time = EXCLUDED.end_time,
        episodes = EXCLUDED.episodes,
        raw_json = EXCLUDED.raw_json`,
     [
       row.id, row.start_day ?? null, row.end_day ?? null,
+      row.start_time ?? null, row.end_time ?? null,
       // node-postgres serializes plain JS objects to JSONB correctly, but
       // bare arrays are emitted as PostgreSQL array literals (`{a,b,c}`)
       // which JSONB rejects. Stringify explicitly.
