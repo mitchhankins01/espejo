@@ -94,8 +94,9 @@ export async function upsertOuraSleepSession(pool: pg.Pool, row: Record<string, 
       total_sleep_duration_seconds, time_in_bed_seconds, awake_seconds, latency_seconds,
       deep_sleep_seconds, rem_sleep_seconds, light_sleep_seconds, restless_periods, efficiency,
       hrv_5min, heart_rate_5min, sleep_phase_5min, sleep_phase_30sec, movement_30sec,
+      sleep_score_delta, readiness_score_delta,
       raw_json
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
     ON CONFLICT (oura_id) DO UPDATE SET
       day = EXCLUDED.day,
       period = EXCLUDED.period,
@@ -120,6 +121,8 @@ export async function upsertOuraSleepSession(pool: pg.Pool, row: Record<string, 
       sleep_phase_5min = EXCLUDED.sleep_phase_5min,
       sleep_phase_30sec = EXCLUDED.sleep_phase_30sec,
       movement_30sec = EXCLUDED.movement_30sec,
+      sleep_score_delta = EXCLUDED.sleep_score_delta,
+      readiness_score_delta = EXCLUDED.readiness_score_delta,
       raw_json = EXCLUDED.raw_json`,
     [
       row.id, row.day, row.period ?? null, row.type ?? null,
@@ -133,6 +136,7 @@ export async function upsertOuraSleepSession(pool: pg.Pool, row: Record<string, 
       row.efficiency ?? null,
       row.hrv ?? null, row.heart_rate ?? null,
       row.sleep_phase_5_min ?? null, row.sleep_phase_30_sec ?? null, row.movement_30_sec ?? null,
+      row.sleep_score_delta ?? null, row.readiness_score_delta ?? null,
       row,
     ]
   );
@@ -172,9 +176,10 @@ export async function upsertOuraDailyActivity(pool: pg.Pool, row: Record<string,
       sedentary_seconds, resting_seconds, non_wear_seconds,
       medium_activity_seconds, high_activity_seconds, low_activity_seconds,
       sedentary_met_minutes, low_met_minutes, medium_met_minutes, high_met_minutes,
-      average_met_minutes, equivalent_walking_distance_m, class_5min, met,
+      average_met_minutes, equivalent_walking_distance_m, inactivity_alerts,
+      class_5min, met, contributors,
       raw_json
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
     ON CONFLICT (day) DO UPDATE SET
       score = EXCLUDED.score,
       steps = EXCLUDED.steps,
@@ -192,8 +197,10 @@ export async function upsertOuraDailyActivity(pool: pg.Pool, row: Record<string,
       high_met_minutes = EXCLUDED.high_met_minutes,
       average_met_minutes = EXCLUDED.average_met_minutes,
       equivalent_walking_distance_m = EXCLUDED.equivalent_walking_distance_m,
+      inactivity_alerts = EXCLUDED.inactivity_alerts,
       class_5min = EXCLUDED.class_5min,
       met = EXCLUDED.met,
+      contributors = EXCLUDED.contributors,
       raw_json = EXCLUDED.raw_json`,
     [
       row.day, row.score ?? null, row.steps ?? null,
@@ -204,7 +211,8 @@ export async function upsertOuraDailyActivity(pool: pg.Pool, row: Record<string,
       row.medium_activity_met_minutes ?? null, row.high_activity_met_minutes ?? null,
       row.average_met_minutes ?? null,
       row.equivalent_walking_distance ?? null,
-      row.class_5_min ?? null, row.met ?? null,
+      row.inactivity_alerts ?? null,
+      row.class_5_min ?? null, row.met ?? null, row.contributors ?? null,
       row,
     ]
   );
@@ -719,6 +727,93 @@ export async function getOuraHeartrateRange(
      WHERE ts >= $1::timestamptz AND ts < $2::timestamptz
      ORDER BY ts ASC`,
     [startTs, endTs]
+  );
+  return result.rows;
+}
+
+// ─── 046 follow-up: personal_info + ring_configurations ────────────────────
+
+export async function upsertOuraPersonalInfo(pool: pg.Pool, row: Record<string, unknown>): Promise<void> {
+  await pool.query(
+    `INSERT INTO oura_personal_info (id, oura_user_id, age, weight_kg, height_m, biological_sex, email, raw_json, updated_at)
+     VALUES (1, $1, $2, $3, $4, $5, $6, $7, NOW())
+     ON CONFLICT (id) DO UPDATE SET
+       oura_user_id = EXCLUDED.oura_user_id,
+       age = EXCLUDED.age,
+       weight_kg = EXCLUDED.weight_kg,
+       height_m = EXCLUDED.height_m,
+       biological_sex = EXCLUDED.biological_sex,
+       email = EXCLUDED.email,
+       raw_json = EXCLUDED.raw_json,
+       updated_at = NOW()`,
+    [
+      row.id ?? null,
+      row.age ?? null,
+      row.weight ?? null,
+      row.height ?? null,
+      row.biological_sex ?? null,
+      row.email ?? null,
+      row,
+    ]
+  );
+}
+
+export async function upsertOuraRingConfiguration(pool: pg.Pool, row: Record<string, unknown>): Promise<void> {
+  await pool.query(
+    `INSERT INTO oura_ring_configurations (oura_id, hardware_type, color, design, size, firmware_version, set_up_at, raw_json)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+     ON CONFLICT (oura_id) DO UPDATE SET
+       hardware_type = EXCLUDED.hardware_type,
+       color = EXCLUDED.color,
+       design = EXCLUDED.design,
+       size = EXCLUDED.size,
+       firmware_version = EXCLUDED.firmware_version,
+       set_up_at = EXCLUDED.set_up_at,
+       raw_json = EXCLUDED.raw_json`,
+    [
+      row.id, row.hardware_type ?? null, row.color ?? null, row.design ?? null,
+      row.size ?? null, row.firmware_version ?? null, row.set_up_at ?? null, row,
+    ]
+  );
+}
+
+export interface OuraPersonalInfoRow {
+  id: number;
+  oura_user_id: string | null;
+  age: number | null;
+  weight_kg: number | null;
+  height_m: number | null;
+  biological_sex: string | null;
+  email: string | null;
+  updated_at: Date;
+}
+
+export async function getOuraPersonalInfo(pool: pg.Pool): Promise<OuraPersonalInfoRow | null> {
+  const result = await pool.query<OuraPersonalInfoRow>(
+    `SELECT id, oura_user_id, age, weight_kg, height_m, biological_sex, email, updated_at
+     FROM oura_personal_info WHERE id = 1`
+  );
+  return result.rows[0] ?? null;
+}
+
+export interface OuraRingConfigurationRow {
+  oura_id: string;
+  hardware_type: string | null;
+  color: string | null;
+  design: string | null;
+  size: number | null;
+  firmware_version: string | null;
+  set_up_at: Date | null;
+}
+
+// Returns one row per distinct ring (de-duped on hardware_type+color+size since
+// the API emits one row per day with the active configuration).
+export async function getOuraDistinctRings(pool: pg.Pool): Promise<OuraRingConfigurationRow[]> {
+  const result = await pool.query<OuraRingConfigurationRow>(
+    `SELECT DISTINCT ON (hardware_type, color, size)
+       oura_id, hardware_type, color, design, size, firmware_version, set_up_at
+     FROM oura_ring_configurations
+     ORDER BY hardware_type, color, size, set_up_at NULLS LAST`
   );
   return result.rows;
 }

@@ -16,6 +16,8 @@ const mockQueries = vi.hoisted(() => ({
   upsertOuraEnhancedTag: vi.fn().mockResolvedValue(undefined),
   upsertOuraRestModePeriod: vi.fn().mockResolvedValue(undefined),
   upsertOuraSession: vi.fn().mockResolvedValue(undefined),
+  upsertOuraPersonalInfo: vi.fn().mockResolvedValue(undefined),
+  upsertOuraRingConfiguration: vi.fn().mockResolvedValue(undefined),
   insertOuraHeartrateBatch: vi.fn().mockResolvedValue(0),
   upsertOuraSyncState: vi.fn().mockResolvedValue(undefined),
 }));
@@ -43,6 +45,8 @@ const mockClientInstance = vi.hoisted(() => ({
   getRestModePeriods: vi.fn().mockResolvedValue([]),
   getSessions: vi.fn().mockResolvedValue([]),
   getHeartrate: vi.fn().mockResolvedValue([]),
+  getPersonalInfo: vi.fn().mockResolvedValue(null),
+  getRingConfigurations: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("../../src/db/queries.js", () => mockQueries);
@@ -66,6 +70,8 @@ vi.mock("../../src/oura/client.js", () => ({
     getRestModePeriods = mockClientInstance.getRestModePeriods;
     getSessions = mockClientInstance.getSessions;
     getHeartrate = mockClientInstance.getHeartrate;
+    getPersonalInfo = mockClientInstance.getPersonalInfo;
+    getRingConfigurations = mockClientInstance.getRingConfigurations;
   },
 }));
 
@@ -89,6 +95,7 @@ beforeEach(() => {
   vi.restoreAllMocks();
   for (const fn of Object.values(mockQueries)) fn.mockClear();
   for (const fn of Object.values(mockClientInstance)) fn.mockClear().mockResolvedValue([]);
+  mockClientInstance.getPersonalInfo.mockResolvedValue(null);
   mockQueries.insertOuraSyncRun.mockResolvedValue(1);
   mockQueries.insertOuraHeartrateBatch.mockResolvedValue(0);
   mockConfig.config.oura.accessToken = "test-token";

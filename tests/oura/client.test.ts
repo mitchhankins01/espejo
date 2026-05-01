@@ -238,3 +238,47 @@ describe("OuraClient", () => {
     });
   });
 });
+
+describe("getPersonalInfo (singleton)", () => {
+  it("returns the single info object", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ id: "user-x", age: 33, weight: 78.3 }),
+    } as unknown as Response);
+    const info = await client.getPersonalInfo();
+    expect(info).toEqual({ id: "user-x", age: 33, weight: 78.3 });
+  });
+
+  it("returns null when no token", async () => {
+    const empty = new OuraClient("");
+    expect(await empty.getPersonalInfo()).toBeNull();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("throws on API error", async () => {
+    mockFetch.mockResolvedValue(apiError(500, "boom"));
+    await expect(client.getPersonalInfo()).rejects.toThrow("Oura API personal_info failed (500): boom");
+  });
+
+  it("retries on transient 503 then succeeds", async () => {
+    mockFetch
+      .mockResolvedValueOnce(apiError(503, "down"))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ id: "u" }),
+      } as unknown as Response);
+    const info = await client.getPersonalInfo();
+    expect(info).toEqual({ id: "u" });
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("getRingConfigurations", () => {
+  it("uses ring_configuration endpoint with date range", async () => {
+    mockFetch.mockResolvedValue(apiResponse([{ id: "ring-1", hardware_type: "gen3" }]));
+    const rings = await client.getRingConfigurations("2024-01-01", "2024-12-31");
+    expect(rings).toEqual([{ id: "ring-1", hardware_type: "gen3" }]);
+    const url = mockFetch.mock.calls[0][0] as URL;
+    expect(url.toString()).toContain("ring_configuration");
+  });
+});

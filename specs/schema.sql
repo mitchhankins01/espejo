@@ -251,6 +251,8 @@ CREATE TABLE IF NOT EXISTS oura_sleep_sessions (
     sleep_phase_5min TEXT,           -- per-5-min phase code string
     sleep_phase_30sec TEXT,          -- per-30-sec phase code string
     movement_30sec TEXT,             -- per-30-sec movement code string
+    sleep_score_delta INT,           -- how this night moved the rolling sleep score
+    readiness_score_delta INT,       -- how this night moved the rolling readiness score
     raw_json JSONB NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_oura_sleep_sessions_day ON oura_sleep_sessions(day DESC);
@@ -289,8 +291,10 @@ CREATE TABLE IF NOT EXISTS oura_daily_activity (
     high_met_minutes INT,
     average_met_minutes DOUBLE PRECISION,
     equivalent_walking_distance_m INT,
+    inactivity_alerts INT,
     class_5min TEXT,
     met JSONB,
+    contributors JSONB,
     raw_json JSONB NOT NULL
 );
 
@@ -369,9 +373,10 @@ CREATE TABLE IF NOT EXISTS oura_enhanced_tags (
 );
 CREATE INDEX IF NOT EXISTS idx_oura_enhanced_tags_start_day ON oura_enhanced_tags(start_day DESC);
 
--- Rest-mode windows (when Oura suggests recovery).
+-- Rest-mode windows (when Oura suggests recovery). The id is a UUID string;
+-- the v2 API used INT in older docs but emits UUIDs in practice.
 CREATE TABLE IF NOT EXISTS oura_rest_mode_periods (
-    oura_id INT PRIMARY KEY,
+    oura_id TEXT PRIMARY KEY,
     start_day DATE,
     end_day DATE,
     episodes JSONB,
@@ -404,6 +409,35 @@ CREATE TABLE IF NOT EXISTS oura_heartrate (
 );
 CREATE INDEX IF NOT EXISTS idx_oura_heartrate_ts ON oura_heartrate(ts DESC);
 CREATE INDEX IF NOT EXISTS idx_oura_heartrate_source_ts ON oura_heartrate(source, ts DESC);
+
+-- Personal info snapshot. Singleton row. The /personal_info endpoint returns
+-- the current value only; we overwrite on every sync but keep updated_at so
+-- callers can see how stale it is.
+CREATE TABLE IF NOT EXISTS oura_personal_info (
+    id INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    oura_user_id TEXT,
+    age INT,
+    weight_kg DOUBLE PRECISION,
+    height_m DOUBLE PRECISION,
+    biological_sex TEXT,
+    email TEXT,
+    raw_json JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Ring configurations. One row per unique ring (the API returns a row per day
+-- but the underlying ring rarely changes — we de-dupe on oura_id).
+CREATE TABLE IF NOT EXISTS oura_ring_configurations (
+    oura_id TEXT PRIMARY KEY,
+    hardware_type TEXT,              -- gen2 | gen3 | gen4 | …
+    color TEXT,
+    design TEXT,
+    size INT,
+    firmware_version TEXT,
+    set_up_at TIMESTAMPTZ,
+    raw_json JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_oura_ring_configurations_set_up ON oura_ring_configurations(set_up_at DESC);
 
 -- ============================================================================
 -- Knowledge artifacts

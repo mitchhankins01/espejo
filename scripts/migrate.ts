@@ -1588,6 +1588,60 @@ const migrations: Migration[] = [
       LEFT JOIN daily_metrics m ON m.date = d.day;
     `,
   },
+  // 046 finishes the Oura coverage gaps surfaced in the post-045 audit:
+  // promote daily_activity.contributors + inactivity_alerts; promote
+  // sleep_session score deltas; add personal_info (singleton) and
+  // ring_configurations (de-duped per ring). All promotions read from raw_json,
+  // no API refetch required for existing rows.
+  {
+    name: "046-oura-coverage-followup",
+    getSql: () => `
+      ALTER TABLE oura_rest_mode_periods ALTER COLUMN oura_id TYPE TEXT;
+
+      ALTER TABLE oura_daily_activity
+        ADD COLUMN IF NOT EXISTS contributors JSONB,
+        ADD COLUMN IF NOT EXISTS inactivity_alerts INT;
+
+      UPDATE oura_daily_activity SET
+        contributors = raw_json->'contributors',
+        inactivity_alerts = NULLIF(raw_json->>'inactivity_alerts','')::int
+      WHERE contributors IS NULL OR inactivity_alerts IS NULL;
+
+      ALTER TABLE oura_sleep_sessions
+        ADD COLUMN IF NOT EXISTS sleep_score_delta INT,
+        ADD COLUMN IF NOT EXISTS readiness_score_delta INT;
+
+      UPDATE oura_sleep_sessions SET
+        sleep_score_delta = NULLIF(raw_json->>'sleep_score_delta','')::int,
+        readiness_score_delta = NULLIF(raw_json->>'readiness_score_delta','')::int
+      WHERE sleep_score_delta IS NULL OR readiness_score_delta IS NULL;
+
+      CREATE TABLE IF NOT EXISTS oura_personal_info (
+          id INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+          oura_user_id TEXT,
+          age INT,
+          weight_kg DOUBLE PRECISION,
+          height_m DOUBLE PRECISION,
+          biological_sex TEXT,
+          email TEXT,
+          raw_json JSONB NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS oura_ring_configurations (
+          oura_id TEXT PRIMARY KEY,
+          hardware_type TEXT,
+          color TEXT,
+          design TEXT,
+          size INT,
+          firmware_version TEXT,
+          set_up_at TIMESTAMPTZ,
+          raw_json JSONB NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_oura_ring_configurations_set_up
+        ON oura_ring_configurations(set_up_at DESC);
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

@@ -120,6 +120,27 @@ export class OuraClient {
     return this.fetchCollection("workout", startDate, endDate);
   }
 
+  // personal_info is a non-collection singleton — different shape from the others.
+  public async getPersonalInfo(): Promise<Record<string, unknown> | null> {
+    if (!this.token) return null;
+    const url = `${BASE_URL}/personal_info`;
+    let response: Response | undefined;
+    for (let attempt = 0; ; attempt++) {
+      response = await fetch(url, { headers: { Authorization: `Bearer ${this.token}` } });
+      if (response.ok || !RETRYABLE_STATUSES.has(response.status) || attempt >= MAX_RETRIES) break;
+      await sleep(BASE_DELAY_MS * 2 ** attempt);
+    }
+    if (!response!.ok) {
+      const errorBody = await response!.text();
+      throw new Error(`Oura API personal_info failed (${response!.status}): ${errorBody}`);
+    }
+    return (await response!.json()) as Record<string, unknown>;
+  }
+
+  public getRingConfigurations(startDate: string, endDate: string): Promise<Record<string, unknown>[]> {
+    return this.fetchCollection("ring_configuration", startDate, endDate);
+  }
+
   public getDailySpo2(startDate: string, endDate: string): Promise<Record<string, unknown>[]> {
     return this.fetchCollection("daily_spo2", startDate, endDate);
   }
