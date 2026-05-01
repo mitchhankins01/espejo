@@ -160,7 +160,11 @@ scripts/
   embed-entries.ts  — Batch embed all entries missing embeddings.
   ingest-sessions.ts — Ingest Claude Code / OpenCode / Codex session metadata into agent_sessions (pnpm ingest:sessions). See specs/agent-sessions-ingestor.md.
   import-lookups.ts — Bulk import Spanish verbs + Kindle lookups.
-  write-tomo.ts     — Write the Tomo prompt-doc artifact.
+  write-tomo.ts     — Write the next Espejo tomo (essay or myth format). Opportunistic myth-mode driven by curated corpus at `books/myths.jsonl`. Flags: `--format=<essay|myth>`, `--myth=<name>`, `--no-myth`, `--fresh-plan`. See `Artifacts/Prompt/Write Tomo.md` and `specs/2026-05-01-feat-mythology-tomos-plan.md`.
+  book/myths.ts     — Mythology corpus reader + validator + accent-insensitive find/suggest.
+  book/myth-scorer.ts — Standalone scoring of corpus vs. context (used by myth-fit-report).
+  book/myth-fit-report.ts — Diagnostic CLI: ranks corpus fit vs. current context without writing a plan (`pnpm tsx scripts/book/myth-fit-report.ts`).
+  book/add-myth.ts  — Drafts a new corpus entry with Claude and appends to `books/myths.jsonl` after explicit confirmation.
   condense-insights.ts — Periodic condensation pass over insights.
   reprocess-pending.ts — Re-run extraction on Artifacts/Pending entries.
   migrate.ts        — Runs SQL files, tracks applied migrations in _migrations table.

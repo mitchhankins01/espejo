@@ -3,6 +3,8 @@ import { existsSync } from "fs";
 
 const HISTORY_PATH = "books/history.json";
 
+export type TomoFormat = "essay" | "myth" | "fiction";
+
 export type TomoDomain =
   | "neuroscience"
   | "cognition"
@@ -14,19 +16,23 @@ export type TomoDomain =
   | "ai"
   | "robotics"
   | "technology"
+  | "mythology"
   | "none";
 
 export interface TomoRecord {
   n: number;
   title: string;
-  format?: "fiction" | "essay";
+  format?: TomoFormat;
   domain: TomoDomain;
   topic: string;
   source_uuids: string[];
   date: string;
   word_count: number;
+  word_count_myth?: number;
+  word_count_bridge?: number;
   series_seed?: boolean;
   bilingual?: boolean;
+  myth_name?: string;
 }
 
 export async function readHistory(): Promise<TomoRecord[]> {
@@ -46,17 +52,38 @@ export function nextTomoNumber(h: TomoRecord[]): number {
   return Math.max(...h.map((r) => r.n)) + 1;
 }
 
-export function recentSourceUuids(h: TomoRecord[], n = 30): Set<string> {
-  const recent = h.slice(-n);
-  return new Set(recent.flatMap((r) => r.source_uuids));
+export function recentSourceUuids(
+  h: TomoRecord[],
+  fullN = 30,
+  mythN = 15
+): Set<string> {
+  const recent = h.slice(-fullN);
+  const out = new Set<string>();
+  for (let i = 0; i < recent.length; i++) {
+    const tomo = recent[i];
+    const isMyth = (tomo.format ?? "essay") === "myth";
+    const tomosFromEnd = recent.length - i;
+    if (isMyth && tomosFromEnd > mythN) continue;
+    for (const u of tomo.source_uuids) out.add(u);
+  }
+  return out;
+}
+
+export function recentMythNames(h: TomoRecord[], n = 8): Set<string> {
+  const out = new Set<string>();
+  for (const r of h.slice(-n)) {
+    if (r.myth_name) out.add(r.myth_name);
+  }
+  return out;
 }
 
 export interface TomoSummary {
   n: number;
   title: string;
   topic: string;
-  format: "fiction" | "essay";
+  format: TomoFormat;
   domain: string;
+  myth_name?: string;
 }
 
 export function recentTomoSummaries(h: TomoRecord[], n = 30): TomoSummary[] {
@@ -64,7 +91,8 @@ export function recentTomoSummaries(h: TomoRecord[], n = 30): TomoSummary[] {
     n: r.n,
     title: r.title,
     topic: r.topic,
-    format: r.format,
+    format: r.format ?? "essay",
     domain: r.domain,
+    myth_name: r.myth_name,
   }));
 }
