@@ -576,7 +576,14 @@ export async function upsertOuraRestModePeriod(pool: pg.Pool, row: Record<string
        end_day = EXCLUDED.end_day,
        episodes = EXCLUDED.episodes,
        raw_json = EXCLUDED.raw_json`,
-    [row.id, row.start_day ?? null, row.end_day ?? null, row.episodes ?? null, row]
+    [
+      row.id, row.start_day ?? null, row.end_day ?? null,
+      // node-postgres serializes plain JS objects to JSONB correctly, but
+      // bare arrays are emitted as PostgreSQL array literals (`{a,b,c}`)
+      // which JSONB rejects. Stringify explicitly.
+      row.episodes != null ? JSON.stringify(row.episodes) : null,
+      row,
+    ]
   );
 }
 

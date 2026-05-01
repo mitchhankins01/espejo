@@ -485,17 +485,28 @@ describe("upsertOuraEnhancedTag", () => {
 });
 
 describe("upsertOuraRestModePeriod", () => {
-  it("upserts rest mode window", async () => {
+  it("upserts rest mode window and stringifies episodes array for JSONB", async () => {
     const pool = mockPool();
     await upsertOuraRestModePeriod(pool, {
-      id: 1,
+      id: "uuid-1",
       start_day: "2025-01-15",
       end_day: "2025-01-17",
       episodes: [{ tags: ["sick"], timestamp: "2025-01-15T08:00:00Z" }],
     });
     const args = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1] as unknown[];
-    expect(args[0]).toBe(1);
+    expect(args[0]).toBe("uuid-1");
     expect(args[1]).toBe("2025-01-15");
+    // episodes must be stringified — pg-driver emits PG array literals for
+    // bare arrays, which JSONB rejects.
+    expect(typeof args[3]).toBe("string");
+    expect(JSON.parse(args[3] as string)).toEqual([{ tags: ["sick"], timestamp: "2025-01-15T08:00:00Z" }]);
+  });
+
+  it("preserves null when episodes is missing", async () => {
+    const pool = mockPool();
+    await upsertOuraRestModePeriod(pool, { id: "uuid-2" });
+    const args = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1] as unknown[];
+    expect(args[3]).toBeNull();
   });
 });
 
@@ -712,7 +723,7 @@ describe("upsert null-fallback coverage", () => {
 
   it("upsertOuraRestModePeriod handles missing fields", async () => {
     const pool = mockPool();
-    await upsertOuraRestModePeriod(pool, { id: 99 });
+    await upsertOuraRestModePeriod(pool, { id: "uuid-99" });
     const args = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1] as unknown[];
     expect(args[1]).toBeNull();
     expect(args[2]).toBeNull();
