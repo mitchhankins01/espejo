@@ -17,6 +17,10 @@ import {
   upsertOuraEnhancedTag,
   upsertOuraRestModePeriod,
   upsertOuraSession,
+  upsertOuraPersonalInfo,
+  upsertOuraRingConfiguration,
+  getOuraPersonalInfo,
+  getOuraDistinctRings,
   insertOuraHeartrateBatch,
   getOuraSummaryByDay,
   getOuraWeeklyRows,
@@ -214,7 +218,8 @@ describe("upsertOuraDailyActivity", () => {
     expect(args[10]).toBe(3600); // low_activity_seconds
     expect(args[15]).toBe(1.5); // average_met_minutes
     expect(args[16]).toBe(6500); // equivalent_walking_distance_m
-    expect(args[17]).toBe("11122334"); // class_5min
+    expect(args[17]).toBeNull(); // inactivity_alerts (not provided in this fixture)
+    expect(args[18]).toBe("11122334"); // class_5min
   });
 
   it("handles missing optional fields with null fallback", async () => {
@@ -225,7 +230,8 @@ describe("upsertOuraDailyActivity", () => {
     expect(args[5]).toBeNull(); // sedentary_seconds
     expect(args[7]).toBeNull(); // non_wear_seconds
     expect(args[8]).toBeNull(); // medium_activity_seconds
-    expect(args[18]).toBeNull(); // met
+    expect(args[19]).toBeNull(); // met
+    expect(args[20]).toBeNull(); // contributors
   });
 });
 
@@ -724,5 +730,105 @@ describe("upsert null-fallback coverage", () => {
     expect(args[6]).toBeNull(); // motion_count
     expect(args[7]).toBeNull(); // hrv
     expect(args[8]).toBeNull(); // heart_rate
+  });
+});
+
+describe("upsertOuraDailyActivity — 046 follow-up fields", () => {
+  it("promotes contributors + inactivity_alerts", async () => {
+    const pool = mockPool();
+    await upsertOuraDailyActivity(pool, {
+      day: "2025-01-15",
+      inactivity_alerts: 3,
+      contributors: { stay_active: 96, recovery_time: 100 },
+    });
+    const args = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1] as unknown[];
+    expect(args[17]).toBe(3); // inactivity_alerts
+    expect(args[20]).toEqual({ stay_active: 96, recovery_time: 100 }); // contributors
+  });
+});
+
+describe("upsertOuraSleepSession — 046 score deltas", () => {
+  it("promotes sleep_score_delta + readiness_score_delta", async () => {
+    const pool = mockPool();
+    await upsertOuraSleepSession(pool, {
+      id: "s-046", day: "2025-01-15", type: "long_sleep",
+      sleep_score_delta: 4,
+      readiness_score_delta: -2,
+    });
+    const args = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1] as unknown[];
+    expect(args[24]).toBe(4); // sleep_score_delta
+    expect(args[25]).toBe(-2); // readiness_score_delta
+  });
+});
+
+describe("upsertOuraPersonalInfo", () => {
+  it("upserts singleton from API field names (weight/height not weight_kg)", async () => {
+    const pool = mockPool();
+    await upsertOuraPersonalInfo(pool, {
+      id: "user-x",
+      age: 33,
+      weight: 78.3,
+      height: 1.8,
+      biological_sex: "male",
+      email: "x@y.com",
+    });
+    const args = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1] as unknown[];
+    expect(args[0]).toBe("user-x");
+    expect(args[1]).toBe(33);
+    expect(args[2]).toBe(78.3);
+    expect(args[3]).toBe(1.8);
+    expect(args[4]).toBe("male");
+  });
+
+  it("handles missing fields", async () => {
+    const pool = mockPool();
+    await upsertOuraPersonalInfo(pool, {});
+    const args = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1] as unknown[];
+    expect(args[0]).toBeNull();
+    expect(args[1]).toBeNull();
+  });
+});
+
+describe("upsertOuraRingConfiguration", () => {
+  it("upserts a ring config", async () => {
+    const pool = mockPool();
+    await upsertOuraRingConfiguration(pool, {
+      id: "ring-1", hardware_type: "gen3", color: "glossy_black",
+      design: "heritage", size: 12, firmware_version: "3.2.2",
+      set_up_at: "2023-10-06T00:00:00Z",
+    });
+    const args = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1] as unknown[];
+    expect(args[0]).toBe("ring-1");
+    expect(args[1]).toBe("gen3");
+    expect(args[6]).toBe("2023-10-06T00:00:00Z");
+  });
+
+  it("handles missing fields", async () => {
+    const pool = mockPool();
+    await upsertOuraRingConfiguration(pool, { id: "r-x" });
+    const args = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1] as unknown[];
+    expect(args[1]).toBeNull();
+    expect(args[6]).toBeNull();
+  });
+});
+
+describe("getOuraPersonalInfo / getOuraDistinctRings", () => {
+  it("returns singleton row", async () => {
+    const pool = mockPool([{ id: 1, age: 33, weight_kg: 78.3 }]);
+    const r = await getOuraPersonalInfo(pool);
+    expect(r?.age).toBe(33);
+  });
+
+  it("returns null when no info", async () => {
+    expect(await getOuraPersonalInfo(mockPool([]))).toBeNull();
+  });
+
+  it("returns distinct rings", async () => {
+    const pool = mockPool([
+      { oura_id: "r1", hardware_type: "gen3" },
+      { oura_id: "r2", hardware_type: "gen4" },
+    ]);
+    const rings = await getOuraDistinctRings(pool);
+    expect(rings).toHaveLength(2);
   });
 });

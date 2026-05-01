@@ -11,6 +11,8 @@ import {
   upsertOuraDailySleep,
   upsertOuraDailySpo2,
   upsertOuraDailyStress,
+  upsertOuraPersonalInfo,
+  upsertOuraRingConfiguration,
   upsertOuraEnhancedTag,
   upsertOuraRestModePeriod,
   upsertOuraSession,
@@ -44,6 +46,8 @@ export interface OuraSyncResult {
     rest_mode: number;
     meditation_sessions: number;
     heartrate: number;
+    personal_info: number;
+    ring_configurations: number;
   };
   durationMs: number;
 }
@@ -63,6 +67,7 @@ export async function runOuraSync(pool: pg.Pool, lookbackDays: number): Promise<
     const [
       dailySleep, sleepSessions, readiness, activity, stress, workouts,
       spo2, resilience, cvAge, sleepTime, enhancedTags, restModePeriods, meditationSessions,
+      personalInfo, ringConfigs,
     ] = await Promise.all([
       client.getDailySleep(startDate, endDate),
       client.getSleepSessions(startDate, endDate),
@@ -77,6 +82,8 @@ export async function runOuraSync(pool: pg.Pool, lookbackDays: number): Promise<
       client.getEnhancedTags(startDate, endDate),
       client.getRestModePeriods(startDate, endDate),
       client.getSessions(startDate, endDate),
+      client.getPersonalInfo(),
+      client.getRingConfigurations(startDate, endDate),
     ]);
 
     await Promise.all(dailySleep.map((row) => upsertOuraDailySleep(pool, row)));
@@ -92,6 +99,8 @@ export async function runOuraSync(pool: pg.Pool, lookbackDays: number): Promise<
     await Promise.all(enhancedTags.map((row) => upsertOuraEnhancedTag(pool, row)));
     await Promise.all(restModePeriods.map((row) => upsertOuraRestModePeriod(pool, row)));
     await Promise.all(meditationSessions.map((row) => upsertOuraSession(pool, row)));
+    if (personalInfo) await upsertOuraPersonalInfo(pool, personalInfo);
+    await Promise.all(ringConfigs.map((row) => upsertOuraRingConfiguration(pool, row)));
 
     // Continuous heart rate (5-min rest/awake + per-second workout). Bounded by
     // lookback window. Backfill is a separate script.
@@ -121,6 +130,8 @@ export async function runOuraSync(pool: pg.Pool, lookbackDays: number): Promise<
       rest_mode: restModePeriods.length,
       meditation_sessions: meditationSessions.length,
       heartrate: heartrateInserted,
+      personal_info: personalInfo ? 1 : 0,
+      ring_configurations: ringConfigs.length,
     };
     const total = Object.values(counts).reduce((a, b) => a + b, 0);
     await completeOuraSyncRun(pool, runId, "success", total, null);

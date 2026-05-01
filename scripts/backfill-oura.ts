@@ -21,7 +21,9 @@ import {
   upsertOuraDailySpo2,
   upsertOuraDailyStress,
   upsertOuraEnhancedTag,
+  upsertOuraPersonalInfo,
   upsertOuraRestModePeriod,
+  upsertOuraRingConfiguration,
   upsertOuraSession,
   upsertOuraSleepSession,
   upsertOuraSleepTime,
@@ -158,6 +160,24 @@ async function main(): Promise<void> {
     console.log(`[sessions/meditation] ${since} → ${until}`);
     const rows = await client.getSessions(since, until);
     for (const row of rows) await upsertOuraSession(pool, row);
+    console.log(`  upserted ${rows.length}`);
+  }
+
+  if (!skip("personal_info")) {
+    console.log(`[personal_info]`);
+    const info = await client.getPersonalInfo();
+    if (info) {
+      await upsertOuraPersonalInfo(pool, info);
+      console.log(`  upserted 1`);
+    } else {
+      console.log(`  upserted 0`);
+    }
+  }
+
+  if (!skip("ring_configurations")) {
+    console.log(`[ring_configurations] ${since} → ${until}`);
+    const rows = await client.getRingConfigurations(since, until);
+    for (const row of rows) await upsertOuraRingConfiguration(pool, row);
     console.log(`  upserted ${rows.length}`);
   }
 
