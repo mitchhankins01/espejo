@@ -33,6 +33,7 @@ export interface TomoRecord {
   series_seed?: boolean;
   bilingual?: boolean;
   myth_name?: string;
+  shared_with_julia?: string;
 }
 
 export async function readHistory(): Promise<TomoRecord[]> {
@@ -44,6 +45,17 @@ export async function readHistory(): Promise<TomoRecord[]> {
 export async function appendHistory(r: TomoRecord): Promise<void> {
   const h = await readHistory();
   h.push(r);
+  await writeFile(HISTORY_PATH, JSON.stringify(h, null, 2) + "\n", "utf-8");
+}
+
+export async function updateHistory(
+  n: number,
+  patch: Partial<TomoRecord>
+): Promise<void> {
+  const h = await readHistory();
+  const idx = h.findIndex((r) => r.n === n);
+  if (idx < 0) throw new Error(`updateHistory: tomo ${n} not in history`);
+  h[idx] = { ...h[idx], ...patch };
   await writeFile(HISTORY_PATH, JSON.stringify(h, null, 2) + "\n", "utf-8");
 }
 

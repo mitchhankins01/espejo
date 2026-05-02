@@ -47,8 +47,14 @@ import {
   recentGrammarFlags,
   recentLookups,
 } from "./book/lookups.js";
+import {
+  formatHighlightsForWriter,
+  readHighlights,
+  recentHighlights,
+} from "./book/highlights.js";
 import { buildEpub, tomoFilename } from "./book/epub.js";
 import { sendToKindle } from "./book/send.js";
+import { offerJuliaShare, type ShareJuliaMode } from "./book/share.js";
 import { readMyths, findMyth, suggestMyths, type MythEntry } from "./book/myths.js";
 import { config } from "../src/config.js";
 
@@ -106,6 +112,7 @@ interface Args {
   send: boolean;
   steer?: string;
   bilingual?: boolean;
+  shareJulia: ShareJuliaMode;
   forceFormat?: "essay" | "myth";
   forceMyth?: string;
   freshPlan: boolean;
@@ -119,6 +126,11 @@ function parseArgs(): Args {
   let bilingual: boolean | undefined;
   if (argv.includes("--bilingual")) bilingual = true;
   else if (argv.includes("--no-bilingual")) bilingual = false;
+
+  let shareJulia: ShareJuliaMode;
+  if (argv.includes("--share-julia")) shareJulia = "yes";
+  else if (argv.includes("--no-share-julia")) shareJulia = "skip";
+  else shareJulia = process.stdin.isTTY ? "prompt" : "skip";
 
   let forceFormat: "essay" | "myth" | undefined;
   for (const a of argv) {
@@ -157,6 +169,7 @@ function parseArgs(): Args {
     send: !argv.includes("--no-send"),
     steer,
     bilingual,
+    shareJulia,
     forceFormat,
     forceMyth,
     freshPlan: argv.includes("--fresh-plan"),
@@ -346,11 +359,20 @@ async function main(): Promise<void> {
       `      injecting ${Math.min(grammarFlags.length, 15)} grammar uncertainties (${grammarFlags.length} total)`
     );
   }
+  const highlights = await readHighlights();
+  const highlightsBlock = formatHighlightsForWriter(
+    recentHighlights(highlights, 12)
+  );
+  if (highlights.length > 0) {
+    console.log(
+      `      injecting ${Math.min(highlights.length, 12)} sentence-level confusions (${highlights.length} total)`
+    );
+  }
   const mythEntry = p.format === "myth" && p.myth_name ? findMyth(myths, p.myth_name) : null;
   if (p.format === "myth" && !mythEntry) {
     throw new Error(`format=myth but myth "${p.myth_name}" not in corpus`);
   }
-  const markdown = await write(p, style, allContext, lookupsBlock, grammarBlock, mythEntry);
+  const markdown = await write(p, style, allContext, lookupsBlock, grammarBlock, highlightsBlock, mythEntry);
   const counts = countWords(markdown);
   if (p.format === "myth") {
     console.log(`      ${counts.total} words (myth: ${counts.myth ?? 0}, bridge: ${counts.bridge ?? 0})`);
@@ -427,6 +449,7 @@ async function main(): Promise<void> {
     console.log(`[send] emailing ${filename} to ${config.gmail.kindleEmail}`);
     await sendToKindle({ epubPath, filename, subject });
     console.log("[send] sent");
+    await offerJuliaShare({ mode: args.shareJulia });
   } else {
     console.log("\n=== SEND SKIPPED (--no-send) ===");
     console.log(`to: ${config.gmail.kindleEmail}`);

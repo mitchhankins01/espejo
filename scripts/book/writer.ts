@@ -76,6 +76,7 @@ export async function write(
   context: ContextItem[],
   lookupsBlock = "",
   grammarBlock = "",
+  highlightsBlock = "",
   mythEntry: MythEntry | null = null
 ): Promise<string> {
   if (!config.anthropic.apiKey) {
@@ -107,6 +108,7 @@ export async function write(
       style,
       ...(lookupsBlock ? ["", lookupsBlock] : []),
       ...(grammarBlock ? ["", grammarBlock] : []),
+      ...(highlightsBlock ? ["", highlightsBlock] : []),
       "",
       "# Tomo plan (myth-mode)",
       `- Título: ${plan.title}`,
@@ -138,6 +140,7 @@ export async function write(
       style,
       ...(lookupsBlock ? ["", lookupsBlock] : []),
       ...(grammarBlock ? ["", grammarBlock] : []),
+      ...(highlightsBlock ? ["", highlightsBlock] : []),
       "",
       "# Tomo plan",
       `- Título: ${plan.title}`,

@@ -139,5 +139,7 @@ export const config = {
       "mitchhankins01@gmail.com",
     kindleEmail:
       process.env.KINDLE_EMAIL || "mitchhankins01_Afzu6H@kindle.com",
+    juliaKindleEmail:
+      process.env.JULIA_KINDLE_EMAIL || "iulia.ignatov_pjpj4i@kindle.com",
   },
 } as const;
