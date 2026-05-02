@@ -18,14 +18,6 @@ const databaseUrl =
 const pool = new pg.Pool({ connectionString: databaseUrl });
 
 const result = await runObsidianSync(pool);
-
-// Wait for review-extraction to finish before closing the pool, then strip the
-// promise from the printed result.
-if (result?.extractionPromise) {
-  await result.extractionPromise;
-}
-const { extractionPromise: _drop, ...printable } = result ?? {};
-void _drop;
-console.log(JSON.stringify(printable, null, 2));
+console.log(JSON.stringify(result, null, 2));
 
 await pool.end();

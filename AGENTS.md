@@ -136,7 +136,6 @@ src/
   obsidian/
     sync.ts         — Obsidian vault sync engine: R2 fetch + DB upserts + timer.
     parser.ts       — Markdown frontmatter parser for Obsidian notes.
-    extraction.ts   — Content extraction from Obsidian markdown.
     wiki-links.ts   — Wiki-link parsing and resolution.
   notifications/
     on-this-day.ts  — "On This Day" morning reflection notification.
@@ -166,7 +165,6 @@ scripts/
   book/myth-fit-report.ts — Diagnostic CLI: ranks corpus fit vs. current context without writing a plan (`pnpm tsx scripts/book/myth-fit-report.ts`).
   book/add-myth.ts  — Drafts a new corpus entry with Claude and appends to `books/myths.jsonl` after explicit confirmation.
   condense-insights.ts — Periodic condensation pass over insights.
-  reprocess-pending.ts — Re-run extraction on Artifacts/Pending entries.
   migrate.ts        — Runs SQL files, tracks applied migrations in _migrations table.
   migrate-entries-to-artifacts.ts — One-time migration of entries into knowledge artifacts.
   migrate-llm-entries.ts — One-time migration for LLM-generated entries.
@@ -363,7 +361,7 @@ Artifacts/
   Parts/       — IFS parts work (parts.md is a CONCISE OVERVIEW — preserve hierarchy)
   Attachment/  — media
   Template/    — Obsidian templates (NOT synced)
-  Pending/     — auto-extracted insights awaiting approval (status: pending)
+  Pending/     — extracted insights awaiting dedup approval (written by `Artifacts/Prompt/Extract Insights.md`)
 ```
 
 Any `.md` outside `.obsidian/`, `.trash/`, `Template/` syncs to the DB.
@@ -394,6 +392,7 @@ Current inventory:
 
 | file | purpose |
 |---|---|
+| `Extract Insights.md` | Per-Review atomic insight extraction → `Pending/`. Mitch supplies the Review filename. Retrieval is for terminology/wikilinks only; dedup decisions live in `Insights Dedup.md`. |
 | `Insights Dedup.md` | Stage-1-through-4 dedup pipeline orchestrator. References `scripts/dedup/`. |
 | `Insights Condense.md` | Periodic condensation of related insights into thematic clusters. |
 | `Evening Review.md` | End-of-day review prompt — closes the loop on the day's pulls/decisions. |

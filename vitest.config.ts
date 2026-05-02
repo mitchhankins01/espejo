@@ -19,7 +19,6 @@ export default defineConfig({
         "src/oura/analysis/index.ts",
         "src/storage/r2.ts",
         "src/obsidian/sync.ts",
-        "src/obsidian/extraction.ts",
         "src/db/queries/obsidian.ts",
       ],
       reporter: ["text", "lcov"],
