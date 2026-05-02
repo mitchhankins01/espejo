@@ -47,6 +47,10 @@ export interface ObsidianSyncResult {
   linksResolved: number;
   errors: Array<{ file: string; error: string }>;
   durationMs: number;
+  /** Promise for the post-sync review-extraction job. Callers that own the pool
+   *  lifecycle (e.g. CLI scripts) must await this before `pool.end()` to avoid
+   *  closing the pool mid-extraction. The server timer can ignore it. */
+  extractionPromise?: Promise<void>;
 }
 
 // ============================================================================
@@ -178,19 +182,23 @@ export async function runObsidianSync(
       }
     }
 
-    // 9. Post-sync: extract insights from newly synced reviews (fire-and-forget)
+    // 9. Post-sync: extract insights from newly synced reviews.
+    //    The promise is returned to the caller. Server timer ignores it
+    //    (fire-and-forget); CLI awaits it before closing the pool.
     const approvedArtifacts = upsertedArtifacts.filter((a) => !a.key.startsWith("Pending/"));
     const newReviews = approvedArtifacts
       .filter((a) => a.kind === "review")
       .map((a) => ({ title: a.title, body: a.body }));
     console.log(`[obsidian-sync] Reviews for extraction: ${newReviews.map((r) => r.title).join(", ") || "(none)"}`);
-    if (newReviews.length > 0) {
-      void extractAndNotifyReviews(pool, newReviews)
-        .catch((err) => notifyError("Review extraction", err));
-    }
+    const extractionPromise =
+      newReviews.length > 0
+        ? extractAndNotifyReviews(pool, newReviews).catch((err) =>
+            notifyError("Review extraction", err)
+          )
+        : undefined;
 
     await completeObsidianSyncRun(pool, runId, "success", filesSynced, filesDeleted, linksResolved, errors);
-    return { runId, filesSynced, filesDeleted, linksResolved, errors, durationMs: Date.now() - t0 };
+    return { runId, filesSynced, filesDeleted, linksResolved, errors, durationMs: Date.now() - t0, extractionPromise };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown Obsidian sync error";
     await completeObsidianSyncRun(pool, runId, "error", filesSynced, filesDeleted, linksResolved, [
