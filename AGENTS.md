@@ -379,8 +379,9 @@ tags:
 ---
 ```
 
-- Title goes in the first `# heading`, never in frontmatter.
-- No blank line between closing `---` and `# heading`.
+- **Filename is the title.** Don't add an `# H1` heading inside the file — Obsidian renders the filename as the title, so an H1 produces a duplicated title in the UI. Sync (`src/obsidian/parser.ts:66`) falls back to the filename when no H1 exists, so dropping it is safe and correct.
+- Title is NEVER in frontmatter either. Just the filename.
+- Body starts immediately on the line after the closing `---`. No blank line.
 - `[[Wiki Links]]` become graph edges in the DB.
 - `status: pending` = excluded from semantic search until approved.
 - Tags are normalized to lowercase on sync.
@@ -402,7 +403,6 @@ Current inventory:
 | `Council Review.md` | Multi-model deliberation wrapper used by `Insights Dedup.md` and other workflows. |
 | `Write Tomo.md` | Generate the Tomo Spanish-tutor prompt-doc. |
 | `Import Kindle Lookups.md` | Pull Kindle vocab.db highlights into the vault. |
-| `Insights Dedup 1.md` | Legacy variant of the dedup prompt; superseded by `Insights Dedup.md`. |
 
 ### SOP: Pending → Insight dedup
 
@@ -447,6 +447,7 @@ Then `$PSQL "$PGURL"` + OpenAI embeddings API (`text-embedding-3-small` — same
 - No `status: active` — only `pending` / `approved`.
 - No content above frontmatter.
 - No duplicate title in both frontmatter and heading.
+- No H1 inside the file. Filename = title. Adding `# Title` after the frontmatter renders twice in Obsidian.
 - `parts.md` stays a concise OVERVIEW — don't inline part bodies.
 
 ## Gotchas
