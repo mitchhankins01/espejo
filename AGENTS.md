@@ -159,11 +159,7 @@ scripts/
   embed-entries.ts  — Batch embed all entries missing embeddings.
   ingest-sessions.ts — Ingest Claude Code / OpenCode / Codex session metadata into agent_sessions (pnpm ingest:sessions). See specs/agent-sessions-ingestor.md.
   import-lookups.ts — Bulk import Spanish verbs + Kindle lookups.
-  write-tomo.ts     — Write the next Espejo tomo (essay or myth format). Opportunistic myth-mode driven by curated corpus at `books/myths.jsonl`. Flags: `--format=<essay|myth>`, `--myth=<name>`, `--no-myth`, `--fresh-plan`. See `Artifacts/Prompt/Write Tomo.md` and `specs/2026-05-01-feat-mythology-tomos-plan.md`.
-  book/myths.ts     — Mythology corpus reader + validator + accent-insensitive find/suggest.
-  book/myth-scorer.ts — Standalone scoring of corpus vs. context (used by myth-fit-report).
-  book/myth-fit-report.ts — Diagnostic CLI: ranks corpus fit vs. current context without writing a plan (`pnpm tsx scripts/book/myth-fit-report.ts`).
-  book/add-myth.ts  — Drafts a new corpus entry with Claude and appends to `books/myths.jsonl` after explicit confirmation.
+  write-tomo.ts     — Write the next Espejo tomo. Two-step flow: `--plan-only` emits 6 candidates (3 essay + 3 flow) saved to `books/next-plan.json`; `--pick=<1-6>` runs the writer with the chosen candidate. Flags: `--steer "..."`, `--bilingual` / `--no-bilingual`, `--share-julia` / `--no-share-julia`, `--fresh-plan`. See `Artifacts/Prompt/Spanish/Tomo.md`.
   condense-insights.ts — Periodic condensation pass over insights.
   migrate.ts        — Runs SQL files, tracks applied migrations in _migrations table.
   migrate-entries-to-artifacts.ts — One-time migration of entries into knowledge artifacts.
@@ -361,7 +357,7 @@ Artifacts/
   Parts/       — IFS parts work (parts.md is a CONCISE OVERVIEW — preserve hierarchy)
   Attachment/  — media
   Template/    — Obsidian templates (NOT synced)
-  Pending/     — extracted insights awaiting dedup approval (written by `Artifacts/Prompt/Extract Insights.md`)
+  Pending/     — extracted insights awaiting dedup approval (written by `Artifacts/Prompt/Insights/Extract.md`)
 ```
 
 Any `.md` outside `.obsidian/`, `.trash/`, `Template/` syncs to the DB.
@@ -386,22 +382,26 @@ tags:
 
 ### Reusable prompts (Artifacts/Prompt/)
 
-`Artifacts/Prompt/` is the canonical home for cross-tool reusable prompts. Mitch invokes them by referring to the file in plain text — *"Run Artifacts/Prompt/Insights Dedup.md"* — not as slash commands. When you see that pattern, read the matching file and execute it; don't regenerate.
+`Artifacts/Prompt/` is the canonical home for cross-tool reusable prompts. Mitch invokes them by referring to the file in plain text — *"Run Artifacts/Prompt/Insights/Dedup.md"* — not as slash commands. When you see that pattern, read the matching file and execute it; don't regenerate.
 
 Current inventory:
 
 | file | purpose |
 |---|---|
-| `Extract Insights.md` | Per-Review atomic insight extraction → `Pending/`. Mitch supplies the Review filename. Retrieval is for terminology/wikilinks only; dedup decisions live in `Insights Dedup.md`. |
-| `Insights Dedup.md` | Stage-1-through-4 dedup pipeline orchestrator. References `scripts/dedup/`. |
-| `Insights Condense.md` | Periodic condensation of related insights into thematic clusters. |
-| `Evening Review.md` | End-of-day review prompt — closes the loop on the day's pulls/decisions. |
-| `Reviews.md` | Weekly/monthly review template (writes Review-kind artifacts). |
-| `Therapy.md` | Pre-therapy load + session-prep prompt. |
-| `Parts Check-in.md` | IFS midday parts checkin protocol. |
-| `Council Review.md` | Multi-model deliberation wrapper used by `Insights Dedup.md` and other workflows. |
-| `Write Tomo.md` | Generate the Tomo Spanish-tutor prompt-doc. |
-| `Import Kindle Lookups.md` | Pull Kindle vocab.db highlights into the vault. |
+| `Review/Evening.md` | End-of-day review prompt — closes the loop on the day's pulls/decisions. |
+| `Review/Weekly.md` | Weekly pattern-interrupt review (writes Review-kind artifacts). |
+| `Review/Monthly.md` | Monthly Proyecto Mitch review (writes Review-kind artifacts). |
+| `Insights/Extract.md` | Per-Review atomic insight extraction → `Pending/`. Mitch supplies the Review filename. Retrieval is for terminology/wikilinks only; dedup decisions live in `Insights/Dedup.md`. |
+| `Insights/Dedup.md` | Stage-1-through-4 dedup pipeline orchestrator. References `scripts/dedup/`. |
+| `Insights/Condense.md` | Periodic condensation of related insights into thematic clusters. |
+| `Therapy/Prep.md` | Pre-therapy load + session-prep prompt. |
+| `Therapy/Processing.md` | Distill a therapy session transcript into `Artifacts/Review/YYYY-MM-DD — Therapy.md`. |
+| `Therapy/Parts Check-in.md` | IFS midday parts check-in protocol. |
+| `Therapy/Checkpoint.md` | Body-meeting / Checkpoint Protocol (3-turn). |
+| `Spanish/Tomo.md` | Generate the next Tomo (Phase 0 imports Kindle lookups). |
+| `Spanish/Vivo.md` | Update `Artifacts/Project/Español Vivo.md` from recent ingestion. |
+| `Spanish/Hilo.md` | Spanish thread / tutor prompt. |
+| `Council Review.md` | Multi-model deliberation wrapper used by `Insights/Dedup.md` and other workflows. |
 
 ### SOP: Pending → Insight dedup
 

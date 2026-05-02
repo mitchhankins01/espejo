@@ -11,7 +11,6 @@ Rules:
 - Bullets in "## Para llevarte": each Spanish bullet stays a bullet ("- ..."); on the line directly below the bullet, the English translation in italics, indented with two spaces ("  *...*"). Blank line between bullet pairs.
 - Translate naturally, not literally. Preserve nuance, tone, and idiom. The English should read clearly to a learner — not awkward word-for-word.
 - Treat short interjections, fragments, and quoted speech as their own sentence pairs.
-- If the source contains a "## El espejo" heading, the section above is a literary myth retelling in past tense — keep the EN translation in matching literary register (no contemporary contractions, retain the third-person past). The section below "El espejo" is a second-person bridge — translate the EN matching essay voice. The "## Para llevarte" bullets interleave myth lesson and personal resonance — maintain a consistent reflective tone across both kinds.
 - Output pure markdown. No preamble, no commentary, no closing note.`;
 
 export async function interleave(markdown: string): Promise<string> {

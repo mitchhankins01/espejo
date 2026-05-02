@@ -3,7 +3,9 @@ import { existsSync } from "fs";
 
 const HISTORY_PATH = "books/history.json";
 
-export type TomoFormat = "essay" | "myth" | "fiction";
+// "myth" and "fiction" are legacy values present in older history rows. New
+// tomos write only "essay" or "flow". Keep the broader union so old rows parse.
+export type TomoFormat = "essay" | "flow" | "myth" | "fiction";
 
 export type TomoDomain =
   | "neuroscience"
@@ -64,27 +66,11 @@ export function nextTomoNumber(h: TomoRecord[]): number {
   return Math.max(...h.map((r) => r.n)) + 1;
 }
 
-export function recentSourceUuids(
-  h: TomoRecord[],
-  fullN = 30,
-  mythN = 15
-): Set<string> {
-  const recent = h.slice(-fullN);
+export function recentSourceUuids(h: TomoRecord[], n = 30): Set<string> {
+  const recent = h.slice(-n);
   const out = new Set<string>();
-  for (let i = 0; i < recent.length; i++) {
-    const tomo = recent[i];
-    const isMyth = (tomo.format ?? "essay") === "myth";
-    const tomosFromEnd = recent.length - i;
-    if (isMyth && tomosFromEnd > mythN) continue;
+  for (const tomo of recent) {
     for (const u of tomo.source_uuids) out.add(u);
-  }
-  return out;
-}
-
-export function recentMythNames(h: TomoRecord[], n = 8): Set<string> {
-  const out = new Set<string>();
-  for (const r of h.slice(-n)) {
-    if (r.myth_name) out.add(r.myth_name);
   }
   return out;
 }
@@ -95,7 +81,6 @@ export interface TomoSummary {
   topic: string;
   format: TomoFormat;
   domain: string;
-  myth_name?: string;
 }
 
 export function recentTomoSummaries(h: TomoRecord[], n = 30): TomoSummary[] {
@@ -105,6 +90,5 @@ export function recentTomoSummaries(h: TomoRecord[], n = 30): TomoSummary[] {
     topic: r.topic,
     format: r.format ?? "essay",
     domain: r.domain,
-    myth_name: r.myth_name,
   }));
 }

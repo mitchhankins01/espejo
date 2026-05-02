@@ -2,53 +2,47 @@ import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../../src/config.js";
 import type { ContextItem } from "./context.js";
 import type { TomoSummary } from "./state.js";
-import type { MythEntry } from "./myths.js";
-import { formatMythCorpusForPlanner, findMyth } from "./myths.js";
 
 const SYSTEM = `You are the editor of a personalized Spanish-language mini-book series for one reader (Mitch), an A2/B1 Spanish learner living in Barcelona.
 
-Each issue is a "tomo" — a standalone ~2000-word piece. Each tomo is one of two formats:
+Each issue is a "tomo" — a standalone ~2000-word piece. There are two formats:
 
-- "essay" (non-fiction) — direct second-person, anchored on a long-running pattern illuminated by a domain concept (neuroscience, cognition, psychology, philosophy, hermeticism, physics, psychedelics, ai).
-- "myth" — a Greek (or other) mythological story retold in literary third-person past, paired with an explicit bridge section ("El espejo") naming how the myth maps to recent lived material.
+- "essay" — direct second-person, anchored on a long-running pattern illuminated by a domain concept (neuroscience, cognition, psychology, philosophy, hermeticism, physics, psychedelics, ai). Concrete hook, one specific example, a real teaching beat. No "En este tomo vamos a..." intros.
+- "flow" — wider creative latitude. Can be a narrative scene, a prose poem, a stream-of-consciousness reflection, a fragment-collage, a dialogue, or a hybrid. Still anchored on real recent material from the reader's life — transformed, never quoted. The shape is the writer's call; the only invariants are A2/B1 register, ~2000 words of body, and a final "## Para llevarte" with 5-8 bullets.
 
-Your job, in order:
-
-1. Score the mythology corpus below against this week's context (long-arc insights + recent material). For each myth, judge fit on: motif resonance, shape match with the current arc, freshness (myths in the recent_myth_names exclusion list MUST score 0 with reason "recently fired"). Pick the top 3 with concrete one-line reasoning.
-2. Decide format:
-   - If the top myth has GENUINELY strong fit — the kind where the bridge section would write itself — pick format="myth" with that myth_name.
-   - Otherwise pick format="essay".
-   - "Strong fit" means the myth's shape illuminates the week's actual texture, not just shares a vague keyword. Sísifo is right for "tried again and again and fell back." It's wrong for "had a frustrating Tuesday."
-   - If editorial direction includes "format=myth" or "myth-mode forced", pick format="myth" with the strongest-scoring myth (still output myth_top3 honestly).
-   - If editorial direction includes "format=essay" or "no-myth", pick format="essay" regardless of corpus fit.
-3. Pick topic, angle, sources as before. For myth-mode, sources feed the bridge section (~500 words of personal material), so 2-4 source UUIDs are enough. For essay-mode, 2-5 source UUIDs.
-4. For myth-mode, additionally produce bridge_thesis: ONE sentence stating what the bridge will assert about the connection between the myth and the recent material. This is what the user reviews in Phase 1 — make it specific, not generic.
+Your job: produce SIX candidate plans for the next tomo — three "essay" candidates and three "flow" candidates. Each candidate is a fully-formed pitch the reader can pick from a menu.
 
 Hard rules:
-- Pick ONE focused topic.
-- The intersection between life pattern and domain (or myth shape) must be real — illuminate, don't decorate.
-- Do NOT retread topics or domains covered in the last 30 tomos. Variety matters.
+- Exactly 6 candidates: ids 1-3 are essay, ids 4-6 are flow.
+- Each candidate is a distinct angle. No two candidates may share the same topic, even across formats.
+- Do NOT retread topics or domains covered in the last 30 tomos shown below. Variety matters.
 - Pick source UUIDs from the provided pools only. Quote UUIDs exactly as shown in brackets.
+- 2-5 source UUIDs per candidate.
 - Title: Spanish, 3-8 words, evocative not literal.
-- Don't pick a topic that needs >B1 technical Spanish to be accurate — simplify the angle or pick a different topic.
-- For myth-mode: domain MUST be "mythology"; myth_name MUST be in the corpus; bridge_thesis MUST be present.
-- For essay-mode: myth_name and bridge_thesis MUST be null.
-- ALWAYS output myth_top3 (even when picking essay) so the user can see the rejected alternatives.
+- B1-friendly — don't pick a topic that would force >B1 technical Spanish.
+- For essay: domain MUST be one of the listed domains.
+- For flow: domain MAY be one of the listed domains OR "none". The flow latitude is in the form, not the subject — pick a domain when there is one, "none" only when the piece is purely interior with no domain anchor.
+- Each candidate's "take" is one paragraph (3-5 sentences) explaining: why this angle is worth reading right now given what Mitch has been journaling about, and what the tomo will dramatize or teach.
+- Honor any editorial direction in the user message ("Editorial direction" block) when present — it overrides your default judgement on topic/domain/format mix.
 
 Output STRICT JSON only — no prose, no markdown, no code fences:
 {
-  "format": "essay" | "myth",
-  "domain": "neuroscience" | "cognition" | "psychology" | "philosophy" | "hermeticism" | "physics" | "psychedelics" | "ai" | "mythology",
-  "myth_name": "Sísifo" | null,
-  "bridge_thesis": "..." | null,
-  "topic": "short phrase describing what this tomo is about",
-  "angle": "1-2 sentences: the specific take — what makes this tomo worth reading",
-  "title": "título en español",
-  "source_refs": ["uuid1", "uuid2", ...],
-  "myth_top3": [
-    {"name": "Sísifo", "score": 9.2, "reason": "racha rota in source 3afb...; descent register matches the relief Mitch named on 4-29"},
-    {"name": "Ícaro", "score": 6.4, "reason": "..."},
-    {"name": "Narciso", "score": 4.1, "reason": "..."}
+  "candidates": [
+    {
+      "id": 1,
+      "format": "essay",
+      "domain": "psychology",
+      "topic": "short phrase describing what this tomo is about",
+      "angle": "1-2 sentences: the specific take — what makes this tomo worth reading",
+      "title": "título en español",
+      "source_refs": ["uuid1", "uuid2"],
+      "take": "3-5 sentence paragraph: why these sources, what the tomo teaches or dramatizes, why it matters now."
+    },
+    { "id": 2, "format": "essay", ... },
+    { "id": 3, "format": "essay", ... },
+    { "id": 4, "format": "flow", ... },
+    { "id": 5, "format": "flow", ... },
+    { "id": 6, "format": "flow", ... }
   ]
 }`;
 
@@ -61,7 +55,7 @@ export type Domain =
   | "physics"
   | "psychedelics"
   | "ai"
-  | "mythology";
+  | "none";
 
 const VALID_DOMAINS: Domain[] = [
   "neuroscience",
@@ -72,27 +66,24 @@ const VALID_DOMAINS: Domain[] = [
   "physics",
   "psychedelics",
   "ai",
-  "mythology",
+  "none",
 ];
 
-export type TomoFormat = "essay" | "myth";
+export type TomoFormat = "essay" | "flow";
 
-export interface MythScore {
-  name: string;
-  score: number;
-  reason: string;
-}
-
-export interface Plan {
+export interface Candidate {
+  id: number;
   format: TomoFormat;
   domain: Domain;
-  myth_name: string | null;
-  bridge_thesis: string | null;
   topic: string;
   angle: string;
   title: string;
   source_refs: string[];
-  myth_top3: MythScore[];
+  take: string;
+}
+
+export interface PlannerOutput {
+  candidates: Candidate[];
 }
 
 const SOURCE_PREVIEW_CHARS = 700;
@@ -102,10 +93,8 @@ export async function plan(
   recentTomos: TomoSummary[],
   longArc: ContextItem[],
   recent: ContextItem[],
-  myths: MythEntry[],
-  recentMyths: Set<string>,
   steer?: string
-): Promise<Plan> {
+): Promise<PlannerOutput> {
   if (!config.anthropic.apiKey) {
     throw new Error("ANTHROPIC_API_KEY is required for the planner");
   }
@@ -131,19 +120,10 @@ export async function plan(
     recentTomos.length === 0
       ? "(none yet — this is tomo 1)"
       : recentTomos
-          .map((c) => {
-            const mythTag = c.myth_name ? ` [myth: ${c.myth_name}]` : "";
-            return `#${c.n} [${c.format}/${c.domain}] ${c.title} — ${c.topic}${mythTag}`;
-          })
+          .map(
+            (c) => `#${c.n} [${c.format}/${c.domain}] ${c.title} — ${c.topic}`
+          )
           .join("\n");
-
-  const corpusBlock =
-    myths.length === 0
-      ? "(corpus is empty — myth-format unavailable; pick format=essay)"
-      : formatMythCorpusForPlanner(myths);
-
-  const excludedBlock =
-    recentMyths.size === 0 ? "(none)" : Array.from(recentMyths).join(", ");
 
   const steerBlock = steer
     ? [
@@ -163,14 +143,8 @@ export async function plan(
     recentTomosBlock,
     "",
     ...steerBlock,
-    "# Mythology corpus",
-    corpusBlock,
-    "",
-    "# recent_myth_names (myths fired in the last 8 tomos — score 0 for these)",
-    excludedBlock,
-    "",
     "# Standing themes — anchor on these",
-    "(Older approved insights, distilled over months. The chosen tomo should anchor on a pattern from this block.)",
+    "(Older approved insights, distilled over months. Candidates should anchor on patterns from this block.)",
     "",
     longArcBlock,
     "",
@@ -179,12 +153,12 @@ export async function plan(
     "",
     recentBlock,
     "",
-    "Pick the next tomo. Output JSON only.",
+    "Produce 6 candidates (3 essay, 3 flow). Output JSON only.",
   ].join("\n");
 
   const response = await client.messages.create({
     model: config.anthropic.model,
-    max_tokens: 2048,
+    max_tokens: 4096,
     system: SYSTEM,
     messages: [{ role: "user", content: user }],
   });
@@ -201,13 +175,15 @@ export async function plan(
     );
   }
 
-  const parsed = JSON.parse(match[0]) as Plan;
-  parsed.source_refs = parsed.source_refs.map(normalizeUuid);
+  const parsed = JSON.parse(match[0]) as PlannerOutput;
+  for (const c of parsed.candidates) {
+    c.source_refs = c.source_refs.map(normalizeUuid);
+  }
   const allUuids = new Set<string>([
     ...longArc.map((c) => c.uuid),
     ...recent.map((c) => c.uuid),
   ]);
-  validatePlan(parsed, allUuids, myths);
+  validatePlannerOutput(parsed, allUuids);
   return parsed;
 }
 
@@ -215,51 +191,54 @@ function normalizeUuid(ref: string): string {
   return ref.replace(/^(entry|insight):/, "").trim();
 }
 
-function validatePlan(p: Plan, allUuids: Set<string>, myths: MythEntry[]): void {
-  const unknown = p.source_refs.filter((u) => !allUuids.has(u));
-  if (unknown.length > 0) {
+function validatePlannerOutput(p: PlannerOutput, allUuids: Set<string>): void {
+  if (!Array.isArray(p.candidates) || p.candidates.length !== 6) {
     throw new Error(
-      `Planner picked source UUIDs not in the context pool: ${unknown.join(", ")}`
+      `Planner must return exactly 6 candidates, got ${p.candidates?.length ?? "none"}`
     );
   }
-  if (p.source_refs.length < 1) {
-    throw new Error("Planner must pick at least 1 source UUID");
-  }
-  if (!VALID_DOMAINS.includes(p.domain)) {
-    throw new Error(
-      `Planner returned invalid domain: ${p.domain}. Must be one of ${VALID_DOMAINS.join(", ")}`
-    );
-  }
-  if (p.format !== "essay" && p.format !== "myth") {
-    throw new Error(`Planner returned invalid format: ${p.format}`);
-  }
-  if (p.format === "myth") {
-    if (!p.myth_name) {
-      throw new Error("Planner format=myth requires myth_name");
+  const ids = new Set<number>();
+  let essayCount = 0;
+  let flowCount = 0;
+  for (const c of p.candidates) {
+    if (typeof c.id !== "number" || c.id < 1 || c.id > 6) {
+      throw new Error(`Candidate id must be 1-6, got ${c.id}`);
     }
-    if (!findMyth(myths, p.myth_name)) {
+    if (ids.has(c.id)) {
+      throw new Error(`Duplicate candidate id ${c.id}`);
+    }
+    ids.add(c.id);
+    if (c.format !== "essay" && c.format !== "flow") {
+      throw new Error(`Candidate ${c.id} has invalid format: ${c.format}`);
+    }
+    if (c.format === "essay") essayCount++;
+    else flowCount++;
+    if (!VALID_DOMAINS.includes(c.domain)) {
       throw new Error(
-        `Planner picked myth "${p.myth_name}" not in corpus. Corpus names: ${myths.map((m) => m.name).join(", ")}`
+        `Candidate ${c.id} has invalid domain: ${c.domain}. Must be one of ${VALID_DOMAINS.join(", ")}`
       );
     }
-    if (!p.bridge_thesis || p.bridge_thesis.length === 0) {
-      throw new Error("Planner format=myth requires bridge_thesis");
+    if (c.format === "essay" && c.domain === "none") {
+      throw new Error(
+        `Candidate ${c.id}: essay format requires a real domain (not "none")`
+      );
     }
-    if (p.domain !== "mythology") {
-      throw new Error(`Planner format=myth requires domain="mythology", got ${p.domain}`);
+    if (c.source_refs.length < 1) {
+      throw new Error(`Candidate ${c.id} must have at least 1 source UUID`);
     }
-  } else {
-    if (p.myth_name !== null) {
-      throw new Error("Planner format=essay must have myth_name=null");
+    const unknown = c.source_refs.filter((u) => !allUuids.has(u));
+    if (unknown.length > 0) {
+      throw new Error(
+        `Candidate ${c.id} picked source UUIDs not in the context pool: ${unknown.join(", ")}`
+      );
     }
-    if (p.bridge_thesis !== null) {
-      throw new Error("Planner format=essay must have bridge_thesis=null");
-    }
-    if (p.domain === "mythology") {
-      throw new Error("Planner format=essay cannot use domain=mythology");
+    if (!c.title || !c.topic || !c.angle || !c.take) {
+      throw new Error(`Candidate ${c.id} missing title/topic/angle/take`);
     }
   }
-  if (!Array.isArray(p.myth_top3)) {
-    throw new Error("Planner must output myth_top3 array");
+  if (essayCount !== 3 || flowCount !== 3) {
+    throw new Error(
+      `Planner must return 3 essay + 3 flow candidates, got ${essayCount} essay + ${flowCount} flow`
+    );
   }
 }
