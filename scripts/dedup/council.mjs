@@ -62,6 +62,19 @@ const env = { ...readEnvFile(".env"), ...readEnvFile(".env.production.local"), .
 
 // ─── wrapper prompt ─────────────────────────────────────────────────────────
 
+// Read Parts.md verbatim so the classifier can resolve part-name aliases
+// (e.g. "watchtower" == "The Self-Monitor"). Vocabulary drift across reviews
+// otherwise produces near-duplicate insights that look distinct under embedding
+// + RRF retrieval. Graceful no-op if file is missing.
+function loadPartsContext() {
+  const path = "Artifacts/Note/Parts.md";
+  if (!existsSync(path)) return "";
+  const body = readFileSync(path, "utf8");
+  return `\n## Parts-of-self database (treat aliases as same referent)\n\nWhen a pair uses different vocabulary for the same part (e.g. one says "watchtower", the other says "The Self-Monitor"), they are talking about the same referent. Use the database below to resolve aliases and recognize when insights belong to the same part even when phrasing differs.\n\n${body}\n`;
+}
+
+const PARTS_CONTEXT = loadPartsContext();
+
 const WRAPPER = `You are classifying candidate insight pairs for a vault dedup workflow.
 
 Input: a JSON file embedded below (the "INPUT DATA" section). Each entry under \`.plan[]\` pairs a "source" insight (a Pending file) with up to 10 "candidates" from Insight/ OR Pending/ ordered by hybrid RRF score. Bodies are full text. Cosine distance is provided when available.
@@ -90,7 +103,7 @@ Output ONE JSON array, one object per source. Schema:
 ]
 
 End with a single line OUTSIDE the JSON: "Confidence: low | medium | high — <one sentence>"
-
+${PARTS_CONTEXT}
 ----- INPUT DATA -----
 `;
 
