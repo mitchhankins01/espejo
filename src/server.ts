@@ -24,6 +24,7 @@ import { handleSearchContent } from "./tools/search-content.js";
 import { handleSyncObsidianVault } from "./tools/sync-obsidian-vault.js";
 import { handleGetObsidianSyncStatus } from "./tools/get-obsidian-sync-status.js";
 import { handleSaveEveningReview } from "./tools/save-evening-review.js";
+import { handleLogCheckpoint } from "./tools/log-checkpoint.js";
 import { handleLogWeights } from "./tools/log-weights.js";
 import { handleDistillHnThread } from "./tools/distill-hn-thread.js";
 import { handleEveningReviewPrompt } from "./prompts/evening-review.js";
@@ -56,6 +57,7 @@ export const toolHandlers: Record<string, ToolHandler> = {
   sync_obsidian_vault: handleSyncObsidianVault,
   get_obsidian_sync_status: handleGetObsidianSyncStatus,
   save_evening_review: handleSaveEveningReview,
+  log_checkpoint: handleLogCheckpoint,
   log_weights: handleLogWeights,
   distill_hn_thread: handleDistillHnThread,
 };

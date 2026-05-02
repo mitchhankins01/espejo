@@ -612,6 +612,51 @@ export const toolSpecs = {
     ],
   },
 
+  log_checkpoint: {
+    name: "log_checkpoint" as const,
+    annotations: WRITE_IDEMPOTENT,
+    description:
+      "Append a Checkpoint Protocol toll to today's vault log. " +
+      "Writes to Artifacts/Checkpoint/<YYYY-MM-DD>.md in R2. " +
+      "Creates the file with frontmatter on first toll of the day; appends a bullet on subsequent tolls. " +
+      "Bullet shape: `- HH:MM Substance. Body. Part voice. choice`. " +
+      "HH:MM is the current local time in Europe/Madrid (24h). " +
+      "Use the user's words verbatim where possible — don't sanitize 'Nic' to 'Nicotine' or compress texture out of the body/part_voice clauses.",
+    params: z.object({
+      substance: z.string().min(1).describe(
+        "The surface label the user gave (e.g. 'Nic', 'Weed', 'Nic & Weed'). Don't expand."
+      ),
+      body: z.string().min(1).describe(
+        "Where the craving sits in the body — one short clause, the user's words. e.g. 'head + flutter in stomach'."
+      ),
+      part_voice: z.string().min(1).describe(
+        "What the part wants — one short clause, the user's words. e.g. 'post-Ritalin surf, keep moving'."
+      ),
+      choice: z.enum(["pass", "go", "unset"]).default("unset").describe(
+        "Step-4 outcome, in the protocol's own language. 'pass' = ran the toll and didn't use the substance; 'go' = ran the toll then used (still a win — running the toll IS the win); 'unset' = no answer given. Logged as '(no answer)' when unset. Never moralize."
+      ),
+    }),
+    examples: [
+      {
+        input: {
+          substance: "Nic",
+          body: "head + flutter in stomach",
+          part_voice: "post-Ritalin surf, keep moving",
+          choice: "pass",
+        },
+        behavior: "Appends `- HH:MM Nic. head + flutter in stomach. post-Ritalin surf, keep moving. pass` to today's checkpoint log; creates file with frontmatter if first toll of the day",
+      },
+      {
+        input: {
+          substance: "Weed",
+          body: "chest pressure",
+          part_voice: "wants to mellow",
+        },
+        behavior: "Defaults choice to 'unset', writes bullet ending in `(no answer)`",
+      },
+    ],
+  },
+
 } as const;
 
 // ============================================================================
