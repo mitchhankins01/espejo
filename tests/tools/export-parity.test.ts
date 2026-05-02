@@ -36,11 +36,6 @@ describe("queries.ts export parity", () => {
       "insertActivityLog",
       "getActivityLog",
       "getRecentActivityLogs",
-      "OBSERVABLE_DB_TABLES",
-      "isObservableDbTableName",
-      "listObservableTables",
-      "listObservableTableRows",
-      "listRecentDbChanges",
       "insertOuraSyncRun",
       "completeOuraSyncRun",
       "getOuraSyncRun",
@@ -89,7 +84,7 @@ describe("queries.ts export parity", () => {
 // Keep this in sync — update when intentionally adding/removing exports
 function expected_count(): number {
   // Current runtime export count (functions + constants, not types/interfaces)
-  return 56;
+  return 51;
 }
 
 describe("oura/analysis.ts export parity", () => {
