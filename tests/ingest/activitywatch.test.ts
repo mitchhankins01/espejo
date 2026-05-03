@@ -135,16 +135,19 @@ describe("readActivityWatchEvents", () => {
     expect(chase.hostname).toBe("secure.chase.com");
   });
 
-  it("filters by since (lex compare on ISO)", () => {
+  it("filters by since across peewee's space-separated timestamps", () => {
+    // peewee stores `2026-05-03 13:54:45.753000+00:00` (space, not T). Make
+    // sure since-filtering survives the format mismatch — a naive lex compare
+    // against an ISO `T` string would silently drop newer rows.
     const db = makeDb();
     insertBucket(db, 1, "aw-watcher-window_h", "currentwindow", "h");
     db.prepare("INSERT INTO eventmodel VALUES (1, 1, ?, ?, ?)").run(
-      "2026-05-01T10:00:00.000Z",
+      "2026-05-01 10:00:00.000000+00:00",
       10,
       JSON.stringify({ app: "A", title: "old" })
     );
     db.prepare("INSERT INTO eventmodel VALUES (2, 1, ?, ?, ?)").run(
-      "2026-05-03T10:00:00.000Z",
+      "2026-05-03 10:00:00.000000+00:00",
       10,
       JSON.stringify({ app: "B", title: "new" })
     );

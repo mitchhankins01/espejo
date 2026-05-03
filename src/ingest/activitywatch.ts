@@ -100,12 +100,15 @@ export function readActivityWatchEvents(
 
     const sinceIso = opts.since ? opts.since.toISOString() : null;
 
-    // peewee stores timestamps as ISO strings; lexicographic > works for those.
+    // peewee stores timestamps with a space separator (`2026-05-03 13:54:45...`)
+    // not a `T`, so a naive lexicographic compare against an ISO string with `T`
+    // is wrong (space < T). Cast both sides via SQLite's `datetime()` for a
+    // correct chronological filter.
     const eventStmt = sinceIso
       ? db.prepare(
           `SELECT id, bucket_id, timestamp, duration, datastr
              FROM eventmodel
-            WHERE bucket_id = ? AND timestamp > ?
+            WHERE bucket_id = ? AND datetime(timestamp) > datetime(?)
          ORDER BY timestamp ASC`
         )
       : db.prepare(
