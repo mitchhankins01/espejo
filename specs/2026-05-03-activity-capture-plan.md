@@ -136,14 +136,24 @@ Lowest risk; reuses `usage_logs`.
   - `atuin import zsh` to backfill `history.db` from `~/.zsh_history`. Imported rows all carry `exit=-1` (no exit captured); see sentinel handling above.
   - No sync server — local SQLite only.
 
-### Phase 4 — Screenpipe ingestor (trial)
-Deferred. Build only after phases 1–3 are stable. Trial clock starts on day Screenpipe is first ingested; if no SQL queries hit `screen_captures` in 14 days, drop the table and uninstall.
+### Phase 4 — Screenpipe ingestor (trial) — **shipped 2026-05-03, kill 2026-05-17 if no queries land**
+Trial clock started 2026-05-03. If no SQL hits `screen_captures` in 14 days, drop the table and uninstall.
 
-- **Migration 050** (only at start of trial): `screen_captures (id, started_at, ended_at, app, window, ocr_text, audio_text, embedding vector(1536), data jsonb)` + tsvector on `ocr_text` + ivfflat on embedding.
-- **`src/ingest/screenpipe.ts`**: read Screenpipe SQLite; chunk OCR text per (app, window, ~30s); embed via `text-embedding-3-small`; upsert.
-- **Retention**: 14 days raw OCR + audio; after that, keep only embeddings + 200-char excerpt. Implement as a daily prune query; trigger from `ingest-activity.ts` post-ingest.
-- **Privacy**: same SENSITIVE_HOSTS / sensitive-app drop list as ActivityWatch; drop captures where active app ∈ password manager set.
-- **Kill switch**: deleting the table + removing from `migrate.ts` + uninstalling Screenpipe is the rollback. No code in `src/` outside `ingest/` depends on it.
+- **Migration 050**: `screen_captures (id, source_chunk_id UNIQUE, started_at, ended_at, app, window_name, ocr_text, audio_text, embedding vector(1536), embedding_model, data jsonb, tsv tsvector GENERATED, ingested_at)` + gin on tsv + ivfflat on embedding (lists=50). `window_name` not `window` because `window` is a Postgres reserved word — caught by the test-DB init script, not in unit tests.
+- **`src/ingest/screenpipe.ts`**: read `~/.screenpipe/db.sqlite` read-only; LEFT JOIN `frames` + `ocr_text` (also `audio_chunks` + `audio_transcriptions` if present); group by `(app, window_name, floor(epoch / 30s))`; concatenate OCR per chunk with consecutive-dup collapse; attach overlapping audio transcriptions to chunks by time-window match (audio doesn't carry app context, so it's mapped to whatever buckets sit in the same 30s slot).
+- **`src/db/queries/screen-captures.ts`**: `upsertScreenCapture(s)` (idempotent on `source_chunk_id` = `chunk:${app}|${window}|${bucketIdx}`), `latestScreenCaptureStartedAt`, `pruneOldScreenCaptures(days=14)` (sets `ocr_text = LEFT(ocr_text, 200)`, `audio_text = NULL` for rows older than N days that still have an embedding).
+- **`scripts/ingest-activity.ts`**: `ingestScreenpipe()` mirrors `ingestActivityWatch`. Embeds combined OCR+audio in batches of 100 via `text-embedding-3-small` (cap 30k chars per chunk to stay under the 8192-token model limit). Calls `pruneOldScreenCaptures` post-ingest. Watermark via `latestScreenCaptureStartedAt`. Default backfill 7d. Adds screenpipe stats to summary + `usage_logs` meta.
+- **Retention**: 14 days raw OCR + audio; afterwards keep only embeddings + 200-char excerpt. Triggered every ingest (no separate cron).
+- **Privacy** (in `src/ingest/screenpipe.ts`):
+  - `SENSITIVE_APPS = {1Password (3 variants), Bitwarden, Keychain Access, Messages, Signal, Telegram, WhatsApp, Mail}` — drop the chunk entirely (OCR + audio). More aggressive than AW because OCR pulls content, not just titles.
+  - `SENSITIVE_HOSTS` substring-matches against window titles (best-effort — Screenpipe doesn't expose URLs the way the AW browser extension does).
+  - `--ignored-windows` passed to the `screenpipe record` command (in launchd plist) belt-and-suspenders the same set at recording time.
+- **macOS install** (CLI, not the paid desktop app):
+  - `npm i -g screenpipe` (v0.3.307 at install time). Brew formula `screenpipe` is deprecated. The paid desktop app is $400; the OSS CLI does the same recording into the same SQLite. Native binary lives at `~/.nvm/.../node_modules/screenpipe/node_modules/@screenpipe/cli-darwin-arm64/bin/screenpipe`.
+  - `launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.espejo.screenpipe.plist`. Plist invokes the native binary directly (so TCC perm grants attach to it, not to a Node wrapper). KeepAlive=true.
+  - **Audio disabled (`--disable-audio`).** Justification: macOS Sequoia removed the `+`-add affordance in Privacy & Security → Microphone; mic perm can only be granted via a runtime prompt, and launchd-spawned processes have no parent UI to attach the prompt to. Screen Recording is fine because that pane still has `+`-add. The `audio_text` schema column is preserved for future re-enable. Possible re-enable paths: drop launchd entirely and run `nohup screenpipe record &` from iTerm (inherits iTerm's mic perm; survives until reboot), or wait for Apple to restore manual Microphone add.
+  - First-run perm setup: launchd attempts the binary, which silently times out on perms; user manually adds the binary path to System Settings → Privacy & Security → Screen Recording → `+`. Subsequent KeepAlive respawn picks up the perm.
+- **Kill switch**: drop the table, remove migration 050 from `scripts/migrate.ts`, `launchctl bootout gui/$UID/com.espejo.screenpipe`, `rm ~/Library/LaunchAgents/com.espejo.screenpipe.plist`, `npm uninstall -g screenpipe`, `rm -rf ~/.screenpipe`. Nothing in `src/` outside `ingest/screenpipe.ts` + `db/queries/screen-captures.ts` depends on this.
 
 ## Auto-trigger via AGENTS.md
 

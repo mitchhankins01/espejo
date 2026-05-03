@@ -1714,6 +1714,37 @@ const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS device_events_host_idx    ON device_events (hostname) WHERE hostname IS NOT NULL;
     `,
   },
+  // 050 adds screen_captures — Screenpipe OCR + audio chunks (Phase 4 trial,
+  // started 2026-05-03). See specs/2026-05-03-activity-capture-plan.md.
+  // Trial commit: drop the table + uninstall Screenpipe if no SQL hits this
+  // table by 2026-05-17.
+  {
+    name: "050-screen-captures",
+    getSql: () => `
+      CREATE TABLE IF NOT EXISTS screen_captures (
+          id BIGSERIAL PRIMARY KEY,
+          source_chunk_id TEXT NOT NULL UNIQUE,
+          started_at TIMESTAMPTZ NOT NULL,
+          ended_at TIMESTAMPTZ NOT NULL,
+          app TEXT,
+          window_name TEXT,
+          ocr_text TEXT,
+          audio_text TEXT,
+          embedding vector(1536),
+          embedding_model TEXT NOT NULL DEFAULT 'text-embedding-3-small',
+          data JSONB NOT NULL DEFAULT '{}',
+          tsv tsvector GENERATED ALWAYS AS (
+              to_tsvector('english', coalesce(ocr_text, '') || ' ' || coalesce(audio_text, ''))
+          ) STORED,
+          ingested_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS screen_captures_started_idx ON screen_captures (started_at DESC);
+      CREATE INDEX IF NOT EXISTS screen_captures_app_idx     ON screen_captures (app, started_at DESC);
+      CREATE INDEX IF NOT EXISTS screen_captures_tsv_idx     ON screen_captures USING gin (tsv);
+      CREATE INDEX IF NOT EXISTS screen_captures_embedding_idx
+          ON screen_captures USING ivfflat (embedding vector_cosine_ops) WITH (lists = 50);
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

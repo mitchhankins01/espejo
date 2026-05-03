@@ -1,5 +1,5 @@
 /**
- * Activity capture ingestor: ActivityWatch (today), Atuin + Screenpipe (later).
+ * Activity capture ingestor: ActivityWatch + Atuin + Screenpipe.
  *
  * Usage:
  *   pnpm ingest:activity
@@ -9,7 +9,7 @@
  *   pnpm ingest:activity --source aw|atuin|screenpipe
  *   pnpm ingest:activity --skip-if-fresh 24h
  *
- * See specs/2026-05-03-activity-capture-plan.md (Phase 2).
+ * See specs/2026-05-03-activity-capture-plan.md (Phases 2–4).
  */
 import "dotenv/config";
 import { pool } from "../src/db/client.js";
@@ -30,6 +30,17 @@ import {
   readActivityWatchEvents,
 } from "../src/ingest/activitywatch.js";
 import { ATUIN_SOURCE, readAtuinHistory } from "../src/ingest/atuin.js";
+import {
+  readScreenpipeChunks,
+  type ScreenCaptureChunk,
+} from "../src/ingest/screenpipe.js";
+import {
+  upsertScreenCaptures,
+  latestScreenCaptureStartedAt,
+  pruneOldScreenCaptures,
+  type UpsertScreenCaptureInput,
+} from "../src/db/queries/screen-captures.js";
+import { generateEmbeddingsBatch } from "../src/db/embeddings.js";
 
 type ActivitySource = "aw" | "atuin" | "screenpipe";
 
@@ -49,6 +60,14 @@ const skipIfFresh = arg("--skip-if-fresh");
 // Default backfill window when nothing has been ingested yet.
 const DEFAULT_BACKFILL_DAYS = 7;
 const ATUIN_DEFAULT_BACKFILL_DAYS = 30;
+const SCREENPIPE_DEFAULT_BACKFILL_DAYS = 7;
+// text-embedding-3-small batch size. Mirrors scripts/embed-entries.ts.
+const EMBED_BATCH = 100;
+// Cap each chunk's combined OCR+audio at ~30k chars before embedding to stay
+// under the 8192-token model limit. Mirrors scripts/embed-entries.ts.
+const MAX_EMBED_CHARS = 30_000;
+// Tiered-retention window for OCR/audio text (matches phase-4 spec).
+const SCREENPIPE_RETENTION_DAYS = 14;
 
 function parseDuration(s: string): number {
   const m = s.match(/^(\d+)\s*([mhd])$/);
@@ -209,6 +228,112 @@ async function ingestAtuin(sinceOverride: Date | null): Promise<SourceStats> {
   return stats;
 }
 
+async function ingestScreenpipe(
+  sinceOverride: Date | null
+): Promise<SourceStats & { embedded: number; pruned: number }> {
+  const stats = {
+    ...blankStats(),
+    embedded: 0,
+    pruned: 0,
+  };
+  const watermark = force ? null : await latestScreenCaptureStartedAt(pool);
+  const fallback = new Date(
+    Date.now() - SCREENPIPE_DEFAULT_BACKFILL_DAYS * 86_400_000
+  );
+  const since = sinceOverride ?? watermark ?? fallback;
+  log(`screenpipe: since = ${since.toISOString()}`);
+
+  let chunks: ScreenCaptureChunk[];
+  try {
+    chunks = readScreenpipeChunks({ since });
+  } catch (err) {
+    stats.errors++;
+    console.error("  screenpipe read failed:", err);
+    return stats;
+  }
+  stats.scanned = chunks.length;
+  // "buckets" here is by app — gives a quick read on what dominated the window.
+  for (const c of chunks) {
+    stats.buckets[c.app] = (stats.buckets[c.app] || 0) + 1;
+  }
+
+  if (chunks.length === 0) {
+    log("screenpipe: no new chunks");
+    return stats;
+  }
+
+  if (dryRun) {
+    stats.skipped = chunks.length;
+    log(`screenpipe: ${chunks.length} chunks (dry-run, not written/embedded)`);
+    return stats;
+  }
+
+  // Embed in batches. Concat OCR + audio for each chunk; cap length so the
+  // model doesn't reject the request.
+  const embeddings = new Array<number[] | null>(chunks.length).fill(null);
+  for (let i = 0; i < chunks.length; i += EMBED_BATCH) {
+    const slice = chunks.slice(i, i + EMBED_BATCH);
+    const inputs = slice.map((c) => {
+      const combined = [c.ocrText, c.audioText].filter(Boolean).join("\n");
+      return combined.length > MAX_EMBED_CHARS
+        ? combined.slice(0, MAX_EMBED_CHARS)
+        : combined;
+    });
+    try {
+      const vecs = await generateEmbeddingsBatch(inputs);
+      for (let j = 0; j < vecs.length; j++) {
+        embeddings[i + j] = vecs[j];
+      }
+      stats.embedded += vecs.length;
+    } catch (err) {
+      stats.errors++;
+      console.error(
+        `  screenpipe embed failed at chunk ${i}–${i + slice.length}:`,
+        err
+      );
+      // Leave embeddings as null — upsert will still write the row, embedding
+      // can be backfilled later with --force.
+    }
+  }
+
+  const inputs: UpsertScreenCaptureInput[] = chunks.map((c, idx) => ({
+    sourceChunkId: c.sourceChunkId,
+    startedAt: c.startedAt,
+    endedAt: c.endedAt,
+    app: c.app || null,
+    windowName: c.window || null,
+    ocrText: c.ocrText || null,
+    audioText: c.audioText,
+    embedding: embeddings[idx],
+    data: c.data,
+  }));
+
+  const CHUNK = 500;
+  for (let i = 0; i < inputs.length; i += CHUNK) {
+    const slice = inputs.slice(i, i + CHUNK);
+    try {
+      await upsertScreenCaptures(pool, slice);
+      stats.upserted += slice.length;
+    } catch (err) {
+      stats.errors++;
+      console.error(
+        `  screenpipe upsert failed at chunk ${i}–${i + slice.length}:`,
+        err
+      );
+    }
+  }
+
+  // Tiered retention: shrink old rows.
+  try {
+    stats.pruned = await pruneOldScreenCaptures(pool, SCREENPIPE_RETENTION_DAYS);
+  } catch (err) {
+    stats.errors++;
+    console.error("  screenpipe prune failed:", err);
+  }
+
+  return stats;
+}
+
 async function main(): Promise<void> {
   const start = Date.now();
 
@@ -244,10 +369,10 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const stats: Record<ActivitySource, SourceStats> = {
+  const stats = {
     aw: blankStats(),
     atuin: blankStats(),
-    screenpipe: blankStats(),
+    screenpipe: { ...blankStats(), embedded: 0, pruned: 0 },
   };
 
   if (!sourceArg || sourceArg === "aw") {
@@ -256,8 +381,8 @@ async function main(): Promise<void> {
   if (!sourceArg || sourceArg === "atuin") {
     stats.atuin = await ingestAtuin(since);
   }
-  if (sourceArg === "screenpipe") {
-    log("screenpipe: deferred (phase 4)");
+  if (!sourceArg || sourceArg === "screenpipe") {
+    stats.screenpipe = await ingestScreenpipe(since);
   }
 
   const durationMs = Date.now() - start;
@@ -266,10 +391,14 @@ async function main(): Promise<void> {
   console.log("ingest:activity summary");
   console.log("  activitywatch:", stats.aw);
   console.log("  atuin:        ", stats.atuin);
+  console.log("  screenpipe:   ", stats.screenpipe);
   console.log(`  duration:      ${durationMs}ms`);
 
   if (!dryRun) {
-    const allOk = stats.aw.errors === 0 && stats.atuin.errors === 0;
+    const allOk =
+      stats.aw.errors === 0 &&
+      stats.atuin.errors === 0 &&
+      stats.screenpipe.errors === 0;
     logUsage(pool, {
       source: "script",
       surface: "ingest-activity",
@@ -279,6 +408,7 @@ async function main(): Promise<void> {
       meta: {
         activitywatch: stats.aw,
         atuin: stats.atuin,
+        screenpipe: stats.screenpipe,
         force,
         since: sinceArg,
         source: sourceArg,

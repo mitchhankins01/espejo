@@ -593,6 +593,33 @@ CREATE INDEX IF NOT EXISTS device_events_app_idx     ON device_events (app, star
 CREATE INDEX IF NOT EXISTS device_events_bucket_idx  ON device_events (bucket, started_at DESC);
 CREATE INDEX IF NOT EXISTS device_events_host_idx    ON device_events (hostname) WHERE hostname IS NOT NULL;
 
+-- Screenpipe OCR + audio chunks. ~30s windows of (app, window) with
+-- concatenated OCR text and any overlapping mic transcription. Embedding +
+-- tsvector make these searchable. Phase 4 trial (kill 2026-05-17 if no
+-- queries land). See specs/2026-05-03-activity-capture-plan.md.
+CREATE TABLE IF NOT EXISTS screen_captures (
+    id BIGSERIAL PRIMARY KEY,
+    source_chunk_id TEXT NOT NULL UNIQUE,
+    started_at TIMESTAMPTZ NOT NULL,
+    ended_at TIMESTAMPTZ NOT NULL,
+    app TEXT,
+    window_name TEXT,
+    ocr_text TEXT,
+    audio_text TEXT,
+    embedding vector(1536),
+    embedding_model TEXT NOT NULL DEFAULT 'text-embedding-3-small',
+    data JSONB NOT NULL DEFAULT '{}',
+    tsv tsvector GENERATED ALWAYS AS (
+        to_tsvector('english', coalesce(ocr_text, '') || ' ' || coalesce(audio_text, ''))
+    ) STORED,
+    ingested_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS screen_captures_started_idx ON screen_captures (started_at DESC);
+CREATE INDEX IF NOT EXISTS screen_captures_app_idx     ON screen_captures (app, started_at DESC);
+CREATE INDEX IF NOT EXISTS screen_captures_tsv_idx     ON screen_captures USING gin (tsv);
+CREATE INDEX IF NOT EXISTS screen_captures_embedding_idx
+    ON screen_captures USING ivfflat (embedding vector_cosine_ops) WITH (lists = 50);
+
 -- ============================================================================
 -- Views
 -- ============================================================================
