@@ -87,13 +87,13 @@ Validates the pipe; smallest blast radius.
   - `source_message_id`, `raw_text`, `ingested_at` = always latest
 - **Logging**: `logUsage({ source: 'telegram', surface: 'screen-time', action, ok, meta })` where `action ∈ { 'detect', 'ingest' }` — `detect` fires for every photo (including non-Screen-Time fall-throughs), `ingest` fires once we commit to writing the row.
 
-### Phase 2 — ActivityWatch ingestor
+### Phase 2 — ActivityWatch ingestor — **shipped 2026-05-03**
 Highest ongoing signal. Mirror `agent_sessions` pattern.
 
-- **Migration 049**: `device_events`.
-- **`src/ingest/activitywatch.ts`**: read `~/Library/Application Support/activitywatch/aw-server/peewee-sqlite.v2.db` (or rocksdb fallback) read-only via `better-sqlite3`; iterate per bucket (`aw-watcher-window`, `aw-watcher-web-*`, `aw-watcher-afk`); produce normalized rows.
-- **`src/db/queries/device-events.ts`**: `upsertDeviceEvent`, `latestStartedAt(source, bucket)`.
-- **`scripts/ingest-activity.ts`**: entrypoint that runs all activity ingestors. Args mirror `ingest-sessions.ts` (`--dry-run`, `--force`, `--since`, `--source <aw|atuin|screenpipe>`, `--skip-if-fresh 24h`). Writes one `usage_logs` summary row per run.
+- **Migration 049**: `device_events` (applied prod 2026-05-03).
+- **`src/ingest/activitywatch.ts`**: read `~/Library/Application Support/activitywatch/aw-server/peewee-sqlite.v2.db` read-only via `better-sqlite3`; iterate per bucket (`aw-watcher-window`, `aw-watcher-web-*`, `aw-watcher-afk`); produce normalized rows.
+- **`src/db/queries/device-events.ts`**: `upsertDeviceEvent`, `upsertDeviceEvents` (transactional batch), `latestStartedAt(source, bucket?)`, `latestDeviceEventIngestedAt`.
+- **`scripts/ingest-activity.ts`**: entrypoint that runs all activity ingestors. Args mirror `ingest-sessions.ts` (`--dry-run`, `--force`, `--since`, `--source <aw|atuin|screenpipe>`, `--skip-if-fresh 24h`). Chunks upserts at 500. Writes one `usage_logs` summary row per run.
 - **`package.json`**: `"ingest:activity": "NODE_ENV=production tsx scripts/ingest-activity.ts"`.
 - **Watermark**: `MAX(started_at) WHERE source='activitywatch'`. Idempotent on `(source, source_event_id)`.
 - **Backfill**: default last 7 days; `--force` for full history. AW retains months locally — keep in mind volume.
@@ -101,6 +101,17 @@ Highest ongoing signal. Mirror `agent_sessions` pattern.
   - Drop `title` if `app` ∈ {`1Password`, `Bitwarden`, `Keychain Access`}; keep app + duration.
   - Strip URL paths/queries for hostnames in a `SENSITIVE_HOSTS` list (banks, health portals); keep hostname only.
   - Drop events where the AW browser extension flag indicates incognito/private.
+- **AW install**: `brew install --cask activitywatch` for the desktop app (bundles `aw-server`, `aw-watcher-window`, `aw-watcher-afk`). Web watcher is a separate browser extension that has to be installed per-browser:
+  - Chrome: https://chrome.google.com/webstore/detail/activitywatch-web-watcher/nglaklhklhcoonedhgnpgddginnjdadi (installed 2026-05-03)
+  - Firefox: https://addons.mozilla.org/firefox/addon/aw-watcher-web/
+  - Safari: not supported (extension model blocks the polling pattern); window-watcher still records "Safari — <page title>" without per-tab URL.
+- **Peewee schema gotchas** (locked in by tests in `tests/ingest/activitywatch.test.ts` after both bit me on the live DB):
+  - `bucketmodel.key` is the INTEGER PK; `bucketmodel.id` is the string bucket name (e.g. `aw-watcher-window_<host>`). Aliasing in the SELECT is required.
+  - peewee writes timestamps with a space separator (`2026-05-03 13:54:45.753000+00:00`), not a `T`. A naive `timestamp > ?` against an ISO-`T` string silently drops everything (space 0x20 < `T` 0x54). Use `datetime(timestamp) > datetime(?)`.
+- **Auxiliary watchers — explicitly out of scope for v1** (capture-first, see top of spec):
+  - `aw-watcher-input` (keyboard/mouse intensity beyond AFK) — possibly worth adding once we have any consumer at all; revisit after Phase 3/4.
+  - `aw-watcher-vscode`, `aw-watcher-jetbrains` — skip; `agent_sessions` already covers IDE work in finer grain.
+  - `aw-watcher-obsidian` (community) — skip; window-watcher titles + Obsidian sync already cover the same ground.
 
 ### Phase 3 — Atuin ingestor
 Lowest risk; reuses `usage_logs`.
