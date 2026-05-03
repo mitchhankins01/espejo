@@ -3,6 +3,17 @@ import { config } from "../../src/config.js";
 import type { Candidate } from "./planner.js";
 import type { ContextItem } from "./context.js";
 
+const GRAMMAR_GUARDRAILS = `Spanish grammar guardrails — recurring writer-model errors to avoid:
+
+- Subjuntivo only when triggered. Use subjuntivo ONLY after explicit triggers: querer/esperar/dudar/preferir que; para que; antes/después de que; sin que; cuando + future event ("cuando llegue"); relative clauses with non-specific or hypothetical antecedent ("busco a alguien que sepa"); negative belief ("no creo que sea"). Outside these, use indicative.
+- Real, specific ongoing things in relative clauses take indicative: "una parte de ti que actúa" (not "que actúe"); "el escáner que sigue funcionando" (not "siga"); "el programa no dispara la alarma" (not "no dispare").
+- After "saber cómo" use the infinitive: "no sabe cómo registrar eso" (not "cómo registre eso").
+- After "sin" use the infinitive, not gerundio: "sin apretar los puños" (not "sin apretando").
+- Parallel "cuando" clauses describing factual present states stay in indicative: "cuando todo está bien" (not "cuando todo estuviera bien"). Only counterfactual or future-projecting "cuando" takes subjuntivo.
+- "Lo que" + verb is singular: "Lo que envejecía" (not "Lo que envejecían"). The neuter "lo que" takes singular agreement.
+- Tense floats inside paragraphs: pick a tense per scene and stay in it. Don't drift "Envejece despacio" → "Envejecía despacio" without a clear shift.
+- Never leak English words into the Spanish body. "La torre" not "La tower". If you need a technical term that has no Spanish equivalent, gloss it in Spanish.`;
+
 const ESSAY_SYSTEM = `You are writing one tomo — a Spanish essay (non-fiction) — for a single reader (Mitch), an A2/B1 Spanish learner living in Barcelona.
 
 A tomo is a standalone ~2000-word essay. No references to previous tomos. No translation, no footnotes, no parenthetical English.
@@ -24,6 +35,8 @@ After the body, append a final takeaways section:
 - 5-8 short bullets, one Spanish sentence each, starting with "- ".
 - Distill the actual ideas, observations, contrasts — not the structure of the argument.
 - Excluded from the body word count.
+
+${GRAMMAR_GUARDRAILS}
 
 Output format:
 - "# <title>" on the first line.
@@ -50,6 +63,8 @@ The only invariants:
 - No translation, no footnotes, no parenthetical English.
 
 Wider latitude than essay-mode means: you can break linear time, use recurring images, leave things implicit, end on an image rather than a thesis. But the texture must still feel anchored to the reader's actual life — recognizable mirror text, not generic. Be specific. Name the texture.
+
+${GRAMMAR_GUARDRAILS}
 
 Output format:
 - "# <title>" on the first line.
