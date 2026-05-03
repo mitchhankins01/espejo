@@ -14,8 +14,8 @@ Richer ground truth on how Mitch spends attention — Mac, iPhone, shell — bey
 
 ### iPhone
 Daily Screen Time push as part of morning ritual, for *previous* day:
-- iOS Shortcut deep-links to `prefs:root=SCREEN_TIME&path=SCREEN_TIME_SUMMARY#DAY`, semi-auto loop of 4 screenshots, share-sheet to Telegram with caption `screen_time YYYY-MM-DD`.
-- Shortcut already built and tested; sample screenshots showed all 4 sections cleanly.
+- iOS Shortcut deep-links to `prefs:root=SCREEN_TIME&path=SCREEN_TIME_SUMMARY#DAY`, semi-auto loop of 4 screenshots, share-sheet to Telegram. **No caption required** — the bot detects iOS Screen Time UI from the screenshot itself and reads the date label off the screen.
+- iOS share-sheet sends each screenshot as its own Telegram message (not a media group), so the four screenshots arrive as four sequential messages. The merge-on-conflict upsert (Phase 1 §Idempotency) is what makes this work — each upsert keeps the richest data per section.
 
 Per-day fields (vision-extracted): total minutes, top categories with minutes, per-app minutes, pickup count + first-pickup time + top apps after pickup, notification count + top notifying apps. Hourly histograms ignored.
 
@@ -73,15 +73,21 @@ CREATE TABLE daily_screen_time (
 
 Build in dependency order; each phase ships independently and is exercisable in isolation.
 
-### Phase 1 — Screen Time → Telegram extractor
+### Phase 1 — Screen Time → Telegram extractor — **shipped 2026-05-03**
 Validates the pipe; smallest blast radius.
 
-- **Migration 048**: `daily_screen_time`.
-- **Photo-group fix** in `src/telegram/updates.ts`: `MediaGroupBuffer` currently retains captions only and drops `photo[].file_id`. Extend to keep `photos: {fileId, caption}[]` (largest per message), and pass `photos` array on flush. Single-photo path unchanged (single photo will arrive in `photos` of length 1 via the same handler — DRY).
-- **New `src/telegram/screen-time.ts`**: detects `screen_time YYYY-MM-DD` caption, runs vision over the 1–4 photos, prompts model for strict JSON matching `daily_screen_time` columns, validates with zod, upserts via `src/db/queries/daily-screen-time.ts` (`ON CONFLICT (date) DO UPDATE`). Replies with one-line confirmation to the chat.
-- **Webhook routing** in `src/telegram/webhook.ts`: before existing `msg.photo` OCR branch, if caption matches the screen-time prefix, dispatch to `screen-time.ts` and return — short-circuits the agent so it doesn't see raw OCR text.
-- **Idempotency**: caption date is canonical. Re-pushing same date overwrites the row.
-- **Logging**: `logUsage({ source: 'telegram', surface: 'screen-time', action: 'ingest', ok, meta: { date, photo_count } })`.
+- **Migration 048**: `daily_screen_time` (applied prod 2026-05-03).
+- **Photo-group fix** in `src/telegram/updates.ts`: `MediaGroupBuffer` previously retained captions only and dropped `photo[].file_id`. Extended to keep `photos: {fileId, caption}[]` (largest per message), and pass `photos` array on flush. Single-photo path unchanged — single photo arrives in `photos` of length 1 via the same handler. (Note: iOS share-sheet ends up sending each screenshot as its own message anyway, so the media-group buffer mostly applies when other clients send a true multi-photo album.)
+- **New `src/telegram/screen-time.ts`**: vision call (`gpt-4.1`, JSON mode) inspects the photos and returns `{ is_screen_time, date, total_minutes, categories, apps, pickups, first_pickup, pickup_apps, notifications, notification_apps }`. Today's date is woven into the prompt so the model can resolve relative date phrases ("Ayer, 2 de mayo" → `2026-05-02`). Schema validated with zod. On `is_screen_time: true && date != null`, upserts via `src/db/queries/daily-screen-time.ts`. Replies with one-line confirmation reflecting the **merged** post-upsert row.
+- **Webhook routing** in `src/telegram/webhook.ts`: any photo message runs `processScreenTimePhotos` first. If `result.isScreenTime` → short-circuit (the agent never sees the screenshot). Otherwise → fall through to the existing OCR + agent path. **No caption required.**
+- **Idempotency / merge**: `ON CONFLICT (date) DO UPDATE` merges per-section instead of overwriting. Each iOS Screen Time screenshot only covers one section (totals, app breakdown, pickups, notifications), so the four photos arrive as four upserts and each must accumulate without clobbering the prior. Rules:
+  - `total_minutes = GREATEST(existing, incoming)`
+  - `pickups`, `first_pickup`, `notifications` = `COALESCE(incoming, existing)`
+  - `categories`, `apps`, `pickup_apps`, `notification_apps` = whichever array is longer (so a per-app screenshot replaces a section that arrived empty)
+  - `source_message_id`, `raw_text`, `ingested_at` = always latest
+- **Logging**: `logUsage({ source: 'telegram', surface: 'screen-time', action, ok, meta })` where `action ∈ { 'detect', 'ingest' }` — `detect` fires for every photo (including non-Screen-Time fall-throughs), `ingest` fires once we commit to writing the row.
+
+**Known quirk**: iOS Spanish renders "Primera consulta ▲0:00" as the marker on the pickups histogram, where `0:00` is sometimes the literal "before midnight" anchor rather than the actual first-pickup-of-day time. The vision model copies it verbatim, so `first_pickup` may end up `00:00:00` even when the user picked up the phone later. Tune the prompt or post-process if this becomes a problem in queries — not blocking for v1.
 
 ### Phase 2 — ActivityWatch ingestor
 Highest ongoing signal. Mirror `agent_sessions` pattern.
