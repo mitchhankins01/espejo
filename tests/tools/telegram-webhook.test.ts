@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import Anthropic from "@anthropic-ai/sdk";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -234,6 +235,7 @@ beforeEach(() => {
     wrotePersisted: true,
   });
   mockBuildSpanishPracticeSystemPrompt.mockReset().mockResolvedValue("PRACTICE PROMPT");
+  mockInsertChatMessage.mockReset().mockResolvedValue({ inserted: true, id: 1 });
   errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -677,8 +679,8 @@ describe("typing heartbeat", () => {
 });
 
 describe("error handling", () => {
-  it("sends actual error message to chat when agent throws", async () => {
-    mockRunAgent.mockRejectedValueOnce(new Error("Anthropic rate limited"));
+  it("sends generic error message to chat when agent throws", async () => {
+    mockRunAgent.mockRejectedValueOnce(new Error("Some random error"));
 
     const handler = getHandler();
     await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
@@ -689,7 +691,62 @@ describe("error handling", () => {
     );
     expect(mockSendTelegramMessage).toHaveBeenCalledWith(
       "100",
-      "Error: Anthropic rate limited"
+      "Error: Some random error"
+    );
+  });
+
+  it("sends friendly message + persists [error] marker on Anthropic credit-low 400", async () => {
+    const apiErr = new Anthropic.BadRequestError(
+      400,
+      {
+        type: "error",
+        error: {
+          type: "invalid_request_error",
+          message:
+            "Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.",
+        },
+      },
+      "billing",
+      new Headers()
+    );
+    mockRunAgent.mockRejectedValueOnce(apiErr);
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      "API credits low — top up at console.anthropic.com, then resend."
+    );
+    // Marker assistant message persisted so the next agent run treats this
+    // user turn as already-responded-to.
+    const markerCall = mockInsertChatMessage.mock.calls.find(
+      (c) =>
+        (c[1] as { role?: string }).role === "assistant" &&
+        typeof (c[1] as { content?: string }).content === "string" &&
+        ((c[1] as { content: string }).content as string).startsWith("[error]")
+    );
+    expect(markerCall).toBeDefined();
+    expect((markerCall![1] as { content: string }).content).toContain(
+      "API credits low"
+    );
+  });
+
+  it("sends friendly message on Anthropic 429 rate limit", async () => {
+    const apiErr = new Anthropic.RateLimitError(
+      429,
+      { type: "error", error: { type: "rate_limit_error", message: "rate limited" } },
+      "rate",
+      new Headers()
+    );
+    mockRunAgent.mockRejectedValueOnce(apiErr);
+
+    const handler = getHandler();
+    await handler({ chatId: 100, text: "hello", messageId: 1, date: 1000 });
+
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      "100",
+      "Rate limited — wait a moment and resend."
     );
   });
 

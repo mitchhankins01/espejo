@@ -31,6 +31,7 @@ import {
   runPracticeExtraction,
 } from "./practice-session.js";
 import { buildSpanishPracticeSystemPrompt } from "../prompts/spanish-practice.js";
+import { categorizeError, buildErrorMarkerMessage } from "./error-handling.js";
 
 // ---------------------------------------------------------------------------
 // Message handler — wires updates → agent → client
@@ -490,11 +491,25 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
     }
   } catch (err) {
     console.error(`Telegram error [chat:${chatId}]:`, err);
-    const errMsg = err instanceof Error ? err.message : String(err);
+    const categorized = categorizeError(err);
     try {
-      await sendTelegramMessage(chatId, `Error: ${errMsg}`);
+      await sendTelegramMessage(chatId, categorized.userMessage);
     } catch {
       /* v8 ignore next -- notification failed; original already logged */
+    }
+    // Persist a marker assistant message so the next successful agent run
+    // sees this user turn as "answered (with an error)" — preventing the
+    // backlog catch-up that re-ran log_checkpoint 4 times on 2026-05-03.
+    try {
+      await insertChatMessage(pool, {
+        chatId,
+        externalMessageId: null,
+        role: "assistant",
+        content: buildErrorMarkerMessage(categorized),
+      });
+    } catch (storeErr) {
+      /* v8 ignore next 2 -- best-effort marker write */
+      console.error(`Telegram error-marker store failed [chat:${chatId}]:`, storeErr);
     }
   }
 }

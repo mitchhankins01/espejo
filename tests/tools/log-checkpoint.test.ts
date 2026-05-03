@@ -195,4 +195,155 @@ tags:
     expect(content).not.toMatch(/\?\./);
     expect(content).toMatch(/the bracing\. go/);
   });
+
+  describe("duplicate suppression", () => {
+    function buildExistingFile(bulletTime: string): string {
+      return `---
+kind: note
+tags:
+  - checkpoint
+  - parts-work
+  - substance-use
+---
+- ${bulletTime} Nicotine. pulse behind the breastbone. keep the directed focus escalera going. go
+`;
+    }
+
+    function freezeWallClock(hhmm: string): () => void {
+      const [h, m] = hhmm.split(":").map(Number);
+      const fixed = new Date(Date.UTC(2026, 4, 2, h, m, 0));
+      const RealDate = Date;
+      const stub = function (...args: ConstructorParameters<typeof Date>) {
+        return args.length === 0 ? new RealDate(fixed) : new RealDate(...args);
+      } as unknown as DateConstructor;
+      stub.now = () => fixed.getTime();
+      stub.UTC = RealDate.UTC;
+      stub.parse = RealDate.parse;
+      Object.setPrototypeOf(stub, RealDate);
+      Object.setPrototypeOf(stub.prototype, RealDate.prototype);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).Date = stub;
+      return () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (globalThis as any).Date = RealDate;
+      };
+    }
+
+    it("rejects identical entry within 10-minute window without writing", async () => {
+      // Existing bullet at 23:47, agent re-calls at 23:50 with same content.
+      mockR2.getObjectContent.mockResolvedValue(buildExistingFile("23:47"));
+      // Madrid timezone is UTC+2 in May; 21:50 UTC == 23:50 Madrid.
+      const restore = freezeWallClock("21:50");
+      try {
+        const result = await handleLogCheckpoint(mockPool, {
+          substance: "Nicotine",
+          body: "pulse behind the breastbone",
+          part_voice: "keep the directed focus escalera going",
+          choice: "go",
+        });
+        expect(result).toMatch(/Already logged at 23:47/);
+        expect(mockR2.putObjectContent).not.toHaveBeenCalled();
+      } finally {
+        restore();
+      }
+    });
+
+    it("ignores case + whitespace + punctuation when checking duplicates", async () => {
+      // The 00:07 re-hallucination case from 2026-05-03: "a pulse" vs "pulse",
+      // "Nicotine" vs "Nicotine.", "Eager Excitement" vs "eager excitement".
+      mockR2.getObjectContent.mockResolvedValue(buildExistingFile("23:47"));
+      const restore = freezeWallClock("21:55");
+      try {
+        const result = await handleLogCheckpoint(mockPool, {
+          substance: "Nicotine.",
+          body: "  PULSE   behind the   breastbone ",
+          part_voice: "Keep the Directed Focus Escalera Going",
+          choice: "go",
+        });
+        expect(result).toMatch(/Already logged/);
+        expect(mockR2.putObjectContent).not.toHaveBeenCalled();
+      } finally {
+        restore();
+      }
+    });
+
+    it("allows re-log of the same toll after the duplicate window expires", async () => {
+      mockR2.getObjectContent.mockResolvedValue(buildExistingFile("14:00"));
+      // 14:15 Madrid = 12:15 UTC — 15 minutes later, outside 10-min window.
+      const restore = freezeWallClock("12:15");
+      try {
+        const result = await handleLogCheckpoint(mockPool, {
+          substance: "Nicotine",
+          body: "pulse behind the breastbone",
+          part_voice: "keep the directed focus escalera going",
+          choice: "go",
+        });
+        expect(result).toMatch(/Toll logged/);
+        expect(mockR2.putObjectContent).toHaveBeenCalledTimes(1);
+      } finally {
+        restore();
+      }
+    });
+
+    it("allows different content within the duplicate window", async () => {
+      mockR2.getObjectContent.mockResolvedValue(buildExistingFile("23:47"));
+      const restore = freezeWallClock("21:50");
+      try {
+        const result = await handleLogCheckpoint(mockPool, {
+          substance: "Weed",
+          body: "tightness in the jaw",
+          part_voice: "wants release",
+          choice: "go",
+        });
+        expect(result).toMatch(/Toll logged/);
+        expect(mockR2.putObjectContent).toHaveBeenCalledTimes(1);
+      } finally {
+        restore();
+      }
+    });
+
+    it("does not check duplicates when file does not yet exist", async () => {
+      mockR2.getObjectContent.mockRejectedValue(nf());
+      const restore = freezeWallClock("21:50");
+      try {
+        const result = await handleLogCheckpoint(mockPool, {
+          substance: "Nicotine",
+          body: "pulse",
+          part_voice: "go",
+          choice: "go",
+        });
+        expect(result).toMatch(/Toll logged/);
+        expect(mockR2.putObjectContent).toHaveBeenCalledTimes(1);
+      } finally {
+        restore();
+      }
+    });
+
+    it("ignores legacy backfilled bullets without HH:MM prefix", async () => {
+      const existing = `---
+kind: note
+tags:
+  - checkpoint
+  - parts-work
+  - substance-use
+  - backfilled
+---
+- Weed. some old toll without timestamp. wants something. go
+- 23:47 Nicotine. pulse behind the breastbone. keep the directed focus escalera going. go
+`;
+      mockR2.getObjectContent.mockResolvedValue(existing);
+      const restore = freezeWallClock("21:50");
+      try {
+        const result = await handleLogCheckpoint(mockPool, {
+          substance: "Nicotine",
+          body: "pulse behind the breastbone",
+          part_voice: "keep the directed focus escalera going",
+          choice: "go",
+        });
+        expect(result).toMatch(/Already logged at 23:47/);
+      } finally {
+        restore();
+      }
+    });
+  });
 });
