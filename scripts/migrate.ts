@@ -1665,6 +1665,27 @@ const migrations: Migration[] = [
       WHERE start_time IS NULL OR end_time IS NULL;
     `,
   },
+  // 048 adds daily_screen_time — daily iOS Screen Time snapshot ingested via
+  // Telegram screenshots + vision extraction. See specs/2026-05-03-activity-capture-plan.md.
+  {
+    name: "048-daily-screen-time",
+    getSql: () => `
+      CREATE TABLE IF NOT EXISTS daily_screen_time (
+          date DATE PRIMARY KEY,
+          total_minutes INTEGER NOT NULL,
+          categories JSONB NOT NULL,
+          apps JSONB NOT NULL,
+          pickups INTEGER,
+          first_pickup TIME,
+          pickup_apps JSONB,
+          notifications INTEGER,
+          notification_apps JSONB,
+          source_message_id BIGINT,
+          raw_text TEXT,
+          ingested_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

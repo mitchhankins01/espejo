@@ -276,7 +276,7 @@ describe("processUpdate", () => {
         chatId: 100,
         text: "read this sign",
         messageId: 2,
-        photo: { fileId: "large", caption: "read this sign" },
+        photos: [{ fileId: "large", caption: "read this sign" }],
       })
     );
   });
@@ -332,7 +332,7 @@ describe("processUpdate", () => {
     expect(handler).toHaveBeenCalledWith(
       expect.objectContaining({
         text: "",
-        photo: { fileId: "only-size", caption: "" },
+        photos: [{ fileId: "only-size", caption: "" }],
       })
     );
   });
@@ -701,5 +701,68 @@ describe("media group buffering", () => {
     expect(handler).toHaveBeenCalledWith(
       expect.objectContaining({ text: "[media group]" })
     );
+  });
+
+  it("retains the largest photo per message across the group", async () => {
+    processUpdate(
+      makeUpdate({
+        message: {
+          message_id: 1,
+          chat: { id: 100 },
+          from: { id: 42 },
+          media_group_id: "group-photos",
+          photo: [{ file_id: "small-1" }, { file_id: "large-1" }],
+          caption: "screen_time 2026-05-03",
+          date: 1000,
+        },
+      })
+    );
+
+    processUpdate(
+      makeUpdate({
+        message: {
+          message_id: 2,
+          chat: { id: 100 },
+          from: { id: 42 },
+          media_group_id: "group-photos",
+          photo: [{ file_id: "small-2" }, { file_id: "mid-2" }, { file_id: "large-2" }],
+          date: 1000,
+        },
+      })
+    );
+
+    vi.advanceTimersByTime(500);
+    await getQueuePromise("100");
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        photos: [
+          { fileId: "large-1", caption: "screen_time 2026-05-03" },
+          { fileId: "large-2", caption: "" },
+        ],
+      })
+    );
+  });
+
+  it("omits photos when none of the media-group messages had a photo array", async () => {
+    processUpdate(
+      makeUpdate({
+        message: {
+          message_id: 1,
+          chat: { id: 100 },
+          from: { id: 42 },
+          media_group_id: "group-no-photo",
+          caption: "just text",
+          date: 1000,
+        },
+      })
+    );
+
+    vi.advanceTimersByTime(500);
+    await getQueuePromise("100");
+
+    const call = handler.mock.calls[0][0];
+    expect(call.photos).toBeUndefined();
   });
 });

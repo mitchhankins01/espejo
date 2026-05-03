@@ -48,6 +48,8 @@ import {
   findArtifactByKindAndTitle,
   getRecentReviewArtifacts,
   upsertObsidianArtifact,
+  upsertDailyScreenTime,
+  getDailyScreenTime,
 } from "../../src/db/queries.js";
 import { fixturePatterns, fixtureArtifacts } from "../../specs/fixtures/seed.js";
 
@@ -1786,5 +1788,100 @@ describe("upsertObsidianArtifact — frontmatter timestamps", () => {
     const row = await fetchTimestamps(path);
     expect(row.updated_at.getTime()).toBeGreaterThanOrEqual(beforeUpdate - 1000);
     expect(row.updated_at.getTime()).toBeGreaterThan(initial.getTime());
+  });
+});
+
+describe("daily_screen_time queries", () => {
+  it("upserts a row and reads it back with all fields", async () => {
+    const date = "2026-04-21";
+    await pool.query("DELETE FROM daily_screen_time WHERE date = $1", [date]);
+
+    const inserted = await upsertDailyScreenTime(pool, {
+      date,
+      totalMinutes: 240,
+      categories: [
+        { name: "Productivity & Finance", minutes: 90 },
+        { name: "Social", minutes: 60 },
+      ],
+      apps: [
+        { app: "Telegram", minutes: 50 },
+        { app: "Mobile Safari", minutes: 40 },
+      ],
+      pickups: 78,
+      firstPickup: "07:42:00",
+      pickupApps: [{ app: "Mobile Safari", count: 30 }],
+      notifications: 120,
+      notificationApps: [{ app: "Telegram", count: 80 }],
+      sourceMessageId: 9999,
+      rawText: "raw vision output",
+    });
+
+    expect(inserted.date).toBe(date);
+    expect(inserted.total_minutes).toBe(240);
+    expect(inserted.categories).toHaveLength(2);
+    expect(inserted.apps[0].app).toBe("Telegram");
+    expect(inserted.pickups).toBe(78);
+    expect(inserted.first_pickup).toMatch(/^07:42/);
+    expect(inserted.notifications).toBe(120);
+    expect(inserted.source_message_id).toBe(9999);
+
+    const fetched = await getDailyScreenTime(pool, date);
+    expect(fetched).not.toBeNull();
+    expect(fetched!.total_minutes).toBe(240);
+  });
+
+  it("upsert overwrites the existing row by date (idempotency)", async () => {
+    const date = "2026-04-22";
+    await pool.query("DELETE FROM daily_screen_time WHERE date = $1", [date]);
+
+    await upsertDailyScreenTime(pool, {
+      date,
+      totalMinutes: 100,
+      categories: [{ name: "Social", minutes: 100 }],
+      apps: [{ app: "Telegram", minutes: 100 }],
+    });
+
+    const updated = await upsertDailyScreenTime(pool, {
+      date,
+      totalMinutes: 200,
+      categories: [{ name: "Productivity & Finance", minutes: 200 }],
+      apps: [{ app: "Mobile Safari", minutes: 200 }],
+      pickups: 50,
+    });
+
+    expect(updated.total_minutes).toBe(200);
+    expect(updated.categories[0].name).toBe("Productivity & Finance");
+    expect(updated.pickups).toBe(50);
+
+    const countResult = await pool.query<{ count: string }>(
+      "SELECT COUNT(*)::text AS count FROM daily_screen_time WHERE date = $1",
+      [date]
+    );
+    expect(Number(countResult.rows[0].count)).toBe(1);
+  });
+
+  it("returns null for an unknown date", async () => {
+    const result = await getDailyScreenTime(pool, "1999-01-01");
+    expect(result).toBeNull();
+  });
+
+  it("handles minimal payload with only required fields", async () => {
+    const date = "2026-04-23";
+    await pool.query("DELETE FROM daily_screen_time WHERE date = $1", [date]);
+
+    const inserted = await upsertDailyScreenTime(pool, {
+      date,
+      totalMinutes: 60,
+      categories: [],
+      apps: [],
+    });
+
+    expect(inserted.pickups).toBeNull();
+    expect(inserted.first_pickup).toBeNull();
+    expect(inserted.pickup_apps).toBeNull();
+    expect(inserted.notifications).toBeNull();
+    expect(inserted.notification_apps).toBeNull();
+    expect(inserted.source_message_id).toBeNull();
+    expect(inserted.raw_text).toBeNull();
   });
 });

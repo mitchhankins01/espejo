@@ -548,6 +548,28 @@ CREATE TRIGGER trg_knowledge_artifact_version_bump
     EXECUTE FUNCTION knowledge_artifact_version_bump();
 
 -- ============================================================================
+-- Activity capture (Mac + iPhone)
+-- ============================================================================
+
+-- Daily iOS Screen Time snapshot (vision-extracted from Telegram screenshots).
+-- One row per calendar day; caption-supplied date is canonical, re-pushing the
+-- same date overwrites the row.
+CREATE TABLE IF NOT EXISTS daily_screen_time (
+    date DATE PRIMARY KEY,
+    total_minutes INTEGER NOT NULL,
+    categories JSONB NOT NULL,             -- [{name, minutes}]
+    apps JSONB NOT NULL,                   -- [{app, minutes}]
+    pickups INTEGER,
+    first_pickup TIME,
+    pickup_apps JSONB,                     -- [{app, count}]
+    notifications INTEGER,
+    notification_apps JSONB,               -- [{app, count}]
+    source_message_id BIGINT,              -- Telegram message id (audit)
+    raw_text TEXT,                         -- vision OCR concat (for debugging)
+    ingested_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ============================================================================
 -- Views
 -- ============================================================================
 

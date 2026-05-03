@@ -21,7 +21,7 @@ function getOpenAI(): OpenAI {
   return openaiClient;
 }
 
-async function fetchTelegramFile(fileId: string): Promise<{ buffer: Buffer; filePath: string }> {
+export async function fetchTelegramFile(fileId: string): Promise<{ buffer: Buffer; filePath: string }> {
   const fileRes = await fetch(
     `${TELEGRAM_API}/bot${config.telegram.botToken}/getFile?file_id=${fileId}`
   );

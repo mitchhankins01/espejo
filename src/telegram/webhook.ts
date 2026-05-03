@@ -25,6 +25,10 @@ import { extractTextFromDocument, extractTextFromImage } from "./media.js";
 import { setMessageHandler, processUpdate } from "./updates.js";
 import type { AssembledMessage, TelegramUpdate } from "./updates.js";
 import {
+  parseScreenTimeCaption,
+  processScreenTimePhotos,
+} from "./screen-time.js";
+import {
   startPracticeSession,
   endPracticeSession,
   isPracticeSessionActive,
@@ -262,12 +266,35 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
   // Show typing indicator immediately
   await sendChatAction(chatId, "typing");
 
+  // Screen Time ingest: caption matches "screen_time YYYY-MM-DD" and photos
+  // are attached. Short-circuits before OCR + agent so the agent never sees
+  // raw screenshot text.
+  if (msg.photos && msg.photos.length > 0) {
+    const captionForScreenTime = msg.photos[0].caption;
+    const screenTimeDate = parseScreenTimeCaption(captionForScreenTime);
+    if (screenTimeDate) {
+      await processScreenTimePhotos({
+        pool,
+        chatId,
+        messageId: msg.messageId,
+        photos: msg.photos,
+        caption: captionForScreenTime,
+        notify: async (toChatId, replyText) => {
+          await sendTelegramMessage(toChatId, replyText);
+        },
+      });
+      return;
+    }
+  }
+
   let text = msg.text;
 
   try {
-    // OCR photo messages
-    if (msg.photo) {
-      text = await extractTextFromImage(msg.photo.fileId, msg.photo.caption);
+    // OCR photo messages — for non-screen-time captions, OCR the first photo.
+    // (Screen-time captions are dispatched earlier and short-circuit this branch.)
+    if (msg.photos && msg.photos.length > 0) {
+      const first = msg.photos[0];
+      text = await extractTextFromImage(first.fileId, first.caption);
       if (!text) {
         await sendTelegramMessage(
           chatId,
@@ -295,7 +322,7 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
     }
 
     // Transcribe voice messages
-    if (msg.voice && !msg.photo && !msg.document) {
+    if (msg.voice && !msg.photos && !msg.document) {
       text = await transcribeVoiceMessage(
         msg.voice.fileId,
         msg.voice.durationSeconds

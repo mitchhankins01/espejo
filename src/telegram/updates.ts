@@ -47,12 +47,18 @@ export interface TelegramUpdate {
   message_reaction?: TelegramReactionUpdate;
 }
 
+export interface AssembledPhoto {
+  fileId: string;
+  caption: string;
+}
+
 export interface AssembledMessage {
   chatId: number;
   text: string;
   messageId: number;
   date: number;
-  photo?: { fileId: string; caption: string };
+  /** Photos attached to this message. Length 1 for single photo, length N for media group. */
+  photos?: AssembledPhoto[];
   document?: {
     fileId: string;
     fileName?: string;
@@ -277,6 +283,7 @@ const MEDIA_GROUP_TIMEOUT_MS = 500;
 
 interface MediaGroupBuffer {
   chatId: number;
+  photos: AssembledPhoto[];
   captions: string[];
   firstMessageId: number;
   firstDate: number;
@@ -299,8 +306,18 @@ function flushMediaGroup(groupId: string, handler: MessageHandler): void {
       text,
       messageId: buf.firstMessageId,
       date: buf.firstDate,
+      photos: buf.photos.length > 0 ? buf.photos : undefined,
     })
   );
+}
+
+function pickLargestPhoto(
+  photo: { file_id: string }[] | undefined,
+  caption: string
+): AssembledPhoto | null {
+  if (!photo || photo.length === 0) return null;
+  const largest = photo[photo.length - 1];
+  return { fileId: largest.file_id, caption };
 }
 
 function bufferMediaGroup(
@@ -309,10 +326,15 @@ function bufferMediaGroup(
   handler: MessageHandler
 ): void {
   const existing = mediaGroupBuffers.get(groupId);
+  const caption = msg.caption ?? "";
+  const photo = pickLargestPhoto(msg.photo, caption);
 
   if (existing) {
-    if (msg.caption) {
-      existing.captions.push(msg.caption);
+    if (caption) {
+      existing.captions.push(caption);
+    }
+    if (photo) {
+      existing.photos.push(photo);
     }
     clearTimeout(existing.timer);
     existing.timer = setTimeout(
@@ -328,7 +350,8 @@ function bufferMediaGroup(
   );
   mediaGroupBuffers.set(groupId, {
     chatId: msg.chat.id,
-    captions: msg.caption ? [msg.caption] : [],
+    photos: photo ? [photo] : [],
+    captions: caption ? [caption] : [],
     firstMessageId: msg.message_id,
     firstDate: msg.date,
     timer,
@@ -421,19 +444,20 @@ export function processUpdate(update: TelegramUpdate): void {
     return;
   }
 
-  // Photo message (single) — OCR happens downstream
-  if (msg.photo && msg.photo.length > 0) {
-    const largest = msg.photo[msg.photo.length - 1];
+  // Photo message (single, no media group) — OCR happens downstream.
+  // Single photo is delivered as photos: [photo] for DRY downstream handling.
+  if (!msg.media_group_id && msg.photo && msg.photo.length > 0) {
+    const caption = msg.caption ?? "";
+    const photo = pickLargestPhoto(msg.photo, caption);
+    /* v8 ignore next -- pickLargestPhoto only returns null for empty array, guarded above */
+    if (!photo) return;
     enqueue(String(msg.chat.id), () =>
       handler({
         chatId: msg.chat.id,
-        text: msg.caption ?? "",
+        text: caption,
         messageId: msg.message_id,
         date: msg.date,
-        photo: {
-          fileId: largest.file_id,
-          caption: msg.caption ?? "",
-        },
+        photos: [photo],
       })
     );
     return;

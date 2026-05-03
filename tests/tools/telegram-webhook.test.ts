@@ -30,6 +30,7 @@ const {
   mockEndPracticeSession,
   mockRunPracticeExtraction,
   mockBuildSpanishPracticeSystemPrompt,
+  mockProcessScreenTimePhotos,
   mockConfig,
 } = vi.hoisted(() => {
   const streamUpdate = vi.fn();
@@ -66,6 +67,9 @@ const {
       wrotePersisted: true,
     }),
     mockBuildSpanishPracticeSystemPrompt: vi.fn().mockResolvedValue("PRACTICE PROMPT"),
+    mockProcessScreenTimePhotos: vi
+      .fn()
+      .mockResolvedValue({ ok: true, date: "2026-05-03" }),
     mockConfig: {
       config: {
         telegram: {
@@ -124,6 +128,17 @@ vi.mock("../../src/telegram/updates.js", () => ({
   setMessageHandler: mockSetMessageHandler,
   processUpdate: mockProcessUpdate,
 }));
+
+vi.mock("../../src/telegram/screen-time.js", async () => {
+  // Use the real parser since it's pure; only mock the IO function.
+  const actual = await vi.importActual<
+    typeof import("../../src/telegram/screen-time.js")
+  >("../../src/telegram/screen-time.js");
+  return {
+    parseScreenTimeCaption: actual.parseScreenTimeCaption,
+    processScreenTimePhotos: mockProcessScreenTimePhotos,
+  };
+});
 
 vi.mock("../../src/db/client.js", () => ({
   pool: {},
@@ -224,6 +239,9 @@ beforeEach(() => {
   mockExtractTextFromDocument.mockReset().mockResolvedValue("document text");
   mockSetMessageHandler.mockReset();
   mockProcessUpdate.mockReset();
+  mockProcessScreenTimePhotos
+    .mockReset()
+    .mockResolvedValue({ ok: true, date: "2026-05-03" });
   mockGetOuraSyncRun.mockReset().mockResolvedValue(null);
   mockGetActivityLog.mockReset().mockResolvedValue(null);
   mockIsPracticeSessionActive.mockReset().mockReturnValue(false);
@@ -535,7 +553,7 @@ describe("message handler", () => {
       text: "",
       messageId: 2,
       date: 1000,
-      photo: { fileId: "photo-123", caption: "read this" },
+      photos: [{ fileId: "photo-123", caption: "read this" }],
     });
 
     expect(mockExtractTextFromImage).toHaveBeenCalledWith("photo-123", "read this");
@@ -553,7 +571,7 @@ describe("message handler", () => {
       text: "",
       messageId: 20,
       date: 1000,
-      photo: { fileId: "photo-124", caption: "" },
+      photos: [{ fileId: "photo-124", caption: "" }],
     });
 
     expect(mockRunAgent).not.toHaveBeenCalled();
@@ -561,6 +579,46 @@ describe("message handler", () => {
       "100",
       "I couldn't extract any text from that image. Try a clearer image or add a caption."
     );
+  });
+
+  it("routes screen_time captioned photos to the screen-time extractor", async () => {
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "",
+      messageId: 30,
+      date: 1000,
+      photos: [
+        { fileId: "st-1", caption: "screen_time 2026-05-03" },
+        { fileId: "st-2", caption: "" },
+      ],
+    });
+
+    expect(mockProcessScreenTimePhotos).toHaveBeenCalledTimes(1);
+    expect(mockProcessScreenTimePhotos).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "100",
+        messageId: 30,
+        caption: "screen_time 2026-05-03",
+      })
+    );
+    // Short-circuits — agent + OCR must not run.
+    expect(mockExtractTextFromImage).not.toHaveBeenCalled();
+    expect(mockRunAgent).not.toHaveBeenCalled();
+  });
+
+  it("does not route plain photos through the screen-time extractor", async () => {
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "",
+      messageId: 31,
+      date: 1000,
+      photos: [{ fileId: "plain-1", caption: "look at this" }],
+    });
+
+    expect(mockProcessScreenTimePhotos).not.toHaveBeenCalled();
+    expect(mockExtractTextFromImage).toHaveBeenCalled();
   });
 
   it("extracts text from document messages before sending to agent", async () => {
