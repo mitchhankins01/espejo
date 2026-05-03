@@ -87,8 +87,6 @@ Validates the pipe; smallest blast radius.
   - `source_message_id`, `raw_text`, `ingested_at` = always latest
 - **Logging**: `logUsage({ source: 'telegram', surface: 'screen-time', action, ok, meta })` where `action ∈ { 'detect', 'ingest' }` — `detect` fires for every photo (including non-Screen-Time fall-throughs), `ingest` fires once we commit to writing the row.
 
-**Known quirk**: iOS Spanish renders "Primera consulta ▲0:00" as the marker on the pickups histogram, where `0:00` is sometimes the literal "before midnight" anchor rather than the actual first-pickup-of-day time. The vision model copies it verbatim, so `first_pickup` may end up `00:00:00` even when the user picked up the phone later. Tune the prompt or post-process if this becomes a problem in queries — not blocking for v1.
-
 ### Phase 2 — ActivityWatch ingestor
 Highest ongoing signal. Mirror `agent_sessions` pattern.
 
