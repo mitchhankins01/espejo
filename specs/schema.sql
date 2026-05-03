@@ -569,6 +569,30 @@ CREATE TABLE IF NOT EXISTS daily_screen_time (
     ingested_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Time-range device activity events. Generic by design so multiple sources
+-- (ActivityWatch on Mac today; iOS Shortcut focus/location pushes later) all
+-- land here. Idempotency: (source, source_event_id).
+CREATE TABLE IF NOT EXISTS device_events (
+    id BIGSERIAL PRIMARY KEY,
+    source TEXT NOT NULL,                  -- 'activitywatch' | 'ios-shortcut' | future
+    source_event_id TEXT NOT NULL,         -- AW event id, etc.
+    bucket TEXT NOT NULL,                  -- 'window' | 'web' | 'afk' | 'focus' | 'location'
+    started_at TIMESTAMPTZ NOT NULL,
+    ended_at TIMESTAMPTZ,
+    duration_ms INTEGER,
+    app TEXT,
+    title TEXT,
+    url TEXT,
+    hostname TEXT,
+    data JSONB NOT NULL DEFAULT '{}',      -- source-specific extras
+    ingested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (source, source_event_id)
+);
+CREATE INDEX IF NOT EXISTS device_events_started_idx ON device_events (started_at DESC);
+CREATE INDEX IF NOT EXISTS device_events_app_idx     ON device_events (app, started_at DESC);
+CREATE INDEX IF NOT EXISTS device_events_bucket_idx  ON device_events (bucket, started_at DESC);
+CREATE INDEX IF NOT EXISTS device_events_host_idx    ON device_events (hostname) WHERE hostname IS NOT NULL;
+
 -- ============================================================================
 -- Views
 -- ============================================================================

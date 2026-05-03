@@ -8,9 +8,12 @@ When you (Claude Code, OpenCode, Codex, or any other agent) open or start workin
 
 ```bash
 pnpm ingest:sessions --skip-if-fresh 24h
+pnpm ingest:activity --skip-if-fresh 24h
 ```
 
-This is a no-op if a successful run completed in the last 24 hours. Otherwise it captures Claude Code and OpenCode session logs into the `agent_sessions` table so usage analytics ("how is espejo used? what value does it provide?") have data to draw on. See `specs/agent-sessions-ingestor.md`.
+Both are no-ops if a successful run completed in the last 24 hours. Otherwise they capture:
+- Claude Code / OpenCode / Codex session logs → `agent_sessions` table (see `specs/agent-sessions-ingestor.md`).
+- ActivityWatch window/web/afk events → `device_events` table (see `specs/2026-05-03-activity-capture-plan.md`, Phase 2). No-ops cleanly when ActivityWatch isn't installed.
 
 ## Development Loop
 

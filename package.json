@@ -41,6 +41,7 @@
     "sync:oura": "tsx scripts/sync-oura.ts",
     "sync:obsidian": "NODE_ENV=production tsx scripts/sync-obsidian.ts",
     "ingest:sessions": "NODE_ENV=production tsx scripts/ingest-sessions.ts",
+    "ingest:activity": "NODE_ENV=production tsx scripts/ingest-activity.ts",
     "dedup:retrieve": "NODE_ENV=production tsx scripts/dedup/retrieve.ts",
     "dedup:council": "node scripts/dedup/council.mjs",
     "dedup:synth": "node scripts/dedup/synthesize.mjs",

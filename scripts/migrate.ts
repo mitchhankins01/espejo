@@ -1686,6 +1686,34 @@ const migrations: Migration[] = [
       );
     `,
   },
+  // 049 adds device_events — generic time-range event store for ActivityWatch
+  // (Mac) and future iOS Shortcut focus/location pushes. See
+  // specs/2026-05-03-activity-capture-plan.md (Phase 2).
+  {
+    name: "049-device-events",
+    getSql: () => `
+      CREATE TABLE IF NOT EXISTS device_events (
+          id BIGSERIAL PRIMARY KEY,
+          source TEXT NOT NULL,
+          source_event_id TEXT NOT NULL,
+          bucket TEXT NOT NULL,
+          started_at TIMESTAMPTZ NOT NULL,
+          ended_at TIMESTAMPTZ,
+          duration_ms INTEGER,
+          app TEXT,
+          title TEXT,
+          url TEXT,
+          hostname TEXT,
+          data JSONB NOT NULL DEFAULT '{}',
+          ingested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (source, source_event_id)
+      );
+      CREATE INDEX IF NOT EXISTS device_events_started_idx ON device_events (started_at DESC);
+      CREATE INDEX IF NOT EXISTS device_events_app_idx     ON device_events (app, started_at DESC);
+      CREATE INDEX IF NOT EXISTS device_events_bucket_idx  ON device_events (bucket, started_at DESC);
+      CREATE INDEX IF NOT EXISTS device_events_host_idx    ON device_events (hostname) WHERE hostname IS NOT NULL;
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {
