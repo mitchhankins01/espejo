@@ -19,11 +19,17 @@ import {
   latestDeviceEventIngestedAt,
   type UpsertDeviceEventInput,
 } from "../src/db/queries/device-events.js";
-import { logUsage } from "../src/db/queries/usage.js";
+import {
+  bulkInsertUsageLogs,
+  latestUsageLogTs,
+  logUsage,
+  type LogUsageInput,
+} from "../src/db/queries/usage.js";
 import {
   ACTIVITYWATCH_SOURCE,
   readActivityWatchEvents,
 } from "../src/ingest/activitywatch.js";
+import { ATUIN_SOURCE, readAtuinHistory } from "../src/ingest/atuin.js";
 
 type ActivitySource = "aw" | "atuin" | "screenpipe";
 
@@ -42,6 +48,7 @@ const skipIfFresh = arg("--skip-if-fresh");
 
 // Default backfill window when nothing has been ingested yet.
 const DEFAULT_BACKFILL_DAYS = 7;
+const ATUIN_DEFAULT_BACKFILL_DAYS = 30;
 
 function parseDuration(s: string): number {
   const m = s.match(/^(\d+)\s*([mhd])$/);
@@ -125,13 +132,101 @@ async function ingestActivityWatch(
   return stats;
 }
 
+async function ingestAtuin(sinceOverride: Date | null): Promise<SourceStats> {
+  const stats = blankStats();
+  const watermark = force ? null : await latestUsageLogTs(pool, ATUIN_SOURCE);
+  const fallback = new Date(
+    Date.now() - ATUIN_DEFAULT_BACKFILL_DAYS * 86_400_000
+  );
+  const since = sinceOverride ?? watermark ?? fallback;
+  log(`atuin: since = ${since.toISOString()}`);
+
+  let rows: ReturnType<typeof readAtuinHistory>;
+  try {
+    rows = readAtuinHistory({ since });
+  } catch (err) {
+    stats.errors++;
+    console.error("  atuin read failed:", err);
+    return stats;
+  }
+  stats.scanned = rows.length;
+  // No buckets concept for atuin; use exit-code success/failure as the
+  // breakdown so the summary is still useful. atuin's `-1` sentinel means
+  // "no exit captured" (typically zsh import or shell exited mid-command),
+  // not "command failed" — bucket those separately.
+  for (const r of rows) {
+    const key = r.exit === 0 ? "ok" : r.exit < 0 ? "unknown" : "fail";
+    stats.buckets[key] = (stats.buckets[key] || 0) + 1;
+  }
+
+  if (rows.length === 0) {
+    log("atuin: no new commands");
+    return stats;
+  }
+
+  if (dryRun) {
+    stats.skipped = rows.length;
+    log(`atuin: ${rows.length} commands (dry-run, not written)`);
+    return stats;
+  }
+
+  const inputs: (LogUsageInput & { ts: Date })[] = rows.map((r) => ({
+    source: ATUIN_SOURCE,
+    surface: r.hostname || undefined,
+    actor: r.cwd || undefined,
+    action: r.verb,
+    args: {
+      cmd: r.cmd,
+      cwd: r.cwd,
+      host: r.hostname,
+      exit: r.exit,
+      duration_ms: r.durationMs,
+      atuin_id: r.atuinId,
+      session: r.session,
+    },
+    // exit < 0 is atuin's "unknown" (imported or unfinished). Don't classify
+    // those as failures — they'd otherwise dominate any "what errored" query.
+    ok: r.exit <= 0,
+    error: r.exit > 0 ? String(r.exit) : undefined,
+    durationMs: r.durationMs,
+    ts: r.ts,
+  }));
+
+  const CHUNK = 500;
+  for (let i = 0; i < inputs.length; i += CHUNK) {
+    const slice = inputs.slice(i, i + CHUNK);
+    try {
+      await bulkInsertUsageLogs(pool, slice);
+      stats.upserted += slice.length;
+    } catch (err) {
+      stats.errors++;
+      console.error(
+        `  atuin insert failed at chunk ${i}–${i + slice.length}:`,
+        err
+      );
+    }
+  }
+  return stats;
+}
+
 async function main(): Promise<void> {
   const start = Date.now();
 
   if (skipIfFresh) {
-    const lastIngest = await latestDeviceEventIngestedAt(pool);
-    if (lastIngest) {
-      const ageMs = Date.now() - lastIngest.getTime();
+    // Freshness is keyed off the most recent successful run of this script
+    // (via the summary row it writes to usage_logs at the end). That covers
+    // every source the script handles, not just ActivityWatch's last event.
+    const lastRun = await pool.query<{ ts: Date | null }>(
+      `SELECT MAX(ts) AS ts FROM usage_logs
+        WHERE source = 'script' AND surface = 'ingest-activity' AND ok = TRUE`
+    );
+    const lastRunTs =
+      lastRun.rows[0]?.ts ??
+      // Fall back to the AW-events watermark for legacy installs that have
+      // ingested events but never recorded a script summary row.
+      (await latestDeviceEventIngestedAt(pool));
+    if (lastRunTs) {
+      const ageMs = Date.now() - lastRunTs.getTime();
       if (ageMs < parseDuration(skipIfFresh)) {
         const ageHours = (ageMs / 3_600_000).toFixed(1);
         console.log(
@@ -158,8 +253,8 @@ async function main(): Promise<void> {
   if (!sourceArg || sourceArg === "aw") {
     stats.aw = await ingestActivityWatch(since);
   }
-  if (sourceArg === "atuin") {
-    log("atuin: not yet implemented (phase 3)");
+  if (!sourceArg || sourceArg === "atuin") {
+    stats.atuin = await ingestAtuin(since);
   }
   if (sourceArg === "screenpipe") {
     log("screenpipe: deferred (phase 4)");
@@ -170,10 +265,11 @@ async function main(): Promise<void> {
   console.log();
   console.log("ingest:activity summary");
   console.log("  activitywatch:", stats.aw);
+  console.log("  atuin:        ", stats.atuin);
   console.log(`  duration:      ${durationMs}ms`);
 
   if (!dryRun) {
-    const allOk = stats.aw.errors === 0;
+    const allOk = stats.aw.errors === 0 && stats.atuin.errors === 0;
     logUsage(pool, {
       source: "script",
       surface: "ingest-activity",
@@ -182,6 +278,7 @@ async function main(): Promise<void> {
       durationMs,
       meta: {
         activitywatch: stats.aw,
+        atuin: stats.atuin,
         force,
         since: sinceArg,
         source: sourceArg,

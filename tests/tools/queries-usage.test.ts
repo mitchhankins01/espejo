@@ -1,7 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
 import type pg from "pg";
 
-import { logUsage } from "../../src/db/queries.js";
+import {
+  bulkInsertUsageLogs,
+  latestUsageLogTs,
+  logUsage,
+} from "../../src/db/queries.js";
 
 function fakePool(query: ReturnType<typeof vi.fn>): pg.Pool {
   return { query } as unknown as pg.Pool;
@@ -130,5 +134,91 @@ describe("logUsage", () => {
     await new Promise((r) => setImmediate(r));
     expect(consoleErr).toHaveBeenCalled();
     consoleErr.mockRestore();
+  });
+
+  it("inserts a leading ts column when ts is provided (backdating)", async () => {
+    const query = vi.fn().mockResolvedValue({ rowCount: 1 });
+    const pool = fakePool(query);
+    const ts = new Date("2026-04-01T12:00:00Z");
+
+    logUsage(pool, {
+      source: "shell",
+      surface: "mitch-mbp",
+      actor: "/Users/mitch",
+      action: "git",
+      ok: true,
+      ts,
+    });
+    await new Promise((r) => setImmediate(r));
+
+    const [sql, params] = query.mock.calls[0];
+    expect(sql).toMatch(/INSERT INTO usage_logs[\s\S]*\(ts,/);
+    expect(params[0]).toBe(ts);
+    expect(params[1]).toBe("shell");
+  });
+});
+
+describe("bulkInsertUsageLogs", () => {
+  it("no-ops when input is empty", async () => {
+    const query = vi.fn().mockResolvedValue({ rowCount: 0 });
+    await bulkInsertUsageLogs(fakePool(query), []);
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it("issues one multi-row INSERT with backdated ts on every row", async () => {
+    const query = vi.fn().mockResolvedValue({ rowCount: 2 });
+    const pool = fakePool(query);
+    const t1 = new Date("2026-04-01T00:00:00Z");
+    const t2 = new Date("2026-04-02T00:00:00Z");
+
+    await bulkInsertUsageLogs(pool, [
+      { source: "shell", action: "ls", ok: true, ts: t1 },
+      { source: "shell", action: "pwd", ok: true, ts: t2 },
+    ]);
+
+    expect(query).toHaveBeenCalledTimes(1);
+    const [sql, params] = query.mock.calls[0];
+    expect(sql).toContain("INSERT INTO usage_logs");
+    expect(sql).toContain("$1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10::jsonb");
+    expect(sql).toContain("$11, $12, $13, $14, $15, $16::jsonb, $17, $18, $19, $20::jsonb");
+    expect(params[0]).toBe(t1);
+    expect(params[10]).toBe(t2);
+    // Cols per row: ts, source, surface, actor, action, args, ok, error, duration_ms, meta
+    expect(params[4]).toBe("ls");
+    expect(params[14]).toBe("pwd");
+  });
+
+  it("propagates DB errors to the caller (unlike logUsage)", async () => {
+    const query = vi
+      .fn()
+      .mockRejectedValue(new Error("connection terminated"));
+    await expect(
+      bulkInsertUsageLogs(fakePool(query), [
+        {
+          source: "shell",
+          action: "ls",
+          ok: true,
+          ts: new Date(),
+        },
+      ])
+    ).rejects.toThrow(/connection terminated/);
+  });
+});
+
+describe("latestUsageLogTs", () => {
+  it("returns the MAX(ts) for the given source", async () => {
+    const ts = new Date("2026-05-02T03:04:05Z");
+    const query = vi.fn().mockResolvedValue({ rows: [{ ts }] });
+    const out = await latestUsageLogTs(fakePool(query), "shell");
+    expect(out).toBe(ts);
+    const [sql, params] = query.mock.calls[0];
+    expect(sql).toContain("MAX(ts)");
+    expect(params).toEqual(["shell"]);
+  });
+
+  it("returns null when nothing has been ingested for that source", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [{ ts: null }] });
+    const out = await latestUsageLogTs(fakePool(query), "shell");
+    expect(out).toBeNull();
   });
 });

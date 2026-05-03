@@ -113,19 +113,28 @@ Highest ongoing signal. Mirror `agent_sessions` pattern.
   - `aw-watcher-vscode`, `aw-watcher-jetbrains` — skip; `agent_sessions` already covers IDE work in finer grain.
   - `aw-watcher-obsidian` (community) — skip; window-watcher titles + Obsidian sync already cover the same ground.
 
-### Phase 3 — Atuin ingestor
+### Phase 3 — Atuin ingestor — **shipped 2026-05-03**
 Lowest risk; reuses `usage_logs`.
 
 - No new table.
-- **`src/ingest/atuin.ts`**: read `~/.local/share/atuin/history.db` read-only; rows → `logUsage` calls with:
+- **`src/ingest/atuin.ts`**: read `~/.local/share/atuin/history.db` read-only via `better-sqlite3`. Returns `AtuinShellRow[]` for the entrypoint to insert.
+- **`src/db/queries/usage.ts`**: `LogUsageInput` gained `ts?: Date`; `logUsage` keeps its fire-and-forget contract. Two new awaitable helpers for backfill — `bulkInsertUsageLogs` (multi-row INSERT with ts on each row) and `latestUsageLogTs(source)` (watermark). `UsageSource` gained `'shell'`.
+- **`scripts/ingest-activity.ts`**: `ingestAtuin()` mirrors `ingestActivityWatch()`. Each row maps to:
   - `source: 'shell'`, `surface: hostname`, `actor: cwd`,
-  - `action: command.split(/\s+/)[0]` (verb), `args: { cmd, cwd, host, exit, duration_ms, atuin_id }`,
-  - `ts: atuin.timestamp` (override default), `ok: exit === 0`, `error: exit !== 0 ? String(exit) : null`,
-  - `durationMs: atuin.duration / 1_000_000` (atuin stores nanoseconds).
-- **Watermark**: `MAX(ts) WHERE source='shell'`. Idempotent: re-running with same `--since` re-imports duplicates only on `--force` (cheap; rows are small).
+  - `action: command.split(/\s+/)[0]` (verb), `args: { cmd, cwd, host, exit, duration_ms, atuin_id, session }`,
+  - `ts: atuin.timestamp / 1_000_000` (atuin stores ns since epoch),
+  - `ok: exit <= 0`, `error: exit > 0 ? String(exit) : null`,
+  - `durationMs: max(0, atuin.duration / 1_000_000)`.
+- **Watermark**: `latestUsageLogTs(pool, 'shell')`. Idempotent on re-run; `--force` widens the window and may insert duplicates (cheap; rows are small).
 - **Backfill**: default last 30 days.
-- **Privacy/redaction**: drop commands matching any of: `(?i)(api[_-]?key|token|password|secret|bearer)\s*[=:]`; truncate `cmd` at 4 KB (caps `args` payload).
-- Helper: `logUsage` already exists and accepts arbitrary `meta`; we extend `LogUsageInput` to optionally accept `ts` to backdate inserted rows. Single-line addition; the existing fire-and-forget contract stays.
+- **`exit = -1` is atuin's "unknown" sentinel**, not "command failed". Imported zsh history (which has no recorded exits) all comes in as `-1`. Treating `-1` as a failure would dominate every `WHERE NOT ok` query for a month after the import — so the script maps `exit <= 0` to `ok=true` and only sets `error` for positive exits. Bucket counts split into `ok` / `unknown` / `fail` for visibility.
+- **Privacy/redaction** (in `src/ingest/atuin.ts`): drop the row when `command` matches `(api[_-]?key|token|password|secret|bearer)\s*[=:]/i`; drop tombstoned rows (`deleted_at IS NOT NULL`); truncate `cmd` at 4 KB (caps `args` payload). The redaction is conservative-cheap, not exhaustive — e.g. `Authorization: Bearer <tok>` doesn't match the regex (no `=`/`:` after `bearer`); accepted.
+- **`--skip-if-fresh` upgrade**: previously keyed off `latestDeviceEventIngestedAt` (AW's last event). Now keyed off the script's own most recent successful summary row in `usage_logs (source='script', surface='ingest-activity', ok=true)`, with the AW path as a legacy fallback. This way `--skip-if-fresh 24h` covers both sources, including the case where AW isn't installed.
+- **Atuin install flow**:
+  - `brew install atuin`.
+  - `eval "$(atuin init zsh --disable-up-arrow)"` appended to `~/.zshrc`. `--disable-up-arrow` keeps Up doing zsh's classic history; Ctrl-R is atuin's TUI.
+  - `atuin import zsh` to backfill `history.db` from `~/.zsh_history`. Imported rows all carry `exit=-1` (no exit captured); see sentinel handling above.
+  - No sync server — local SQLite only.
 
 ### Phase 4 — Screenpipe ingestor (trial)
 Deferred. Build only after phases 1–3 are stable. Trial clock starts on day Screenpipe is first ingested; if no SQL queries hit `screen_captures` in 14 days, drop the table and uninstall.

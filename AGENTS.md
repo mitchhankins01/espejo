@@ -14,6 +14,7 @@ pnpm ingest:activity --skip-if-fresh 24h
 Both are no-ops if a successful run completed in the last 24 hours. Otherwise they capture:
 - Claude Code / OpenCode / Codex session logs → `agent_sessions` table (see `specs/agent-sessions-ingestor.md`).
 - ActivityWatch window/web/afk events → `device_events` table (see `specs/2026-05-03-activity-capture-plan.md`, Phase 2). No-ops cleanly when ActivityWatch isn't installed.
+- Atuin shell history → `usage_logs` (`source='shell'`) (see plan, Phase 3). No-ops cleanly when atuin isn't installed.
 
 ## Development Loop
 
@@ -161,6 +162,7 @@ scripts/
   sync-weight.ts    — Sync weight data to production.
   embed-entries.ts  — Batch embed all entries missing embeddings.
   ingest-sessions.ts — Ingest Claude Code / OpenCode / Codex session metadata into agent_sessions (pnpm ingest:sessions). See specs/agent-sessions-ingestor.md.
+  ingest-activity.ts — Ingest ActivityWatch events into device_events + atuin shell history into usage_logs (pnpm ingest:activity). Args: --dry-run, --force, --since, --source <aw|atuin>, --skip-if-fresh 24h. See specs/2026-05-03-activity-capture-plan.md.
   import-lookups.ts — Bulk import Spanish verbs + Kindle lookups.
   write-tomo.ts     — Write the next Espejo tomo. Two-step flow: `--plan-only` emits 6 candidates (3 essay + 3 flow) saved to `books/next-plan.json`; `--pick=<1-6>` runs the writer with the chosen candidate. Flags: `--steer "..."`, `--bilingual` / `--no-bilingual`, `--share-julia` / `--no-share-julia`, `--fresh-plan`. See `Artifacts/Prompt/Spanish/Tomo.md`.
   condense-insights.ts — Periodic condensation pass over insights.
