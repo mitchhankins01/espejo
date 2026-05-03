@@ -2,10 +2,11 @@ import type pg from "pg";
 import { generateEmbeddingsBatch } from "./embeddings.js";
 
 const BATCH_SIZE = 50;
-const MAX_CHARS = 25000;
-// Target chunk size when splitting oversized items. Leaves headroom under
-// MAX_CHARS so a single chunk never bumps against the embedding token limit.
-const CHUNK_TARGET = 20000;
+// text-embedding-3-small caps inputs at 8192 tokens. Dense content (lab
+// values, code, JSON, mixed-language) can hit ~2 chars/token, so 14000 chars
+// is the largest single piece we ever send un-chunked.
+const MAX_CHARS = 14000;
+const CHUNK_TARGET = 10000;
 // Hard cap on chunks per item — guards against pathological inputs (a 1MB note
 // shouldn't quietly fan out into 50 embedding calls).
 const MAX_CHUNKS = 10;

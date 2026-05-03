@@ -27,8 +27,8 @@ describe("chunkText", () => {
   });
 
   it("splits oversized text on paragraph boundaries", () => {
-    const para = "A".repeat(15000);
-    const text = `${para}\n\n${para}`; // 30002 chars
+    const para = "A".repeat(8000);
+    const text = `${para}\n\n${para}`; // 16002 chars
     const chunks = chunkText(text);
     expect(chunks.length).toBe(2);
     expect(chunks[0]).toBe(para);
@@ -40,7 +40,7 @@ describe("chunkText", () => {
     const chunks = chunkText(text);
     expect(chunks.length).toBeGreaterThan(1);
     expect(chunks.join("")).toBe(text);
-    for (const c of chunks) expect(c.length).toBeLessThanOrEqual(20000);
+    for (const c of chunks) expect(c.length).toBeLessThanOrEqual(10000);
   });
 });
 
@@ -111,8 +111,8 @@ describe("embedPending", () => {
   });
 
   it("chunks an oversized entry and averages the vectors", async () => {
-    const para = "A".repeat(15000);
-    const longText = `${para}\n\n${para}`; // 30002 chars → 2 chunks
+    const para = "A".repeat(8000);
+    const longText = `${para}\n\n${para}`; // 16002 chars → 2 chunks
     mockPool.query
       .mockResolvedValueOnce({ rows: [{ id: 1, text: longText }] })
       .mockResolvedValueOnce({ rowCount: 1 })
@@ -142,7 +142,7 @@ describe("embedPending", () => {
   });
 
   it("chunks an oversized artifact and stores a single averaged vector", async () => {
-    const para = "B".repeat(15000);
+    const para = "B".repeat(8000);
     const body = `${para}\n\n${para}`;
     mockPool.query
       .mockResolvedValueOnce({ rows: [] }) // entries
@@ -192,7 +192,7 @@ describe("embedPending", () => {
   });
 
   it("embeds normal items and chunks oversized in same batch", async () => {
-    const para = "C".repeat(15000);
+    const para = "C".repeat(8000);
     const oversized = `${para}\n\n${para}`;
     mockPool.query
       .mockResolvedValueOnce({ rows: [] }) // entries
