@@ -10,14 +10,18 @@ let dbPath: string;
 
 function makeDb(): Database.Database {
   const db = new Database(dbPath);
+  // Mirror peewee's actual layout: bucketmodel.key is the INTEGER PK,
+  // bucketmodel.id is the string bucket name. eventmodel.bucket_id FKs key.
   db.exec(`
     CREATE TABLE bucketmodel (
-      id INTEGER PRIMARY KEY,
-      key TEXT NOT NULL UNIQUE,
+      key INTEGER PRIMARY KEY,
+      id TEXT NOT NULL UNIQUE,
+      created TEXT NOT NULL,
+      name TEXT,
       type TEXT NOT NULL,
       client TEXT NOT NULL,
       hostname TEXT NOT NULL,
-      created TEXT NOT NULL
+      datastr TEXT
     );
     CREATE TABLE eventmodel (
       id INTEGER PRIMARY KEY,
@@ -28,6 +32,18 @@ function makeDb(): Database.Database {
     );
   `);
   return db;
+}
+
+function insertBucket(
+  db: Database.Database,
+  key: number,
+  id: string,
+  type: string,
+  hostname: string
+): void {
+  db.prepare(
+    "INSERT INTO bucketmodel (key, id, created, type, client, hostname) VALUES (?, ?, ?, ?, ?, ?)"
+  ).run(key, id, "2026-05-01T00:00:00+00:00", type, id.split("_")[0], hostname);
 }
 
 beforeEach(() => {
@@ -46,10 +62,9 @@ describe("readActivityWatchEvents", () => {
 
   it("normalizes window, web, and afk buckets", () => {
     const db = makeDb();
-    const created = "2026-05-01T00:00:00+00:00";
-    db.prepare("INSERT INTO bucketmodel VALUES (1, 'aw-watcher-window_h', 'currentwindow', 'aw-watcher-window', 'h', ?)").run(created);
-    db.prepare("INSERT INTO bucketmodel VALUES (2, 'aw-watcher-web-firefox', 'web.tab.current', 'aw-watcher-web', 'h', ?)").run(created);
-    db.prepare("INSERT INTO bucketmodel VALUES (3, 'aw-watcher-afk_h', 'afkstatus', 'aw-watcher-afk', 'h', ?)").run(created);
+    insertBucket(db, 1, "aw-watcher-window_h", "currentwindow", "h");
+    insertBucket(db, 2, "aw-watcher-web-firefox", "web.tab.current", "h");
+    insertBucket(db, 3, "aw-watcher-afk_h", "afkstatus", "h");
 
     db.prepare("INSERT INTO eventmodel VALUES (10, 1, ?, ?, ?)").run(
       "2026-05-02T10:00:00.000+00:00",
@@ -90,9 +105,8 @@ describe("readActivityWatchEvents", () => {
 
   it("redacts sensitive hosts to protocol+host only and drops password-manager titles", () => {
     const db = makeDb();
-    const created = "2026-05-01T00:00:00+00:00";
-    db.prepare("INSERT INTO bucketmodel VALUES (1, 'aw-watcher-window_h', 'currentwindow', 'aw-watcher-window', 'h', ?)").run(created);
-    db.prepare("INSERT INTO bucketmodel VALUES (2, 'aw-watcher-web-firefox', 'web.tab.current', 'aw-watcher-web', 'h', ?)").run(created);
+    insertBucket(db, 1, "aw-watcher-window_h", "currentwindow", "h");
+    insertBucket(db, 2, "aw-watcher-web-firefox", "web.tab.current", "h");
 
     db.prepare("INSERT INTO eventmodel VALUES (1, 1, ?, ?, ?)").run(
       "2026-05-02T10:00:00.000+00:00",
@@ -123,8 +137,7 @@ describe("readActivityWatchEvents", () => {
 
   it("filters by since (lex compare on ISO)", () => {
     const db = makeDb();
-    const created = "2026-05-01T00:00:00+00:00";
-    db.prepare("INSERT INTO bucketmodel VALUES (1, 'aw-watcher-window_h', 'currentwindow', 'aw-watcher-window', 'h', ?)").run(created);
+    insertBucket(db, 1, "aw-watcher-window_h", "currentwindow", "h");
     db.prepare("INSERT INTO eventmodel VALUES (1, 1, ?, ?, ?)").run(
       "2026-05-01T10:00:00.000Z",
       10,

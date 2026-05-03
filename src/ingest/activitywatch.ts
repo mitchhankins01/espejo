@@ -48,8 +48,11 @@ const SENSITIVE_APPS = new Set<string>([
 ]);
 
 interface AwBucket {
-  id: number;
-  key: string;
+  // peewee stores bucketmodel.key as the INTEGER PK and bucketmodel.id as the
+  // string bucket name (e.g. "aw-watcher-window_<host>"). Aliased here to the
+  // names this module already used.
+  id: number; // = bucketmodel.key
+  key: string; // = bucketmodel.id
   type: string;
   client: string;
   hostname: string;
@@ -90,7 +93,7 @@ export function readActivityWatchEvents(
   try {
     const buckets = db
       .prepare(
-        `SELECT id, key AS "key", type, client, hostname FROM bucketmodel`
+        `SELECT key AS id, id AS "key", type, client, hostname FROM bucketmodel`
       )
       .all() as AwBucket[];
     if (buckets.length === 0) return [];
