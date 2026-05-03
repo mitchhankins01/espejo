@@ -171,6 +171,19 @@ function normalizeFirstPickup(value: string | null | undefined): string | null {
   return value.length === 5 ? `${value}:00` : value;
 }
 
+function formatNotifyText(
+  row: import("../db/queries/daily-screen-time.js").DailyScreenTimeRow
+): string {
+  const total = row.total_minutes;
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
+  const totalLabel = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+  const parts = [`${totalLabel} total`, `${row.apps.length} apps`];
+  if (row.pickups != null) parts.push(`${row.pickups} pickups`);
+  if (row.notifications != null) parts.push(`${row.notifications} notifs`);
+  return `📱 Screen Time saved for ${row.date}: ${parts.join(", ")}.`;
+}
+
 export async function processScreenTimePhotos(
   options: ProcessScreenTimeOptions
 ): Promise<ProcessScreenTimeResult> {
@@ -241,7 +254,7 @@ export async function processScreenTimePhotos(
   }
 
   try {
-    await upsertDailyScreenTime(pool, {
+    const merged = await upsertDailyScreenTime(pool, {
       date,
       totalMinutes: json.total_minutes ?? 0,
       categories: json.categories ?? [],
@@ -265,15 +278,7 @@ export async function processScreenTimePhotos(
     });
 
     if (notify) {
-      const total = json.total_minutes ?? 0;
-      const hours = Math.floor(total / 60);
-      const mins = total % 60;
-      const totalLabel = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
-      const appCount = json.apps?.length ?? 0;
-      await notify(
-        chatId,
-        `📱 Screen Time saved for ${date}: ${totalLabel} total, ${appCount} apps.`
-      );
+      await notify(chatId, formatNotifyText(merged));
     }
 
     return { ok: true, isScreenTime: true, date };

@@ -38,6 +38,27 @@ import {
 
 const mockPool = {} as unknown as import("pg").Pool;
 
+type DailyRow =
+  import("../../src/db/queries/daily-screen-time.js").DailyScreenTimeRow;
+
+function makeRow(overrides: Partial<DailyRow> = {}): DailyRow {
+  return {
+    date: "2026-05-02",
+    total_minutes: 0,
+    categories: [],
+    apps: [],
+    pickups: null,
+    first_pickup: null,
+    pickup_apps: null,
+    notifications: null,
+    notification_apps: null,
+    source_message_id: null,
+    raw_text: null,
+    ingested_at: new Date(),
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   mocks.fetchTelegramFile.mockReset();
   mocks.upsertDailyScreenTime.mockReset();
@@ -308,12 +329,23 @@ describe("processScreenTimePhotos", () => {
     );
   });
 
-  it("ingests successfully and notifies on the happy path", async () => {
+  it("ingests successfully and notifies based on the merged row", async () => {
     mocks.fetchTelegramFile.mockResolvedValue({
       buffer: Buffer.from("img"),
       filePath: "x.jpg",
     });
-    mocks.upsertDailyScreenTime.mockResolvedValue({});
+    // Simulate merged row: prior data was richer than this single payload.
+    mocks.upsertDailyScreenTime.mockResolvedValue(
+      makeRow({
+        total_minutes: 275,
+        apps: [
+          { app: "Telegram", minutes: 50 },
+          { app: "Safari", minutes: 30 },
+        ],
+        pickups: 127,
+        notifications: 360,
+      })
+    );
     const notify = vi.fn().mockResolvedValue(undefined);
     const fakeClient = makeFakeClient({
       is_screen_time: true,
@@ -351,9 +383,11 @@ describe("processScreenTimePhotos", () => {
         sourceMessageId: 42,
       })
     );
+    // Notify reflects the merged row (4h 35m total, 2 apps, 127 pickups,
+    // 360 notifs), not the single-photo payload (2h 5m, 1 app, 40 / 80).
     expect(notify).toHaveBeenCalledWith(
       "100",
-      expect.stringContaining("Screen Time saved for 2026-05-02")
+      "📱 Screen Time saved for 2026-05-02: 4h 35m total, 2 apps, 127 pickups, 360 notifs."
     );
     expect(mocks.logUsage).toHaveBeenCalledWith(
       mockPool,
@@ -366,7 +400,7 @@ describe("processScreenTimePhotos", () => {
       buffer: Buffer.from("img"),
       filePath: "x.jpg",
     });
-    mocks.upsertDailyScreenTime.mockResolvedValue({});
+    mocks.upsertDailyScreenTime.mockResolvedValue(makeRow());
     const create = vi.fn().mockResolvedValue({
       choices: [
         {
@@ -410,7 +444,7 @@ describe("processScreenTimePhotos", () => {
       buffer: Buffer.from("img"),
       filePath: "x.jpg",
     });
-    mocks.upsertDailyScreenTime.mockResolvedValue({});
+    mocks.upsertDailyScreenTime.mockResolvedValue(makeRow());
 
     const fakeClient = makeFakeClient({
       is_screen_time: true,
@@ -444,7 +478,9 @@ describe("processScreenTimePhotos", () => {
       buffer: Buffer.from("img"),
       filePath: "x.jpg",
     });
-    mocks.upsertDailyScreenTime.mockResolvedValue({});
+    mocks.upsertDailyScreenTime.mockResolvedValue(
+      makeRow({ total_minutes: 125 })
+    );
     const notify = vi.fn().mockResolvedValue(undefined);
 
     const fakeClient = makeFakeClient({
@@ -480,7 +516,9 @@ describe("processScreenTimePhotos", () => {
       buffer: Buffer.from("img"),
       filePath: "x.jpg",
     });
-    mocks.upsertDailyScreenTime.mockResolvedValue({});
+    mocks.upsertDailyScreenTime.mockResolvedValue(
+      makeRow({ total_minutes: 45 })
+    );
     const notify = vi.fn().mockResolvedValue(undefined);
 
     const fakeClient = makeFakeClient({
@@ -594,7 +632,7 @@ describe("processScreenTimePhotos", () => {
       buffer: Buffer.from("img"),
       filePath: "x.jpg",
     });
-    mocks.upsertDailyScreenTime.mockResolvedValue({});
+    mocks.upsertDailyScreenTime.mockResolvedValue(makeRow());
 
     const fakeClient = makeFakeClient({
       is_screen_time: true,

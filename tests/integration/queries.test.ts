@@ -1830,34 +1830,94 @@ describe("daily_screen_time queries", () => {
     expect(fetched!.total_minutes).toBe(240);
   });
 
-  it("upsert overwrites the existing row by date (idempotency)", async () => {
+  it("merges per-section across upserts so multi-screenshot uploads accumulate", async () => {
     const date = "2026-04-22";
     await pool.query("DELETE FROM daily_screen_time WHERE date = $1", [date]);
 
+    // Screenshot 1: totals + categories.
     await upsertDailyScreenTime(pool, {
       date,
-      totalMinutes: 100,
-      categories: [{ name: "Social", minutes: 100 }],
-      apps: [{ app: "Telegram", minutes: 100 }],
+      totalMinutes: 275,
+      categories: [
+        { name: "Productivity & Finance", minutes: 90 },
+        { name: "Social", minutes: 80 },
+      ],
+      apps: [],
     });
 
-    const updated = await upsertDailyScreenTime(pool, {
+    // Screenshot 2: per-app breakdown only.
+    await upsertDailyScreenTime(pool, {
       date,
-      totalMinutes: 200,
-      categories: [{ name: "Productivity & Finance", minutes: 200 }],
-      apps: [{ app: "Mobile Safari", minutes: 200 }],
-      pickups: 50,
+      totalMinutes: 0,
+      categories: [],
+      apps: [
+        { app: "Telegram", minutes: 50 },
+        { app: "Safari", minutes: 30 },
+        { app: "Mail", minutes: 20 },
+      ],
     });
 
-    expect(updated.total_minutes).toBe(200);
-    expect(updated.categories[0].name).toBe("Productivity & Finance");
-    expect(updated.pickups).toBe(50);
+    // Screenshot 3: pickups only.
+    await upsertDailyScreenTime(pool, {
+      date,
+      totalMinutes: 0,
+      categories: [],
+      apps: [],
+      pickups: 127,
+      firstPickup: "07:42:00",
+      pickupApps: [{ app: "Safari", count: 30 }],
+    });
+
+    // Screenshot 4: notifications only.
+    const final = await upsertDailyScreenTime(pool, {
+      date,
+      totalMinutes: 0,
+      categories: [],
+      apps: [],
+      notifications: 360,
+      notificationApps: [{ app: "Telegram", count: 80 }],
+    });
+
+    // All four sections should be present despite arriving in separate upserts.
+    expect(final.total_minutes).toBe(275);
+    expect(final.categories).toHaveLength(2);
+    expect(final.apps).toHaveLength(3);
+    expect(final.pickups).toBe(127);
+    expect(final.first_pickup).toMatch(/^07:42/);
+    expect(final.pickup_apps).toEqual([{ app: "Safari", count: 30 }]);
+    expect(final.notifications).toBe(360);
+    expect(final.notification_apps).toEqual([{ app: "Telegram", count: 80 }]);
 
     const countResult = await pool.query<{ count: string }>(
       "SELECT COUNT(*)::text AS count FROM daily_screen_time WHERE date = $1",
       [date]
     );
     expect(Number(countResult.rows[0].count)).toBe(1);
+  });
+
+  it("merge prefers larger arrays (apps grows when new screenshot has more entries)", async () => {
+    const date = "2026-04-24";
+    await pool.query("DELETE FROM daily_screen_time WHERE date = $1", [date]);
+
+    await upsertDailyScreenTime(pool, {
+      date,
+      totalMinutes: 100,
+      categories: [],
+      apps: [{ app: "Telegram", minutes: 50 }],
+    });
+
+    const merged = await upsertDailyScreenTime(pool, {
+      date,
+      totalMinutes: 100,
+      categories: [],
+      apps: [
+        { app: "Telegram", minutes: 50 },
+        { app: "Safari", minutes: 30 },
+        { app: "Mail", minutes: 20 },
+      ],
+    });
+
+    expect(merged.apps).toHaveLength(3);
   });
 
   it("returns null for an unknown date", async () => {

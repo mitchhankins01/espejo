@@ -55,14 +55,37 @@ export async function upsertDailyScreenTime(
      VALUES
        ($1::date, $2, $3::jsonb, $4::jsonb, $5, $6::time, $7::jsonb, $8, $9::jsonb, $10, $11)
      ON CONFLICT (date) DO UPDATE SET
-       total_minutes = EXCLUDED.total_minutes,
-       categories = EXCLUDED.categories,
-       apps = EXCLUDED.apps,
-       pickups = EXCLUDED.pickups,
-       first_pickup = EXCLUDED.first_pickup,
-       pickup_apps = EXCLUDED.pickup_apps,
-       notifications = EXCLUDED.notifications,
-       notification_apps = EXCLUDED.notification_apps,
+       -- Merge per-section: each iOS Screen Time screenshot only covers one
+       -- section (totals, apps, pickups, notifications). Keep whichever row
+       -- has data for each section so multi-screenshot uploads don't clobber.
+       total_minutes = GREATEST(daily_screen_time.total_minutes, EXCLUDED.total_minutes),
+       categories = CASE
+         WHEN jsonb_array_length(EXCLUDED.categories) > jsonb_array_length(daily_screen_time.categories)
+           THEN EXCLUDED.categories
+         ELSE daily_screen_time.categories
+       END,
+       apps = CASE
+         WHEN jsonb_array_length(EXCLUDED.apps) > jsonb_array_length(daily_screen_time.apps)
+           THEN EXCLUDED.apps
+         ELSE daily_screen_time.apps
+       END,
+       pickups = COALESCE(EXCLUDED.pickups, daily_screen_time.pickups),
+       first_pickup = COALESCE(EXCLUDED.first_pickup, daily_screen_time.first_pickup),
+       pickup_apps = CASE
+         WHEN EXCLUDED.pickup_apps IS NOT NULL
+           AND jsonb_array_length(EXCLUDED.pickup_apps)
+               > COALESCE(jsonb_array_length(daily_screen_time.pickup_apps), 0)
+           THEN EXCLUDED.pickup_apps
+         ELSE daily_screen_time.pickup_apps
+       END,
+       notifications = COALESCE(EXCLUDED.notifications, daily_screen_time.notifications),
+       notification_apps = CASE
+         WHEN EXCLUDED.notification_apps IS NOT NULL
+           AND jsonb_array_length(EXCLUDED.notification_apps)
+               > COALESCE(jsonb_array_length(daily_screen_time.notification_apps), 0)
+           THEN EXCLUDED.notification_apps
+         ELSE daily_screen_time.notification_apps
+       END,
        source_message_id = EXCLUDED.source_message_id,
        raw_text = EXCLUDED.raw_text,
        ingested_at = NOW()
