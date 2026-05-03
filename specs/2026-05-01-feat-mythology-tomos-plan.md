@@ -83,7 +83,7 @@ scripts/book/
   myth-fit-report.ts         NEW — diagnostic: scores corpus vs. current context, no writes
   add-myth.ts                NEW — explicit corpus-add helper (Claude-drafts entry from a name + theme)
 
-Artifacts/Prompt/Write Tomo.md   updated — Phase 1 review surfaces myth-mode signals;
+Artifacts/Prompt/Spanish/Tomo.md   updated — Phase 1 review surfaces myth-mode signals;
                                   Phase 3 adds myth-specific checks
 ```
 
@@ -369,7 +369,7 @@ behave per spec; type-checking + tests pass.
 
 #### Phase 3: Workflow integration — Write Tomo prompt + Phase-1/Phase-3 review
 
-- **`Artifacts/Prompt/Write Tomo.md`** — extend Phase 1 review structure to surface
+- **`Artifacts/Prompt/Spanish/Tomo.md`** — extend Phase 1 review structure to surface
   myth-mode signals when `plan.format === "myth"`:
   - Add a "myth fit" section showing `myth_top3` with scores + reasoning, so user
     can redirect to runner-up via `--myth=<name>`.
@@ -380,7 +380,7 @@ behave per spec; type-checking + tests pass.
     indefinido/imperfecto terrain naturally — note this explicitly.
 
 - **Phase 3 review checklist** for myth-mode (extends the existing 7-item list in
-  `Artifacts/Prompt/Write Tomo.md`):
+  `Artifacts/Prompt/Spanish/Tomo.md`):
   1. **Per-section word counts** — myth 1100–1500, bridge 400–600. Existing
      1800–2400 total stays.
   2. **Para llevarte** — same 5–8 bullet rule, plus check that bullets *interleave*
@@ -401,7 +401,7 @@ behave per spec; type-checking + tests pass.
   description noting that mythology is a third format option. Minimal edit.
 
 **Phase 3 acceptance**: a manual run-through with a forced `--myth=Sísifo` produces a
-tomo that passes the new review checklist; `Artifacts/Prompt/Write Tomo.md` correctly
+tomo that passes the new review checklist; `Artifacts/Prompt/Spanish/Tomo.md` correctly
 guides the workflow including the myth-mode branches; Phase 1 surfaces all signals
 the user needs to redirect.
 
@@ -556,9 +556,9 @@ Anthropic responses.)
       with `myth`/`bridge` undefined
 - [ ] Bilingual interleave preserves `## El espejo` heading and produces register-
       consistent EN for both sections
-- [ ] `Artifacts/Prompt/Write Tomo.md` Phase 1 surfaces myth_top3, bridge_thesis,
+- [ ] `Artifacts/Prompt/Spanish/Tomo.md` Phase 1 surfaces myth_top3, bridge_thesis,
       and the format decision before user approval
-- [ ] `Artifacts/Prompt/Write Tomo.md` Phase 3 includes per-section word counts,
+- [ ] `Artifacts/Prompt/Spanish/Tomo.md` Phase 3 includes per-section word counts,
       myth fidelity, bridge legibility, and register split checks
 - [ ] `pnpm tsx scripts/book/add-myth.ts <name>` is the documented path to grow the
       corpus; `--myth=<unknown-name>` does NOT auto-add
@@ -578,7 +578,7 @@ Anthropic responses.)
       to Kindle and reviewed at Phase 3 quality
 - [ ] No regressions in essay-mode planning or writing (last essay tomo replays
       identically given frozen inputs)
-- [ ] Documentation: `Artifacts/Prompt/Write Tomo.md` updated; `CLAUDE.md`
+- [ ] Documentation: `Artifacts/Prompt/Spanish/Tomo.md` updated; `CLAUDE.md`
       mentions the new format
 
 ## Success Metrics
@@ -672,7 +672,7 @@ Anthropic responses.)
   essay; selected opportunistically when the curated corpus has strong fit
   with recent context. See `specs/2026-05-01-mythology-tomos-brainstorm.md` and
   this plan for design." Single section.
-- **`Artifacts/Prompt/Write Tomo.md`**: extend Phase 1 review structure;
+- **`Artifacts/Prompt/Spanish/Tomo.md`**: extend Phase 1 review structure;
   extend Phase 3 review checklist; document the new CLI flags in the FAILURE MODES
   section (specifically `--no-myth`, `--myth=<name>`, `--fresh-plan`,
   `--format=myth`).
@@ -708,7 +708,7 @@ Anthropic responses.)
   - `scripts/book/bilingual.ts` (interleave)
   - `scripts/book/rebuild-tomo.ts` (post-edit re-send)
 - Workflow:
-  - `Artifacts/Prompt/Write Tomo.md` (Phase 0/1/2/3 prompt)
+  - `Artifacts/Prompt/Spanish/Tomo.md` (Phase 0/1/2/3 prompt)
   - `books/style.md` (regenerated from `Artifacts/Project/Español Vivo.md`)
   - `books/history.json` (TomoRecord append-log)
   - `books/lookups.jsonl` and `books/grammar-flags.jsonl` (writer-injected blocks)

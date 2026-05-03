@@ -1,6 +1,6 @@
 # Insights Dedup Rewrite
 
-> **Status: Planned** — design accepted via Council Review (2026-04-26). Build a TS script + queries module + thin orchestrator prompt to replace the current `Artifacts/Prompt/Insights Dedup.md` shell-heredoc-SQL approach.
+> **Status: Planned** — design accepted via Council Review (2026-04-26). Build a TS script + queries module + thin orchestrator prompt to replace the current `Artifacts/Prompt/Insights/Dedup.md` shell-heredoc-SQL approach.
 
 Replace the current shell-driven dedup workflow with `scripts/dedup-insights.ts` + `src/db/queries/insights-dedup.ts` + a rewritten 30-line orchestrator prompt. The current prompt has eight concrete bugs (council-confirmed by Claude Opus 4.7, GPT-5.5, Gemini 2.5 Pro, and qwen2.5:32b in the 2026-04-26 council). This spec captures the bugs, the architectural rationale, and the implementation plan so the build is a focused session.
 
@@ -10,7 +10,7 @@ Council synthesis lives at `/tmp/council/20260426-101129/synthesis.md` (ephemera
 
 ## Why this rewrite
 
-The current `Artifacts/Prompt/Insights Dedup.md` runs as a shell-driven workflow: an LLM agent calls `psql` with heredocs, interpolates user content into SQL strings, runs multi-pass threshold sweeps, and asks the user to confirm classifications. The council surfaced eight concrete bugs and four architectural problems.
+The current `Artifacts/Prompt/Insights/Dedup.md` runs as a shell-driven workflow: an LLM agent calls `psql` with heredocs, interpolates user content into SQL strings, runs multi-pass threshold sweeps, and asks the user to confirm classifications. The council surfaced eight concrete bugs and four architectural problems.
 
 ### Concrete bugs in the current prompt
 
@@ -36,7 +36,7 @@ The current `Artifacts/Prompt/Insights Dedup.md` runs as a shell-driven workflow
 
 ### Boundary: script vs prompt
 
-The dedup workflow becomes a TS script (`scripts/dedup-insights.ts`) with parameterized queries living in `src/db/queries/insights-dedup.ts`. The `Artifacts/Prompt/Insights Dedup.md` prompt becomes a ~30-line orchestrator that invokes `pnpm dedup --dry-run`, presents the plan to the user, and applies on confirmation.
+The dedup workflow becomes a TS script (`scripts/dedup-insights.ts`) with parameterized queries living in `src/db/queries/insights-dedup.ts`. The `Artifacts/Prompt/Insights/Dedup.md` prompt becomes a ~30-line orchestrator that invokes `pnpm dedup --dry-run`, presents the plan to the user, and applies on confirmation.
 
 **Rationale:** AGENTS.md mandates "Don't build CLI wrappers for things that can be a prompt or skill (YAGNI)" *and* "all SQL in queries/, never string interpolation." For pure prompt-as-prose work the first rule wins. For SQL-bearing workflows the second rule wins, because shell-heredoc-SQL is provably broken (bug #1 above). The dedup case crosses the boundary: it has SQL.
 
@@ -105,7 +105,7 @@ The script defaults to `--dry-run`, which prints the plan as JSON and makes zero
 
 ### Files to modify
 
-- `Artifacts/Prompt/Insights Dedup.md` — rewrite as ~30-line orchestrator. References `pnpm dedup`, defines the agent's role (classify, present, confirm), preserves the SETUP / DB FRESHNESS / FILENAME ESCAPING headers as still-relevant context.
+- `Artifacts/Prompt/Insights/Dedup.md` — rewrite as ~30-line orchestrator. References `pnpm dedup`, defines the agent's role (classify, present, confirm), preserves the SETUP / DB FRESHNESS / FILENAME ESCAPING headers as still-relevant context.
 - `package.json` — add `"dedup": "tsx scripts/dedup-insights.ts"` script.
 
 ### Files to NOT touch (yet)
@@ -164,7 +164,7 @@ These need decisions before implementation. Default positions in **bold** but fl
 
 - Council run: `/tmp/council/20260426-101129/` (ephemeral — promote excerpts before deletion).
 - Council prompt: `Artifacts/Prompt/Council Review.md`.
-- Current dedup prompt: `Artifacts/Prompt/Insights Dedup.md` (to be rewritten).
+- Current dedup prompt: `Artifacts/Prompt/Insights/Dedup.md` (to be rewritten).
 - AGENTS.md sections: "All SQL in queries/", "RRF Search Implementation", "Code Style", "Don't build CLI wrappers for things that can be a prompt".
 - Existing parameterized RRF reference: `src/db/queries/artifacts.ts:620` (`searchArtifacts`).
 - Existing embedding text normalization: `scripts/embed-entries.ts:167`.

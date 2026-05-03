@@ -1,6 +1,6 @@
 /**
  * Condense Artifacts/Insight/*.md files per the rubric in
- * ~/Documents/Artifacts/Prompt/Insights Condense.md.
+ * ~/Documents/Artifacts/Prompt/Insights/Condense.md.
  *
  * Usage:
  *   pnpm tsx scripts/condense-insights.ts            # dry-run to /tmp/condense-preview/
