@@ -69,7 +69,7 @@ const {
     mockBuildSpanishPracticeSystemPrompt: vi.fn().mockResolvedValue("PRACTICE PROMPT"),
     mockProcessScreenTimePhotos: vi
       .fn()
-      .mockResolvedValue({ ok: true, date: "2026-05-03" }),
+      .mockResolvedValue({ ok: true, isScreenTime: false }),
     mockConfig: {
       config: {
         telegram: {
@@ -129,16 +129,9 @@ vi.mock("../../src/telegram/updates.js", () => ({
   processUpdate: mockProcessUpdate,
 }));
 
-vi.mock("../../src/telegram/screen-time.js", async () => {
-  // Use the real parser since it's pure; only mock the IO function.
-  const actual = await vi.importActual<
-    typeof import("../../src/telegram/screen-time.js")
-  >("../../src/telegram/screen-time.js");
-  return {
-    parseScreenTimeCaption: actual.parseScreenTimeCaption,
-    processScreenTimePhotos: mockProcessScreenTimePhotos,
-  };
-});
+vi.mock("../../src/telegram/screen-time.js", () => ({
+  processScreenTimePhotos: mockProcessScreenTimePhotos,
+}));
 
 vi.mock("../../src/db/client.js", () => ({
   pool: {},
@@ -241,7 +234,7 @@ beforeEach(() => {
   mockProcessUpdate.mockReset();
   mockProcessScreenTimePhotos
     .mockReset()
-    .mockResolvedValue({ ok: true, date: "2026-05-03" });
+    .mockResolvedValue({ ok: true, isScreenTime: false });
   mockGetOuraSyncRun.mockReset().mockResolvedValue(null);
   mockGetActivityLog.mockReset().mockResolvedValue(null);
   mockIsPracticeSessionActive.mockReset().mockReturnValue(false);
@@ -581,7 +574,13 @@ describe("message handler", () => {
     );
   });
 
-  it("routes screen_time captioned photos to the screen-time extractor", async () => {
+  it("short-circuits when screen-time detector classifies the photo as Screen Time", async () => {
+    mockProcessScreenTimePhotos.mockResolvedValueOnce({
+      ok: true,
+      isScreenTime: true,
+      date: "2026-05-02",
+    });
+
     const handler = getHandler();
     await handler({
       chatId: 100,
@@ -589,7 +588,7 @@ describe("message handler", () => {
       messageId: 30,
       date: 1000,
       photos: [
-        { fileId: "st-1", caption: "screen_time 2026-05-03" },
+        { fileId: "st-1", caption: "" },
         { fileId: "st-2", caption: "" },
       ],
     });
@@ -599,15 +598,19 @@ describe("message handler", () => {
       expect.objectContaining({
         chatId: "100",
         messageId: 30,
-        caption: "screen_time 2026-05-03",
+        photos: expect.arrayContaining([
+          expect.objectContaining({ fileId: "st-1" }),
+          expect.objectContaining({ fileId: "st-2" }),
+        ]),
       })
     );
-    // Short-circuits — agent + OCR must not run.
+    // Short-circuit — OCR + agent must not run.
     expect(mockExtractTextFromImage).not.toHaveBeenCalled();
     expect(mockRunAgent).not.toHaveBeenCalled();
   });
 
-  it("does not route plain photos through the screen-time extractor", async () => {
+  it("falls through to OCR + agent when detector says it is not Screen Time", async () => {
+    // Default mock returns { ok: true, isScreenTime: false }
     const handler = getHandler();
     await handler({
       chatId: 100,
@@ -617,8 +620,32 @@ describe("message handler", () => {
       photos: [{ fileId: "plain-1", caption: "look at this" }],
     });
 
-    expect(mockProcessScreenTimePhotos).not.toHaveBeenCalled();
+    expect(mockProcessScreenTimePhotos).toHaveBeenCalledTimes(1);
+    expect(mockExtractTextFromImage).toHaveBeenCalledWith(
+      "plain-1",
+      "look at this"
+    );
+    expect(mockRunAgent).toHaveBeenCalled();
+  });
+
+  it("falls through to OCR when detection itself fails", async () => {
+    mockProcessScreenTimePhotos.mockResolvedValueOnce({
+      ok: false,
+      isScreenTime: false,
+      error: "vision exploded",
+    });
+
+    const handler = getHandler();
+    await handler({
+      chatId: 100,
+      text: "",
+      messageId: 32,
+      date: 1000,
+      photos: [{ fileId: "plain-2", caption: "" }],
+    });
+
     expect(mockExtractTextFromImage).toHaveBeenCalled();
+    expect(mockRunAgent).toHaveBeenCalled();
   });
 
   it("extracts text from document messages before sending to agent", async () => {

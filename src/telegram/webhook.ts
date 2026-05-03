@@ -24,10 +24,7 @@ import {
 import { extractTextFromDocument, extractTextFromImage } from "./media.js";
 import { setMessageHandler, processUpdate } from "./updates.js";
 import type { AssembledMessage, TelegramUpdate } from "./updates.js";
-import {
-  parseScreenTimeCaption,
-  processScreenTimePhotos,
-} from "./screen-time.js";
+import { processScreenTimePhotos } from "./screen-time.js";
 import {
   startPracticeSession,
   endPracticeSession,
@@ -266,32 +263,27 @@ async function handleMessage(msg: AssembledMessage): Promise<void> {
   // Show typing indicator immediately
   await sendChatAction(chatId, "typing");
 
-  // Screen Time ingest: caption matches "screen_time YYYY-MM-DD" and photos
-  // are attached. Short-circuits before OCR + agent so the agent never sees
-  // raw screenshot text.
+  // Screen Time auto-detect: speculatively run the vision detector on any
+  // photo message. If it classifies as iOS Screen Time we short-circuit
+  // (data is upserted + the user is notified). Otherwise we fall through to
+  // the normal OCR + agent path.
   if (msg.photos && msg.photos.length > 0) {
-    const captionForScreenTime = msg.photos[0].caption;
-    const screenTimeDate = parseScreenTimeCaption(captionForScreenTime);
-    if (screenTimeDate) {
-      await processScreenTimePhotos({
-        pool,
-        chatId,
-        messageId: msg.messageId,
-        photos: msg.photos,
-        caption: captionForScreenTime,
-        notify: async (toChatId, replyText) => {
-          await sendTelegramMessage(toChatId, replyText);
-        },
-      });
-      return;
-    }
+    const result = await processScreenTimePhotos({
+      pool,
+      chatId,
+      messageId: msg.messageId,
+      photos: msg.photos,
+      notify: async (toChatId, replyText) => {
+        await sendTelegramMessage(toChatId, replyText);
+      },
+    });
+    if (result.isScreenTime) return;
   }
 
   let text = msg.text;
 
   try {
-    // OCR photo messages — for non-screen-time captions, OCR the first photo.
-    // (Screen-time captions are dispatched earlier and short-circuit this branch.)
+    // OCR photo messages that were not classified as Screen Time.
     if (msg.photos && msg.photos.length > 0) {
       const first = msg.photos[0];
       text = await extractTextFromImage(first.fileId, first.caption);

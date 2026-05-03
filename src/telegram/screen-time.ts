@@ -5,22 +5,8 @@ import { config } from "../config.js";
 import { upsertDailyScreenTime } from "../db/queries/daily-screen-time.js";
 import { logUsage } from "../db/queries/usage.js";
 import { fetchTelegramFile } from "./media.js";
+import { todayInTimezone } from "../utils/dates.js";
 import type { AssembledPhoto } from "./updates.js";
-
-// Caption format: "screen_time YYYY-MM-DD" (case-insensitive prefix).
-const CAPTION_PREFIX = /^\s*screen_time\s+(\d{4}-\d{2}-\d{2})\s*$/i;
-
-export function parseScreenTimeCaption(caption: string | undefined | null): string | null {
-  if (!caption) return null;
-  const match = CAPTION_PREFIX.exec(caption);
-  if (!match) return null;
-  const date = match[1];
-  // Validate it's a real calendar date.
-  const parsed = new Date(`${date}T00:00:00Z`);
-  if (Number.isNaN(parsed.getTime())) return null;
-  if (parsed.toISOString().slice(0, 10) !== date) return null;
-  return date;
-}
 
 const AppMinutesSchema = z.object({
   app: z.string().min(1),
@@ -38,54 +24,71 @@ const AppCountSchema = z.object({
 });
 
 const ScreenTimeJsonSchema = z.object({
-  total_minutes: z.number().int().min(0),
-  categories: z.array(CategoryMinutesSchema),
-  apps: z.array(AppMinutesSchema),
-  pickups: z.number().int().min(0).nullable().optional(),
+  is_screen_time: z.boolean(),
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullable(),
+  total_minutes: z.number().int().min(0).nullable(),
+  categories: z.array(CategoryMinutesSchema).nullable(),
+  apps: z.array(AppMinutesSchema).nullable(),
+  pickups: z.number().int().min(0).nullable(),
   first_pickup: z
     .string()
     .regex(/^\d{2}:\d{2}(:\d{2})?$/)
-    .nullable()
-    .optional(),
-  pickup_apps: z.array(AppCountSchema).nullable().optional(),
-  notifications: z.number().int().min(0).nullable().optional(),
-  notification_apps: z.array(AppCountSchema).nullable().optional(),
+    .nullable(),
+  pickup_apps: z.array(AppCountSchema).nullable(),
+  notifications: z.number().int().min(0).nullable(),
+  notification_apps: z.array(AppCountSchema).nullable(),
 });
 
 export type ScreenTimeJson = z.infer<typeof ScreenTimeJsonSchema>;
 
-const VISION_PROMPT = `You are extracting structured Screen Time data from iOS Settings screenshots for a *single* day.
+function buildVisionPrompt(today: string): string {
+  return `You are inspecting 1-4 screenshots from a Telegram chat. Decide whether they are iOS Screen Time / Tiempo de pantalla screenshots from the iPhone Settings app, then extract structured data for a single day.
 
-The user provides 1–4 screenshots covering: total + per-category time, per-app time, pickups (count, first pickup time, top apps), and notifications (count, top apps).
+Today's date is ${today} (YYYY-MM-DD, user's local timezone).
 
-Return ONLY a JSON object — no prose, no markdown fences — matching this exact shape:
+Set "is_screen_time" to true ONLY if you see characteristic iOS Screen Time UI: bar charts of daily usage, "Screen Time" / "Tiempo de pantalla" / "Consultas del dispositivo" / "Notificaciones" headers, app usage breakdowns, pickups (consultas), or notification counts per app. Otherwise set false and leave every other field null.
 
+When is_screen_time is true, return JSON of this exact shape:
 {
-  "total_minutes": integer,                       // total Screen Time for the day, in minutes
-  "categories": [{ "name": string, "minutes": integer }, ...],
-  "apps":       [{ "app": string,  "minutes": integer }, ...],
+  "is_screen_time": true,
+  "date": "YYYY-MM-DD",
+  "total_minutes": integer | null,
+  "categories": [{ "name": string, "minutes": integer }, ...] | null,
+  "apps":       [{ "app": string,  "minutes": integer }, ...] | null,
   "pickups": integer | null,
-  "first_pickup": "HH:MM" | null,                 // 24-hour
+  "first_pickup": "HH:MM" | null,
   "pickup_apps":      [{ "app": string, "count": integer }, ...] | null,
   "notifications": integer | null,
   "notification_apps":[{ "app": string, "count": integer }, ...] | null
 }
 
-Rules:
-- Convert "1h 23m" → 83 minutes; "45m" → 45; "2h" → 120; "<1m" → 0.
-- iOS shows times like "1:23" in summary headers — these are total Screen Time, not pickups. Read carefully.
-- For first_pickup, use 24-hour HH:MM. If shown in 12h format, convert.
-- If a section is not visible in any screenshot, set the corresponding fields to null (or omit pickups/notifications fields entirely).
-- App names: keep exactly as displayed (e.g., "Mobile Safari", "Messages", "Telegram").
-- Categories: keep exactly as displayed (e.g., "Productivity & Finance", "Social", "Entertainment").
-- Do not invent data not visible in the screenshots.`;
+Date resolution:
+- iOS shows phrases like "Yesterday, May 2", "Ayer, 2 de mayo", "Hoy", or just a weekday letter (D L M X J V S highlighted on a bar chart).
+- Use today's date (${today}) as the anchor for relative phrases. "Hoy"/"Today" → ${today}; "Ayer"/"Yesterday" → the day before.
+- For weekday-letter highlights, pick the most recent occurrence of that weekday on or before today.
+- If you genuinely cannot determine the date, set "date" to null.
+
+Other rules:
+- Convert "1h 23m" → 83, "45m" → 45, "2h" → 120, "<1m" → 0.
+- iOS shows totals like "1:23" in summary headers — these are total Screen Time hours:minutes, not pickups. Read carefully.
+- For first_pickup, use 24-hour HH:MM. Convert from 12-hour if needed.
+- If a section is not visible across the screenshots, set the corresponding fields to null.
+- App / category names: keep exactly as displayed (e.g., "Mobile Safari", "Messages", "Telegram", "Productivity & Finance", "Social").
+- Do not invent data not visible in the screenshots.
+
+Return ONLY a JSON object — no prose, no markdown fences.`;
+}
 
 export interface ProcessScreenTimeOptions {
   pool: pg.Pool;
   chatId: string;
   messageId: number;
   photos: AssembledPhoto[];
-  caption: string;
+  /** Override for tests; defaults to today in the configured timezone. */
+  today?: string;
   /** Visible for testing. */
   openai?: OpenAI;
   /** Visible for testing. */
@@ -93,13 +96,19 @@ export interface ProcessScreenTimeOptions {
 }
 
 export interface ProcessScreenTimeResult {
+  /** Did the upsert (or detection-only path) complete without error? */
   ok: boolean;
+  /** Did the model classify the photos as iOS Screen Time? */
+  isScreenTime: boolean;
+  /** The day-of-data when it was successfully ingested. */
   date?: string;
+  /** Set when something failed (vision error, missing date, DB error). */
   error?: string;
 }
 
 let cachedOpenAI: OpenAI | null = null;
 function getOpenAI(): OpenAI {
+  /* v8 ignore next 3 -- cached singleton; tests inject openai explicitly */
   if (!cachedOpenAI) {
     cachedOpenAI = new OpenAI({ apiKey: config.openai.apiKey });
   }
@@ -108,7 +117,8 @@ function getOpenAI(): OpenAI {
 
 export async function extractScreenTimeJson(
   photoBuffers: Buffer[],
-  client: OpenAI
+  client: OpenAI,
+  today: string
 ): Promise<{ json: ScreenTimeJson; raw: string }> {
   const imageContent = photoBuffers.map((buf) => ({
     type: "image_url" as const,
@@ -124,11 +134,14 @@ export async function extractScreenTimeJson(
       {
         role: "system",
         content:
-          "You extract structured data from iOS Screen Time screenshots. Return only JSON.",
+          "You inspect iOS Settings screenshots, decide whether they are iOS Screen Time, and extract structured data when they are. Return only JSON.",
       },
       {
         role: "user",
-        content: [{ type: "text", text: VISION_PROMPT }, ...imageContent],
+        content: [
+          { type: "text", text: buildVisionPrompt(today) },
+          ...imageContent,
+        ],
       },
     ],
     max_tokens: 2000,
@@ -161,36 +174,83 @@ function normalizeFirstPickup(value: string | null | undefined): string | null {
 export async function processScreenTimePhotos(
   options: ProcessScreenTimeOptions
 ): Promise<ProcessScreenTimeResult> {
-  const { pool, chatId, messageId, photos, caption } = options;
+  const { pool, chatId, messageId, photos } = options;
   const notify = options.notify;
+  const today = options.today ?? todayInTimezone();
   const startedAt = Date.now();
 
-  const date = parseScreenTimeCaption(caption);
-  if (!date) {
-    return { ok: false, error: "invalid_caption" };
-  }
   if (photos.length === 0) {
-    return { ok: false, error: "no_photos" };
+    return { ok: false, isScreenTime: false, error: "no_photos" };
   }
 
+  let json: ScreenTimeJson;
+  let raw: string;
   try {
     const buffers = await Promise.all(
       photos.map(async (p) => (await fetchTelegramFile(p.fileId)).buffer)
     );
-
     const client = options.openai ?? getOpenAI();
-    const { json, raw } = await extractScreenTimeJson(buffers, client);
+    const result = await extractScreenTimeJson(buffers, client, today);
+    json = result.json;
+    raw = result.raw;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logUsage(pool, {
+      source: "telegram",
+      surface: "screen-time",
+      action: "detect",
+      ok: false,
+      error: message,
+      durationMs: Date.now() - startedAt,
+      meta: { photo_count: photos.length },
+    });
+    // Detection itself failed — let the caller fall back to normal OCR.
+    return { ok: false, isScreenTime: false, error: message };
+  }
 
+  if (!json.is_screen_time) {
+    logUsage(pool, {
+      source: "telegram",
+      surface: "screen-time",
+      action: "detect",
+      ok: true,
+      durationMs: Date.now() - startedAt,
+      meta: { photo_count: photos.length, is_screen_time: false },
+    });
+    return { ok: true, isScreenTime: false };
+  }
+
+  const date = json.date;
+  if (!date) {
+    logUsage(pool, {
+      source: "telegram",
+      surface: "screen-time",
+      action: "ingest",
+      ok: false,
+      error: "missing_date",
+      durationMs: Date.now() - startedAt,
+      meta: { photo_count: photos.length },
+    });
+    if (notify) {
+      await notify(
+        chatId,
+        "📱 Screen Time detected but I couldn't read the date label. Crop so the date is visible and resend."
+      );
+    }
+    return { ok: false, isScreenTime: true, error: "missing_date" };
+  }
+
+  try {
     await upsertDailyScreenTime(pool, {
       date,
-      totalMinutes: json.total_minutes,
-      categories: json.categories,
-      apps: json.apps,
-      pickups: json.pickups ?? null,
-      firstPickup: normalizeFirstPickup(json.first_pickup ?? null),
-      pickupApps: json.pickup_apps ?? null,
-      notifications: json.notifications ?? null,
-      notificationApps: json.notification_apps ?? null,
+      totalMinutes: json.total_minutes ?? 0,
+      categories: json.categories ?? [],
+      apps: json.apps ?? [],
+      pickups: json.pickups,
+      firstPickup: normalizeFirstPickup(json.first_pickup),
+      pickupApps: json.pickup_apps,
+      notifications: json.notifications,
+      notificationApps: json.notification_apps,
       sourceMessageId: messageId,
       rawText: raw,
     });
@@ -205,16 +265,18 @@ export async function processScreenTimePhotos(
     });
 
     if (notify) {
-      const hours = Math.floor(json.total_minutes / 60);
-      const mins = json.total_minutes % 60;
+      const total = json.total_minutes ?? 0;
+      const hours = Math.floor(total / 60);
+      const mins = total % 60;
       const totalLabel = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+      const appCount = json.apps?.length ?? 0;
       await notify(
         chatId,
-        `📱 Screen Time saved for ${date}: ${totalLabel} total, ${json.apps.length} apps.`
+        `📱 Screen Time saved for ${date}: ${totalLabel} total, ${appCount} apps.`
       );
     }
 
-    return { ok: true, date };
+    return { ok: true, isScreenTime: true, date };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     logUsage(pool, {
@@ -229,6 +291,6 @@ export async function processScreenTimePhotos(
     if (notify) {
       await notify(chatId, `⚠️ Screen Time ingest failed for ${date}: ${message}`);
     }
-    return { ok: false, error: message, date };
+    return { ok: false, isScreenTime: true, error: message, date };
   }
 }
