@@ -285,15 +285,38 @@ tags:
       }
     });
 
-    it("allows re-log of the same toll after the duplicate window expires", async () => {
+    it("rejects identical-substance fabrication outside 10-min window (2026-05-04 13:35 incident)", async () => {
+      // 11:12 Nicotine logged. Agent later in the day at 13:35 calls
+      // log_checkpoint with byte-identical Nicotine content (copy-pasted from
+      // its own scrollback) alongside a real Weed entry. The 10-min identity
+      // check misses it; the same-day Jaccard guard catches it.
       mockKeys({ today: buildExistingFile("14:00") });
-      // 14:15 Madrid = 12:15 UTC — 15 minutes later, outside 10-min window.
       const restore = freezeWallClock("12:15");
       try {
         const result = await handleLogCheckpoint(mockPool, {
           substance: "Nicotine",
           body: "pulse behind the breastbone",
           part_voice: "keep the directed focus escalera going",
+          choice: "go",
+        });
+        expect(result).toMatch(/Rejected: matches 2026-05-02 14:00/);
+        expect(mockR2.putObjectContent).not.toHaveBeenCalled();
+      } finally {
+        restore();
+      }
+    });
+
+    it("allows a different substance within same day even with overlapping body words", async () => {
+      // Real-world counterpart of the 13:35 incident: Weed entry mentions
+      // "behind breastbone" same as the existing Nicotine bullet, but the
+      // substance differs — must NOT be flagged as fabrication.
+      mockKeys({ today: buildExistingFile("11:12") });
+      const restore = freezeWallClock("11:35");
+      try {
+        const result = await handleLogCheckpoint(mockPool, {
+          substance: "Weed",
+          body: "something difficult to sense in the throat by the Adams apple, behind breastbone an urge to open",
+          part_voice: "to sit down focus and flow on things that matter",
           choice: "go",
         });
         expect(result).toMatch(/Toll logged/);

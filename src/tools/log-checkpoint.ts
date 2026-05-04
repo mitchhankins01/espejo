@@ -127,13 +127,13 @@ function findRecentDuplicate(
   return null;
 }
 
-// Token-Jaccard threshold for cross-day fabrication detection. Picked so that
+// Token-Jaccard threshold for fabrication detection. Picked so that
 // "a flourishing in the upper chest, almost on the surface" vs "flourishing in
 // the upper chest, almost on the surface" (the 2026-05-04 incident — agent
 // prepended a single token to yesterday's bullet) trips the guard, while
 // genuinely different free-form descriptions stay well below.
-const CROSS_DAY_JACCARD_THRESHOLD = 0.85;
-const CROSS_DAY_MIN_TOKENS = 5;
+const FABRICATION_JACCARD_THRESHOLD = 0.85;
+const FABRICATION_MIN_TOKENS = 5;
 
 function tokenize(s: string): Set<string> {
   return new Set(
@@ -151,29 +151,31 @@ function jaccard(a: Set<string>, b: Set<string>): number {
   return union === 0 ? 0 : intersect / union;
 }
 
-// Cross-day fabrication guard: if the input substance matches a bullet in
-// yesterday's file AND the body+part_voice tokens overlap heavily (Jaccard
-// ≥ 0.85), the agent is almost certainly copy-pasting a recent toll from
-// scrollback rather than logging a fresh user signal. See 2026-05-04 incident:
-// agent re-logged 2026-05-03's last bullet ("Ketamine. flourishing in the
-// upper chest…") into 2026-05-04 twice for unrelated triggers (a weight CSV
-// paste and a bare "Checkpoint" with no content yet).
-function findCrossDayDuplicate(
-  previousDay: string,
+// Fabrication guard: if the input substance matches a bullet in the file AND
+// the body+part_voice tokens overlap heavily (Jaccard ≥ 0.85), the agent is
+// almost certainly copy-pasting a recent toll from scrollback rather than
+// logging a fresh user signal. Applied to BOTH today's file (catches
+// mid-conversation re-runs the 10-min window misses, e.g. 11:12 → 13:35) and
+// yesterday's (catches midnight rollover). 2026-05-04 hit both modes: agent
+// fabricated bullets from yesterday twice in the morning, then later in the
+// day fabricated a Nicotine bullet copying its own 11:12 entry while logging
+// a real Weed entry in the same turn.
+function findFabricationMatch(
+  fileContent: string,
   now: { substance: string; body: string; partVoice: string }
 ): ParsedBullet | null {
   const nowSubstance = normalizeForCompare(now.substance);
   const nowTokens = tokenize(`${now.body} ${now.partVoice}`);
-  if (nowTokens.size < CROSS_DAY_MIN_TOKENS) return null;
+  if (nowTokens.size < FABRICATION_MIN_TOKENS) return null;
 
-  const lines = previousDay.split("\n").filter((l) => l.startsWith("- "));
+  const lines = fileContent.split("\n").filter((l) => l.startsWith("- "));
   for (const line of lines) {
     const parsed = parseBullet(line);
     if (!parsed) continue;
     if (normalizeForCompare(parsed.substance) !== nowSubstance) continue;
     const theirTokens = tokenize(`${parsed.body} ${parsed.partVoice}`);
-    if (theirTokens.size < CROSS_DAY_MIN_TOKENS) continue;
-    if (jaccard(nowTokens, theirTokens) >= CROSS_DAY_JACCARD_THRESHOLD) {
+    if (theirTokens.size < FABRICATION_MIN_TOKENS) continue;
+    if (jaccard(nowTokens, theirTokens) >= FABRICATION_JACCARD_THRESHOLD) {
       return parsed;
     }
   }
@@ -208,6 +210,14 @@ export async function handleLogCheckpoint(
     if (dup) {
       return `Already logged at ${dup.hhmm} (skipped duplicate within ${DUPLICATE_WINDOW_MINUTES} min).`;
     }
+    const fab = findFabricationMatch(existing, {
+      substance: params.substance,
+      body: params.body,
+      partVoice: params.part_voice,
+    });
+    if (fab) {
+      return `Rejected: matches ${date} ${fab.hhmm} bullet (likely fabricated from scrollback). If this is a real fresh toll, vary the wording.`;
+    }
   }
 
   const yesterdayDate = daysAgoInTimezone(1);
@@ -220,7 +230,7 @@ export async function handleLogCheckpoint(
   }
 
   if (previousDay != null) {
-    const crossDayDup = findCrossDayDuplicate(previousDay, {
+    const crossDayDup = findFabricationMatch(previousDay, {
       substance: params.substance,
       body: params.body,
       partVoice: params.part_voice,
