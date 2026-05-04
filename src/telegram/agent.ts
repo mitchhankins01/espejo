@@ -117,14 +117,34 @@ export async function runAgent(params: {
 
   const activity = activityParts.join(" | ");
 
-  if (!text) return { response: null, activity, activityLogId };
+  // Fallback: if the model went silent after a successful log_checkpoint
+  // (intermittent — protocol says send a mirror line, but model sometimes
+  // exits with empty text after the tool_result), surface a minimal
+  // confirmation so the user doesn't see dead air after "Pass"/"Go".
+  let finalText = text;
+  if (!finalText) {
+    const successfulLog = [...toolCalls]
+      .reverse()
+      .find(
+        (c) =>
+          c.name === "log_checkpoint" &&
+          typeof c.result === "string" &&
+          c.result.startsWith("Toll logged")
+      );
+    if (successfulLog) {
+      const match = (successfulLog.result as string).match(/at (\d{2}:\d{2})/);
+      finalText = match ? `Logged at ${match[1]}.` : "Logged.";
+    }
+  }
+
+  if (!finalText) return { response: null, activity, activityLogId };
 
   // 5. Store assistant response
   await insertChatMessage(pool, {
     chatId,
     externalMessageId: null,
     role: "assistant",
-    content: text,
+    content: finalText,
   });
 
   // 6. Trigger compaction asynchronously
@@ -133,7 +153,7 @@ export async function runAgent(params: {
     console.error(`Telegram compaction error [chat:${chatId}]:`, err);
   });
 
-  return { response: text, activity, activityLogId };
+  return { response: finalText, activity, activityLogId };
 }
 
 // Need config for activity detail URL building

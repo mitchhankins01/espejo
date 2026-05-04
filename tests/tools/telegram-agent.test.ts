@@ -740,6 +740,72 @@ describe("runAgent", () => {
     expect(result.response).toBeNull();
   });
 
+  it("falls back to 'Logged at HH:MM.' when log_checkpoint succeeds but model returns empty text", async () => {
+    // Real-world failure mode: after user says "Pass"/"Go", model calls
+    // log_checkpoint and then exits with no follow-up text. Without the
+    // fallback the user sees silence.
+    mockAnthropicCreate
+      .mockResolvedValueOnce({
+        content: [
+          {
+            type: "tool_use",
+            id: "toolu_1",
+            name: "log_checkpoint",
+            input: { substance: "Nic", body: "head", part_voice: "wolf", choice: "pass" },
+          },
+        ],
+        usage: { input_tokens: 100, output_tokens: 50 },
+      })
+      .mockResolvedValueOnce({
+        content: [], // model goes silent after tool_result
+        usage: { input_tokens: 150, output_tokens: 0 },
+      });
+    mockToolHandler.mockResolvedValueOnce("Toll logged: Checkpoint/2026-05-04.md at 11:12.");
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "Pass",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBe("Logged at 11:12.");
+    // Assistant message stored with the fallback text, not empty
+    const assistantInsert = mockInsertChatMessage.mock.calls.find(
+      ([, args]) => args.role === "assistant"
+    );
+    expect(assistantInsert?.[1].content).toBe("Logged at 11:12.");
+  });
+
+  it("does not fall back when log_checkpoint result is an error/rejection", async () => {
+    mockAnthropicCreate
+      .mockResolvedValueOnce({
+        content: [
+          {
+            type: "tool_use",
+            id: "toolu_1",
+            name: "log_checkpoint",
+            input: { substance: "Ketamine", body: "x", part_voice: "y", choice: "pass" },
+          },
+        ],
+        usage: { input_tokens: 100, output_tokens: 50 },
+      })
+      .mockResolvedValueOnce({
+        content: [],
+        usage: { input_tokens: 150, output_tokens: 0 },
+      });
+    mockToolHandler.mockResolvedValueOnce(
+      "Rejected: identical to 2026-05-03 18:49 bullet (likely fabricated from scrollback)."
+    );
+
+    const result = await runAgent({
+      chatId: "100",
+      message: "Pass",
+      messageDate: 1000,
+    });
+
+    expect(result.response).toBeNull();
+  });
+
     it("includes journal composition instructions in system prompt", async () => {
     mockAnthropicCreate.mockResolvedValueOnce({
       content: [{ type: "text", text: "Entry text" }],

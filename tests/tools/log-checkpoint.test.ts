@@ -8,7 +8,7 @@ const mockR2 = vi.hoisted(() => ({
 
 const mockDates = vi.hoisted(() => ({
   todayInTimezone: vi.fn(),
-  daysAgoInTimezone: vi.fn(),
+  daysAgoInTimezone: vi.fn().mockReturnValue("2026-05-01"),
   currentHourInTimezone: vi.fn(),
   todayDateInTimezone: vi.fn().mockReturnValue("2026-05-02"),
   currentTimeLabel: vi.fn(),
@@ -31,11 +31,29 @@ function nf(): Error {
   return err;
 }
 
+// Mock helper: return `today` for the today key, `yesterday` for the yesterday
+// key, NoSuchKey for anything else. Tests that don't care about the cross-day
+// guard pass `yesterday: null` so it 404s.
+function mockKeys(opts: { today?: string | null; yesterday?: string | null }) {
+  mockR2.getObjectContent.mockImplementation(async (_client, _bucket, key) => {
+    if (key === "Checkpoint/2026-05-02.md") {
+      if (opts.today == null) throw nf();
+      return opts.today;
+    }
+    if (key === "Checkpoint/2026-05-01.md") {
+      if (opts.yesterday == null) throw nf();
+      return opts.yesterday;
+    }
+    throw nf();
+  });
+}
+
 beforeEach(() => {
   mockR2.putObjectContent.mockReset().mockResolvedValue(undefined);
   mockR2.getObjectContent.mockReset();
   mockR2.createClient.mockReset().mockReturnValue({});
   mockDates.todayDateInTimezone.mockReturnValue("2026-05-02");
+  mockDates.daysAgoInTimezone.mockReturnValue("2026-05-01");
 });
 
 describe("handleLogCheckpoint", () => {
@@ -68,7 +86,7 @@ tags:
 ---
 - 14:32 Nic. head. surf. pass
 `;
-    mockR2.getObjectContent.mockResolvedValue(existing);
+    mockKeys({ today: existing });
 
     await handleLogCheckpoint(mockPool, {
       substance: "Weed",
@@ -166,7 +184,7 @@ tags:
 - 14:32 Nic. head. surf. pass
 
 `; // existing file with trailing blank line
-    mockR2.getObjectContent.mockResolvedValue(existing);
+    mockKeys({ today: existing });
 
     await handleLogCheckpoint(mockPool, {
       substance: "Weed",
@@ -231,7 +249,7 @@ tags:
 
     it("rejects identical entry within 10-minute window without writing", async () => {
       // Existing bullet at 23:47, agent re-calls at 23:50 with same content.
-      mockR2.getObjectContent.mockResolvedValue(buildExistingFile("23:47"));
+      mockKeys({ today: buildExistingFile("23:47") });
       // Madrid timezone is UTC+2 in May; 21:50 UTC == 23:50 Madrid.
       const restore = freezeWallClock("21:50");
       try {
@@ -251,7 +269,7 @@ tags:
     it("ignores case + whitespace + punctuation when checking duplicates", async () => {
       // The 00:07 re-hallucination case from 2026-05-03: "a pulse" vs "pulse",
       // "Nicotine" vs "Nicotine.", "Eager Excitement" vs "eager excitement".
-      mockR2.getObjectContent.mockResolvedValue(buildExistingFile("23:47"));
+      mockKeys({ today: buildExistingFile("23:47") });
       const restore = freezeWallClock("21:55");
       try {
         const result = await handleLogCheckpoint(mockPool, {
@@ -268,7 +286,7 @@ tags:
     });
 
     it("allows re-log of the same toll after the duplicate window expires", async () => {
-      mockR2.getObjectContent.mockResolvedValue(buildExistingFile("14:00"));
+      mockKeys({ today: buildExistingFile("14:00") });
       // 14:15 Madrid = 12:15 UTC — 15 minutes later, outside 10-min window.
       const restore = freezeWallClock("12:15");
       try {
@@ -286,7 +304,7 @@ tags:
     });
 
     it("allows different content within the duplicate window", async () => {
-      mockR2.getObjectContent.mockResolvedValue(buildExistingFile("23:47"));
+      mockKeys({ today: buildExistingFile("23:47") });
       const restore = freezeWallClock("21:50");
       try {
         const result = await handleLogCheckpoint(mockPool, {
@@ -319,6 +337,89 @@ tags:
       }
     });
 
+    it("rejects fabrication: input matches yesterday's last bullet (2026-05-04 incident)", async () => {
+      // Real-world failure mode: agent copy-pastes the most recent toll from
+      // visible scrollback (the previous day's last bullet) when it has no
+      // fresh user content. Today's file is empty.
+      const yesterday = `---
+kind: note
+tags:
+  - checkpoint
+  - parts-work
+  - substance-use
+---
+- 18:33 Weed. stomach, growling up toward the sternum. to flow. go
+- 18:49 Ketamine. flourishing in the upper chest, almost on the surface. to be elevated at the churros party. pass
+`;
+      mockKeys({ today: null, yesterday });
+      const restore = freezeWallClock("07:36");
+      try {
+        const result = await handleLogCheckpoint(mockPool, {
+          substance: "Ketamine",
+          body: "a flourishing in the upper chest, almost on the surface",
+          part_voice: "to be elevated at the churros party",
+          choice: "pass",
+        });
+        expect(result).toMatch(/Rejected: identical to 2026-05-01 18:49/);
+        expect(mockR2.putObjectContent).not.toHaveBeenCalled();
+      } finally {
+        restore();
+      }
+    });
+
+    it("rejects fabrication matching any (not just last) yesterday bullet", async () => {
+      const yesterday = `---
+kind: note
+tags:
+  - checkpoint
+  - parts-work
+  - substance-use
+---
+- 11:38 Nicotine. warmth behind the breastbone. find patterns, become and see more. pass
+- 13:13 Weed. base of the throat. to lose the constriction. pass
+- 18:49 Ketamine. flourishing. churros. pass
+`;
+      mockKeys({ today: null, yesterday });
+      const restore = freezeWallClock("09:00");
+      try {
+        const result = await handleLogCheckpoint(mockPool, {
+          substance: "Nicotine",
+          body: "warmth behind the breastbone",
+          part_voice: "find patterns, become and see more",
+          choice: "pass",
+        });
+        expect(result).toMatch(/Rejected: identical to 2026-05-01 11:38/);
+      } finally {
+        restore();
+      }
+    });
+
+    it("allows a fresh bullet when yesterday exists but content differs", async () => {
+      const yesterday = `---
+kind: note
+tags:
+  - checkpoint
+  - parts-work
+  - substance-use
+---
+- 18:49 Ketamine. flourishing. churros. pass
+`;
+      mockKeys({ today: null, yesterday });
+      const restore = freezeWallClock("07:36");
+      try {
+        const result = await handleLogCheckpoint(mockPool, {
+          substance: "Nicotine",
+          body: "behind the breastbone, a desire to be up",
+          part_voice: "to express",
+          choice: "pass",
+        });
+        expect(result).toMatch(/Toll logged/);
+        expect(mockR2.putObjectContent).toHaveBeenCalledTimes(1);
+      } finally {
+        restore();
+      }
+    });
+
     it("ignores legacy backfilled bullets without HH:MM prefix", async () => {
       const existing = `---
 kind: note
@@ -331,7 +432,7 @@ tags:
 - Weed. some old toll without timestamp. wants something. go
 - 23:47 Nicotine. pulse behind the breastbone. keep the directed focus escalera going. go
 `;
-      mockR2.getObjectContent.mockResolvedValue(existing);
+      mockKeys({ today: existing });
       const restore = freezeWallClock("21:50");
       try {
         const result = await handleLogCheckpoint(mockPool, {
