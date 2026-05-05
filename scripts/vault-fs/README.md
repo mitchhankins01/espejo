@@ -33,14 +33,49 @@ launchctl unload ~/Library/LaunchAgents/com.espejo.vault-fs.fswatch.plist
 launchctl load -w ~/Library/LaunchAgents/com.espejo.vault-fs.fswatch.plist
 ```
 
-## eslogger (sudo, process attribution) — two-process split
+## eslogger (NOT WORKING on macOS Sequoia — kept here for reference only)
 
-`eslogger` ships with macOS 13+ and requires root. macOS Sequoia's TCC walks
-the responsibility chain and won't honor Full Disk Access on `/bin/bash` when
-bash spawns eslogger from a LaunchDaemon — the reliable fix is to make
-`eslogger` itself the leaf binary and grant FDA to `/usr/bin/eslogger`.
+**Status (2026-05-05):** abandoned. macOS Sequoia's TCC requires Full Disk Access
+on the *Endpoint Security entitled* binary (`/usr/bin/eslogger`), but the GUI
+refuses to add binaries inside SIP-protected `/usr/bin/`, and FDA on launcher
+binaries (`/bin/sh`, `/bin/bash`) is *not* credited to their ES-call children
+when run from a LaunchDaemon. We confirmed both `/bin/sh` and `/bin/bash` with
+`auth_value=2` (allowed) in the TCC DB, with the daemon still hitting
+`ES_NEW_CLIENT_RESULT_ERR_NOT_PERMITTED`.
 
-Architecture: a root LaunchDaemon writes vault-only events to a sink file at
+The supported path is to ship a code-signed app bundle with the
+`com.apple.developer.endpoint-security.client` entitlement. Overkill for our
+debugging needs — fswatch (above) gives us path + timing, which has been
+sufficient for incident reconstruction. Process attribution would be a luxury,
+not a foundation.
+
+**Don't re-try this without one of:**
+- A signed app bundle (Apple Developer membership required)
+- A way to write directly to TCC.db (SIP-disabled boot — not worth it)
+- A future macOS version that loosens the responsibility chain
+
+The plists `com.espejo.vault-fs.eslogger.plist` and
+`com.espejo.vault-fs.eslogger-reader.plist` plus `run-eslogger-reader.sh`
+remain in the repo as a starting point if any of the above ever changes.
+
+### Teardown of any failed install
+
+```bash
+sudo launchctl bootout system/com.espejo.vault-fs.eslogger 2>&1 || true
+sudo rm -f /Library/LaunchDaemons/com.espejo.vault-fs.eslogger.plist
+sudo rm -f /var/log/espejo-vault-fs.jsonl /var/log/espejo-vault-fs-eslogger.std{out,err}.log
+launchctl bootout "gui/$UID/com.espejo.vault-fs.eslogger-reader" 2>&1 || true
+rm -f ~/Library/LaunchAgents/com.espejo.vault-fs.eslogger-reader.plist
+```
+
+The FDA grants on `/bin/sh` and `/bin/bash` can be left in place (harmless) or
+removed via System Settings → Privacy & Security → Full Disk Access.
+
+---
+
+### (Reference) Two-process architecture if FDA ever propagates
+
+Capture-only daemon: a root LaunchDaemon writes vault-only events to a sink file at
 `/var/log/espejo-vault-fs.jsonl`, and a user-level LaunchAgent tails the
 file and ingests into Postgres. The reader runs as your user, so it inherits
 nvm/pnpm without extra plumbing.
