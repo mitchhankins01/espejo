@@ -1,5 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Capture-only daemon: eslogger writes vault-only JSON events to a sink file.
+  A separate user-level LaunchAgent (com.espejo.vault-fs.eslogger-reader)
+  tails the file and ingests into Postgres.
+
+  Why split: macOS Sequoia TCC walks the responsibility chain and won't honor
+  Full Disk Access on /bin/bash when bash spawns eslogger. Making eslogger
+  near the leaf and granting FDA to /usr/bin/eslogger is the reliable path.
+
+  Sink file is path-filtered to the vault root via grep so it doesn't grow
+  unbounded.
+-->
 <plist version="1.0">
 <dict>
   <key>Label</key>
@@ -7,22 +19,18 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/bin/bash</string>
-    <string>/Users/mitch/Projects/espejo/scripts/vault-fs/run-eslogger.sh</string>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>exec /usr/bin/eslogger create unlink rename | /usr/bin/grep --line-buffered -F "/Users/mitch/Documents/Artifacts" &gt;&gt; /var/log/espejo-vault-fs.jsonl</string>
   </array>
 
   <key>EnvironmentVariables</key>
   <dict>
     <key>HOME</key>
-    <string>/Users/mitch</string>
+    <string>/var/root</string>
     <key>PATH</key>
-    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
-    <key>VAULT_FS_ROOT</key>
-    <string>/Users/mitch/Documents/Artifacts</string>
+    <string>/usr/bin:/bin</string>
   </dict>
-
-  <key>WorkingDirectory</key>
-  <string>/Users/mitch/Projects/espejo</string>
 
   <key>RunAtLoad</key>
   <true/>

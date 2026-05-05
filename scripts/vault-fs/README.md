@@ -33,29 +33,72 @@ launchctl unload ~/Library/LaunchAgents/com.espejo.vault-fs.fswatch.plist
 launchctl load -w ~/Library/LaunchAgents/com.espejo.vault-fs.fswatch.plist
 ```
 
-## eslogger (sudo, process attribution)
+## eslogger (sudo, process attribution) — two-process split
 
-`eslogger` ships with macOS 13+ and requires root. It also requires the running
-process to have **Full Disk Access** (System Settings → Privacy & Security →
-Full Disk Access) for `/bin/bash` (or whichever shell launchd invokes), because
-`~/Documents` is TCC-protected.
+`eslogger` ships with macOS 13+ and requires root. macOS Sequoia's TCC walks
+the responsibility chain and won't honor Full Disk Access on `/bin/bash` when
+bash spawns eslogger from a LaunchDaemon — the reliable fix is to make
+`eslogger` itself the leaf binary and grant FDA to `/usr/bin/eslogger`.
+
+Architecture: a root LaunchDaemon writes vault-only events to a sink file at
+`/var/log/espejo-vault-fs.jsonl`, and a user-level LaunchAgent tails the
+file and ingests into Postgres. The reader runs as your user, so it inherits
+nvm/pnpm without extra plumbing.
+
+### Install
 
 ```bash
+# 1. Grant Full Disk Access to /usr/bin/eslogger
+#    System Settings → Privacy & Security → Full Disk Access → +
+#    Cmd-Shift-G to type the path: /usr/bin/eslogger
+#    Toggle ON.
+
+# 2. Install root daemon (capture only)
 sudo cp scripts/vault-fs/com.espejo.vault-fs.eslogger.plist /Library/LaunchDaemons/
 sudo chown root:wheel /Library/LaunchDaemons/com.espejo.vault-fs.eslogger.plist
-sudo launchctl load -w /Library/LaunchDaemons/com.espejo.vault-fs.eslogger.plist
+sudo touch /var/log/espejo-vault-fs.jsonl
+sudo chmod 644 /var/log/espejo-vault-fs.jsonl
+sudo launchctl bootstrap system /Library/LaunchDaemons/com.espejo.vault-fs.eslogger.plist
+sudo launchctl enable system/com.espejo.vault-fs.eslogger
+sudo launchctl kickstart -k system/com.espejo.vault-fs.eslogger
 
-# Verify
-sudo tail -f /var/log/espejo-vault-fs-eslogger.stderr.log
+# 3. Confirm eslogger is writing to the sink (should print JSON lines after
+#    you touch a file under ~/Documents/Artifacts)
+touch ~/Documents/Artifacts/Note/_eslogger_smoke.md
+sleep 3
+sudo tail -n 5 /var/log/espejo-vault-fs.jsonl
+
+# 4. Install user-level reader (ingest)
+mkdir -p ~/Library/Logs/espejo
+cp scripts/vault-fs/com.espejo.vault-fs.eslogger-reader.plist ~/Library/LaunchAgents/
+launchctl bootstrap "gui/$UID" ~/Library/LaunchAgents/com.espejo.vault-fs.eslogger-reader.plist
+launchctl enable "gui/$UID/com.espejo.vault-fs.eslogger-reader"
+
+# 5. Final verification — should show eslogger rows in DB
+rm ~/Documents/Artifacts/Note/_eslogger_smoke.md
+sleep 5
+PSQL=/opt/homebrew/opt/libpq/bin/psql
+PGURL=$(grep ^DATABASE_URL .env.production.local | cut -d= -f2-)
+$PSQL "$PGURL" -c "SELECT ts, source, event_type, process_name, pid FROM vault_fs_events WHERE path LIKE '%_eslogger_smoke%' ORDER BY ts;"
 ```
 
-If you see `Operation not permitted`, grant Full Disk Access to `/bin/bash`
-(or the absolute path of bash from `which bash`) and reload.
+### Troubleshooting
 
-Stop:
+If `/var/log/espejo-vault-fs.jsonl` stays empty:
+- Check `sudo tail /var/log/espejo-vault-fs-eslogger.stderr.log` — if you see
+  `Failed to create ES client: ... ERR_NOT_PERMITTED`, FDA on `/usr/bin/eslogger`
+  isn't taking effect. In FDA, remove `/usr/bin/eslogger` and re-add it. Then:
+  `sudo launchctl kickstart -k system/com.espejo.vault-fs.eslogger`.
+- A reboot sometimes flushes TCC's cache and makes a fresh FDA grant stick.
+
+If the sink file fills but DB has no eslogger rows:
+- Check `~/Library/Logs/espejo/vault-fs-eslogger-reader.stderr.log`.
+
+### Stop
 
 ```bash
-sudo launchctl unload /Library/LaunchDaemons/com.espejo.vault-fs.eslogger.plist
+launchctl bootout "gui/$UID/com.espejo.vault-fs.eslogger-reader"
+sudo launchctl bootout system/com.espejo.vault-fs.eslogger
 ```
 
 ## Smoke test
