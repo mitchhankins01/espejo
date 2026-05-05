@@ -191,14 +191,16 @@ describe("runPracticeExtraction", () => {
     expect(mockPutObjectContent).not.toHaveBeenCalled();
   });
 
-  it("strips markdown code fences around JSON", async () => {
+  it("re-attaches the prefilled brace when the model continues without it", async () => {
     mockMessages([{ role: "user", content: "hola amigo, cómo estás hoy compañero" }]);
     mockGetEspanolVivoBody.mockResolvedValue("state");
+    // Simulate the prefill behavior: model returns the JSON body without
+    // the leading `{` since we prefilled the assistant turn with it.
     mockAnthropicCreate.mockResolvedValue({
       content: [
         {
           type: "text",
-          text: "```json\n" + JSON.stringify({ updated_body: "new", diff_summary: "ok" }) + "\n```",
+          text: '"updated_body": "new", "diff_summary": "ok"}',
         },
       ],
     });

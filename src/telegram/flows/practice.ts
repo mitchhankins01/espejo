@@ -1,7 +1,11 @@
 import { randomUUID } from "crypto";
 import type pg from "pg";
 import type { ModelMessage } from "ai";
-import { insertChatMessage } from "../../db/queries/chat.js";
+import {
+  insertChatMessage,
+  getRecentMessages,
+  type ChatMessageRow,
+} from "../../db/queries/chat.js";
 import { logUsage } from "../../db/queries/usage.js";
 import {
   sendTelegramMessage,
@@ -24,6 +28,16 @@ import {
 const FLOW_NAME = "practice";
 const PRACTICE_MODEL = "claude-haiku-4-5-20251001";
 const PRACTICE_MAX_TOKENS = 1024;
+const PRACTICE_CONTEXT_LIMIT = 14;
+
+function reconstruct(rows: ChatMessageRow[]): { role: "user" | "assistant"; content: string }[] {
+  const messages: { role: "user" | "assistant"; content: string }[] = [];
+  for (const row of rows) {
+    if (row.role === "user") messages.push({ role: "user", content: row.content });
+    else if (row.role === "assistant") messages.push({ role: "assistant", content: row.content });
+  }
+  return messages;
+}
 
 function escapeHtml(text: string): string {
   return text
@@ -92,7 +106,14 @@ export async function continuePracticeFlow(params: {
   const seedMessageId = await sendTelegramMessageReturningId(chatId, "…");
   const editor = seedMessageId != null ? createStreamEditor(chatId, seedMessageId) : null;
 
-  const messages: ModelMessage[] = [{ role: "user", content: text }];
+  // Load this session's prior turns so the coach has context.
+  const recent = await getRecentMessages(pool, chatId, PRACTICE_CONTEXT_LIMIT, FLOW_NAME);
+  const messages: ModelMessage[] = reconstruct(recent);
+  // The current user turn was already inserted above; reconstruct() will
+  // include it. Ensure the last message is the current user turn.
+  if (messages.length === 0 || messages[messages.length - 1].role !== "user") {
+    messages.push({ role: "user", content: text });
+  }
 
   let response: { text: string } | null = null;
   try {

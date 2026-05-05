@@ -111,17 +111,25 @@ export async function runPracticeExtraction(
   const userMessage = `CURRENT ESPAÑOL VIVO.md:\n\n${currentBody}\n\n---\n\nSESSION ID: ${session.sessionId}\nSESSION STARTED: ${session.startedAt.toISOString()}\n\nTRANSCRIPT:\n\n${transcript}`;
 
   const anthropic = getAnthropic();
+  // Prefill the assistant turn with `{` to force JSON output. Without this,
+  // the model sometimes treats the transcript-ending `[assistant] ...` line
+  // as a conversation to continue instead of data to summarize.
   const response = await anthropic.messages.create({
     model: config.anthropic.model,
     max_tokens: 8192,
     system: EXTRACTION_PROMPT,
-    messages: [{ role: "user", content: userMessage }],
+    messages: [
+      { role: "user", content: userMessage },
+      { role: "assistant", content: "{" },
+    ],
   });
 
   const textBlocks = response.content.filter(
     (b): b is Anthropic.TextBlock => b.type === "text"
   );
-  const raw = textBlocks.map((b) => b.text).join("\n").trim();
+  const continuation = textBlocks.map((b) => b.text).join("\n").trim();
+  // Re-attach the prefill so the parser sees a complete JSON object.
+  const raw = continuation.startsWith("{") ? continuation : `{${continuation}`;
 
   const parsed = parseExtractionJson(raw);
   if (!parsed) {

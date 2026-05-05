@@ -50,10 +50,13 @@ export function isVaultPromptCommand(name: string): boolean {
 
 const PROMPT_PREAMBLE =
   "You are running this prompt via Telegram. Your output renders as Telegram HTML.\n" +
-  "Formatting rules — these override anything the prompt body says about markdown:\n" +
-  "- Emphasis: <i>text</i> for italic, <b>text</b> for bold. NEVER use *text*, _text_, **text**, __text__, or backtick code spans for emphasis — they render as literal characters in the chat.\n" +
-  "- Headings/lists/horizontal rules: don't use markdown syntax (#, -, ---). Use plain line breaks and short labeled paragraphs instead.\n" +
+  "Formatting rules — these OVERRIDE anything the prompt body says about markdown:\n" +
+  "- Emphasis: only <i>text</i> for italic and <b>text</b> for bold. NEVER use *text*, _text_, **text**, __text__, or backtick code spans for emphasis — Telegram shows them as literal asterisks/underscores/backticks.\n" +
+  "- Section breaks: use a blank line. NEVER use --- or *** or === as horizontal rules — they render as literal three-dashes/asterisks/equals in the chat.\n" +
+  "- Headings: NEVER use #, ##, ### markdown headings. Use a short <b>label</b> on its own line for section labels.\n" +
+  "- Lists: use plain line breaks with leading 'em dash + space' or 'bullet + space' if you really need a list. NEVER use markdown - or * or 1. list syntax.\n" +
   "- Code: only use a fenced code block when the content really is code; never wrap prose in backticks.\n" +
+  "- Write the response in Spanish unless the prompt body specifies otherwise; do not preface in English (no 'Good, I have everything I need' or similar).\n" +
   "- Use the read tools for context and `write_vault_artifact` for vault writes; if a write fails, fall back to printing the file content in chat with a note to paste manually.";
 
 function stripFrontmatter(body: string): string {
