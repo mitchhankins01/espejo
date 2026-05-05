@@ -54,9 +54,12 @@
     "import-highlights": "tsx scripts/import-highlights.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.74",
+    "@ai-sdk/openai": "^3.0.58",
     "@anthropic-ai/sdk": "^0.78.0",
     "@aws-sdk/client-s3": "^3.985.0",
     "@modelcontextprotocol/sdk": "^1.25.3",
+    "ai": "^6.0.174",
     "better-sqlite3": "^11.7.0",
     "cheerio": "^1.2.0",
     "dotenv": "^16.4.7",

@@ -117,7 +117,7 @@ describe("handleEveningReviewPrompt", () => {
     const systemText = (result.messages[0].content as { text: string }).text;
     expect(systemText).toContain("Dutch auntie");
     expect(systemText).toContain("Escalera");
-    expect(systemText).toContain("save_evening_review");
+    expect(systemText).toContain("write_vault_artifact");
     expect(systemText).toContain("B1 Spanish");
 
     // Context message

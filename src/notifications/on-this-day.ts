@@ -1,11 +1,19 @@
 import type pg from "pg";
+import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../config.js";
 import { getEntriesOnThisDay, insertActivityLog, type EntryRow } from "../db/queries.js";
 import { logUsage } from "../db/queries/usage.js";
 import { sendTelegramMessage } from "../telegram/client.js";
 import { notifyError } from "../telegram/notify.js";
-import { getAnthropic } from "../telegram/agent/constants.js";
 import { todayInTimezone, currentHourInTimezone } from "../utils/dates.js";
+
+let anthropicClient: Anthropic | null = null;
+function getAnthropic(): Anthropic {
+  if (!anthropicClient) {
+    anthropicClient = new Anthropic({ apiKey: config.anthropic.apiKey });
+  }
+  return anthropicClient;
+}
 
 const LOCK_KEY = 9152203;
 const CHECK_INTERVAL_MS = 60 * 60_000; // 1 hour

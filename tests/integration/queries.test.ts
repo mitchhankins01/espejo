@@ -649,6 +649,37 @@ describe("getRecentMessages", () => {
     expect(messages[0].content).toBe("Message 3");
     expect(messages[1].content).toBe("Message 4");
   });
+
+  it("filters by flow when provided (NULL or matching)", async () => {
+    await insertChatMessage(pool, {
+      chatId: "9999",
+      externalMessageId: "f1",
+      role: "user",
+      content: "legacy null flow",
+      flow: null,
+    });
+    await insertChatMessage(pool, {
+      chatId: "9999",
+      externalMessageId: "f2",
+      role: "user",
+      content: "chat tagged",
+      flow: "chat",
+    });
+    await insertChatMessage(pool, {
+      chatId: "9999",
+      externalMessageId: "f3",
+      role: "user",
+      content: "checkpoint tagged",
+      flow: "checkpoint",
+    });
+
+    const chatMessages = await getRecentMessages(pool, "9999", 100, "chat");
+    expect(chatMessages.map((m) => m.content)).toEqual([
+      "legacy null flow",
+      "chat tagged",
+    ]);
+    expect(chatMessages.find((m) => m.content === "checkpoint tagged")).toBeUndefined();
+  });
 });
 
 describe("getMessagesSince", () => {

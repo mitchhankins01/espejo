@@ -586,28 +586,41 @@ export const toolSpecs = {
     ],
   },
 
-  save_evening_review: {
-    name: "save_evening_review" as const,
+  write_vault_artifact: {
+    name: "write_vault_artifact" as const,
     annotations: WRITE_IDEMPOTENT,
     description:
-      "Save the evening review entry as a knowledge artifact (kind: review). " +
-      "If a review already exists for the given date, updates it instead of creating a duplicate. " +
-      "Generates an embedding for semantic search after saving.",
+      "Write a markdown file to the Obsidian vault. The handler writes to Cloudflare R2 " +
+      "(Remotely Save replicates to Obsidian) AND immediately upserts the artifact into " +
+      "knowledge_artifacts so same-session reads see it. Use for saving insights to Pending/, " +
+      "reviews to Review/, notes to Note/, etc. Path is relative to vault root and must " +
+      "start with one of: Pending, Insight, Review, Note, Project, Reference. " +
+      "Frontmatter (`---\\nkind: ...`) is required at the top of the body. " +
+      "overwrite=false is the default and rejects existing files.",
     params: z.object({
-      text: z.string().min(1).describe("The final evening review markdown text"),
-      date: dateString.nullable().optional().describe(
-        "Date for the review title (YYYY-MM-DD). Defaults to today. " +
-        "Use yesterday's date if the session started before midnight but it's now past midnight."
-      ),
+      path: z
+        .string()
+        .min(1)
+        .regex(
+          /^(Pending|Insight|Review|Note|Project|Reference)\/[^./][^/]*\.md$/,
+          "Path must be like '<Kind>/<filename>.md' with no nested directories"
+        ),
+      content: z
+        .string()
+        .min(1)
+        .describe("Full markdown body, including frontmatter starting with `---\\nkind: ...`."),
+      overwrite: z
+        .boolean()
+        .default(false)
+        .describe("If false (default), reject when an object already exists at the path."),
     }),
     examples: [
       {
-        input: { text: "**Nervous system**\nTired but grounded..." },
-        behavior: "Creates a review artifact titled 'YYYY-MM-DD — Evening Checkin' with status pending, source mcp",
-      },
-      {
-        input: { text: "Updated review text...", date: "2026-03-27" },
-        behavior: "Upserts: updates existing review for 2026-03-27 if one exists, otherwise creates new",
+        input: {
+          path: "Pending/2026-05-04 — example.md",
+          content: "---\nkind: insight\n---\n\nbody",
+        },
+        behavior: "Writes to R2 and upserts in knowledge_artifacts; returns the saved path",
       },
     ],
   },
@@ -616,12 +629,10 @@ export const toolSpecs = {
     name: "log_checkpoint" as const,
     annotations: WRITE_IDEMPOTENT,
     description:
-      "Append a Checkpoint Protocol toll to today's vault log. " +
-      "Writes to Artifacts/Checkpoint/<YYYY-MM-DD>.md in R2. " +
-      "Creates the file with frontmatter on first toll of the day; appends a bullet on subsequent tolls. " +
-      "Bullet shape: `- HH:MM Substance. Body. Part voice. choice`. " +
-      "HH:MM is the current local time in Europe/Madrid (24h). " +
-      "Use the user's words verbatim where possible — don't sanitize 'Nic' to 'Nicotine' or compress texture out of the body/part_voice clauses.",
+      "Insert a Checkpoint Protocol toll into the `checkpoints` table. " +
+      "Use the user's words verbatim where possible — don't sanitize 'Nic' to 'Nicotine' or compress texture out of the body/part_voice clauses. " +
+      "If a near-identical toll was logged in the last 10 minutes the call returns a no-op. " +
+      "Optionally pass `kind` to log non-substance check-ins (defaults to 'substance').",
     params: z.object({
       substance: z.string().min(1).describe(
         "The surface label the user gave (e.g. 'Nic', 'Weed', 'Nic & Weed'). Don't expand."
@@ -633,7 +644,10 @@ export const toolSpecs = {
         "What the part wants — one short clause, the user's words. e.g. 'post-Ritalin surf, keep moving'."
       ),
       choice: z.enum(["pass", "go", "unset"]).default("unset").describe(
-        "Step-4 outcome, in the protocol's own language. 'pass' = ran the toll and didn't use the substance; 'go' = ran the toll then used (still a win — running the toll IS the win); 'unset' = no answer given. Logged as '(no answer)' when unset. Never moralize."
+        "Step-4 outcome, in the protocol's own language. 'pass' = ran the toll and didn't use the substance; 'go' = ran the toll then used (still a win — running the toll IS the win); 'unset' = no answer given. Never moralize."
+      ),
+      kind: z.string().default("substance").describe(
+        "Checkpoint kind. Defaults to 'substance'. Future: 'parts', 'energy', 'decision', 'gratitude'."
       ),
     }),
     examples: [

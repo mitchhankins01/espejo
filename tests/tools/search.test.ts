@@ -100,9 +100,8 @@ describe("null handling across param types", () => {
     expect(result.content_types).toBeUndefined();
   });
 
-  it("strips null from optional nested object params", () => {
-    const result = validateToolInput("save_evening_review", {
-      text: "test review",
+  it("strips null from optional date params", () => {
+    const result = validateToolInput("get_oura_summary", {
       date: null,
     });
     expect(result.date).toBeUndefined();

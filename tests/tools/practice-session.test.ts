@@ -37,14 +37,16 @@ vi.mock("../../src/storage/r2.js", () => ({
   putObjectContent: mockPutObjectContent,
 }));
 
-vi.mock("../../src/telegram/agent/constants.js", () => ({
-  getAnthropic: () => ({
+vi.mock("@anthropic-ai/sdk", () => ({
+  default: vi.fn().mockImplementation(() => ({
     messages: { create: mockAnthropicCreate },
-  }),
+  })),
 }));
 
 vi.mock("../../src/config.js", () => ({
-  config: { anthropic: { model: "claude-sonnet-4-6" } },
+  config: {
+    anthropic: { model: "claude-sonnet-4-6", apiKey: "sk-test" },
+  },
 }));
 
 import {

@@ -39,7 +39,6 @@ vi.mock("openai", () => ({
 
 import {
   transcribeVoiceMessage,
-  synthesizeVoiceReply,
   normalizeVoiceText,
 } from "../../src/telegram/voice.js";
 
@@ -123,11 +122,3 @@ describe("normalizeVoiceText", () => {
   });
 });
 
-describe("synthesizeVoiceReply", () => {
-    it("throws for empty text after normalization", async () => {
-    await expect(synthesizeVoiceReply("<b> </b>")).rejects.toThrow(
-      "Cannot synthesize an empty voice reply."
-    );
-  });
-
-  });

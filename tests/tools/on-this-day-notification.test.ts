@@ -37,16 +37,16 @@ const mockAnthropicCreate = vi.fn().mockResolvedValue({
   usage: { input_tokens: 500, output_tokens: 100 },
 });
 
-const mockConstants = vi.hoisted(() => ({
-  getAnthropic: vi.fn(() => ({ messages: { create: mockAnthropicCreate } })),
-}));
-
 vi.mock("../../src/db/queries.js", () => mockQueries);
 vi.mock("../../src/config.js", () => mockConfig);
 vi.mock("../../src/telegram/client.js", () => mockTelegram);
 vi.mock("../../src/telegram/notify.js", () => mockNotify);
 vi.mock("../../src/utils/dates.js", () => mockDates);
-vi.mock("../../src/telegram/agent/constants.js", () => mockConstants);
+vi.mock("@anthropic-ai/sdk", () => ({
+  default: vi.fn().mockImplementation(() => ({
+    messages: { create: mockAnthropicCreate },
+  })),
+}));
 
 import {
   formatEntriesForPrompt,

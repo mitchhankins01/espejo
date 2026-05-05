@@ -1745,6 +1745,40 @@ const migrations: Migration[] = [
           ON screen_captures USING ivfflat (embedding vector_cosine_ops) WITH (lists = 50);
     `,
   },
+  // 051 adds checkpoints (substance-toll DB store, replacing R2 vault writes)
+  // and `flow` column on chat_messages (per-flow tagging for filtered context).
+  // See specs/2026-05-04-telegram-refactor-plan.md.
+  {
+    name: "051-checkpoints-and-chat-flow",
+    getSql: () => `
+      CREATE TABLE IF NOT EXISTS checkpoints (
+          id BIGSERIAL PRIMARY KEY,
+          kind TEXT NOT NULL,
+          trigger TEXT NOT NULL,
+          body_signal TEXT,
+          part_voice TEXT,
+          resolution TEXT,
+          payload JSONB NOT NULL DEFAULT '{}',
+          source TEXT NOT NULL DEFAULT 'telegram',
+          chat_id TEXT,
+          occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          local_date DATE NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS checkpoints_local_date_idx       ON checkpoints (local_date DESC);
+      CREATE INDEX IF NOT EXISTS checkpoints_kind_local_date_idx  ON checkpoints (kind, local_date DESC);
+      CREATE UNIQUE INDEX IF NOT EXISTS checkpoints_dedup_idx ON checkpoints (
+          kind, trigger,
+          COALESCE(body_signal, ''),
+          COALESCE(part_voice, ''),
+          occurred_at
+      );
+
+      ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS flow TEXT;
+      CREATE INDEX IF NOT EXISTS chat_messages_flow_chat_id_idx
+          ON chat_messages (chat_id, flow, created_at DESC);
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

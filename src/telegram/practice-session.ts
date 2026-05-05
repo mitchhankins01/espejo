@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import type Anthropic from "@anthropic-ai/sdk";
+import Anthropic from "@anthropic-ai/sdk";
 import { pool } from "../db/client.js";
 import { getMessagesSince, type ChatMessageRow } from "../db/queries/chat.js";
 import { upsertObsidianArtifact } from "../db/queries/obsidian.js";
@@ -10,7 +10,14 @@ import {
   EXTRACTION_PROMPT,
   getEspanolVivoBody,
 } from "../prompts/spanish-practice.js";
-import { getAnthropic } from "./agent/constants.js";
+
+let anthropicClient: Anthropic | null = null;
+function getAnthropic(): Anthropic {
+  if (!anthropicClient) {
+    anthropicClient = new Anthropic({ apiKey: config.anthropic.apiKey });
+  }
+  return anthropicClient;
+}
 
 const VAULT_BUCKET = "artifacts";
 

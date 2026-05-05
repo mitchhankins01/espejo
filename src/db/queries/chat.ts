@@ -8,6 +8,7 @@ export interface ChatMessageRow {
   content: string;
   tool_call_id: string | null;
   compacted_at: Date | null;
+  flow: string | null;
   created_at: Date;
 }
 
@@ -22,11 +23,12 @@ export async function insertChatMessage(
     role: string;
     content: string;
     toolCallId?: string | null;
+    flow?: string | null;
   }
 ): Promise<{ inserted: boolean; id: number | null }> {
   const result = await pool.query(
-    `INSERT INTO chat_messages (chat_id, external_message_id, role, content, tool_call_id)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO chat_messages (chat_id, external_message_id, role, content, tool_call_id, flow)
+     VALUES ($1, $2, $3, $4, $5, $6)
      ON CONFLICT (external_message_id) DO NOTHING
      RETURNING id`,
     [
@@ -35,6 +37,7 @@ export async function insertChatMessage(
       params.role,
       params.content,
       params.toolCallId ?? null,
+      params.flow ?? null,
     ]
   );
   return {
@@ -66,12 +69,30 @@ export async function getMessagesSince(
 
 /**
  * Get recent uncompacted messages, ordered oldest first.
+ * If `flow` is provided, returns rows where `flow IS NULL OR flow = $flow`
+ * (NULL covers historical rows pre-`flow` migration).
  */
 export async function getRecentMessages(
   pool: pg.Pool,
   chatId: string,
-  limit: number
+  limit: number,
+  flow?: string
 ): Promise<ChatMessageRow[]> {
+  if (flow !== undefined) {
+    const result = await pool.query(
+      `SELECT *
+       FROM (
+         SELECT *
+         FROM chat_messages
+         WHERE chat_id = $1 AND compacted_at IS NULL AND (flow IS NULL OR flow = $3)
+         ORDER BY created_at DESC, id DESC
+         LIMIT $2
+       ) AS recent
+       ORDER BY created_at ASC, id ASC`,
+      [chatId, limit, flow]
+    );
+    return result.rows;
+  }
   const result = await pool.query(
     `SELECT *
      FROM (

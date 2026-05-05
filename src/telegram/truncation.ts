@@ -1,17 +1,14 @@
-import { TOOL_RESULT_MAX_CHARS, SEARCH_RESULT_ENTRY_MAX_CHARS } from "./constants.js";
+// Tool result truncation — used to keep persisted tool_result rows compact.
+// (Lifted from src/telegram/agent/truncation.ts so flows don't depend on the
+// soon-to-be-deleted agent module.)
 
-// ---------------------------------------------------------------------------
-// Tool result truncation
-// ---------------------------------------------------------------------------
+const TOOL_RESULT_MAX_CHARS = 500;
+const SEARCH_RESULT_ENTRY_MAX_CHARS = 100;
 
-export function truncateToolResult(
-  toolName: string,
-  result: string
-): string {
+export function truncateToolResult(toolName: string, result: string): string {
   if (result.length <= TOOL_RESULT_MAX_CHARS) return result;
 
   if (toolName === "search_entries") {
-    // Extract UUIDs, dates, and truncated text
     const lines = result.split("\n");
     const truncated: string[] = [];
     let chars = 0;

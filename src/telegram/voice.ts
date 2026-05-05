@@ -63,26 +63,3 @@ export async function transcribeVoiceMessage(
   return transcription as unknown as string;
 }
 
-/**
- * Synthesize a short voice reply with OpenAI TTS and return MP3 bytes.
- */
-export async function synthesizeVoiceReply(text: string): Promise<Buffer> {
-  const input = normalizeVoiceText(text);
-  if (!input) {
-    throw new Error("Cannot synthesize an empty voice reply.");
-  }
-
-  const model = config.telegram.voiceModel;
-
-  const audioResponse = await getOpenAI().audio.speech.create({
-    model: model as never,
-    voice: config.telegram.voiceName as never,
-    input,
-    response_format: "mp3",
-  });
-
-  const audio = Buffer.from(await audioResponse.arrayBuffer());
-
-
-  return audio;
-}

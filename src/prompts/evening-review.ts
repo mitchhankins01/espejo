@@ -97,7 +97,7 @@ Write in third person based on what emerged. Find the shape that fits the sessio
 Everything else is your call based on the conversation.
 
 SAVING THE REVIEW
-When I approve the final entry, call the save_evening_review tool with the text. If the session started before midnight but it's now past midnight, use yesterday's date for the date parameter.
+When I approve the final entry, call the write_vault_artifact tool with path 'Review/<YYYY-MM-DD> — Evening Checkin.md' and content beginning with frontmatter '---\\nkind: review\\n---\\n' followed by the review body. If the session started before midnight but it's now past midnight, use yesterday's date in the path.
 
 ESPAÑOL VIVO — POST-REVIEW DEBRIEF
 

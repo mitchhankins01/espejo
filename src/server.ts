@@ -23,10 +23,10 @@ import { handleSearchArtifacts } from "./tools/search-artifacts.js";
 import { handleSearchContent } from "./tools/search-content.js";
 import { handleSyncObsidianVault } from "./tools/sync-obsidian-vault.js";
 import { handleGetObsidianSyncStatus } from "./tools/get-obsidian-sync-status.js";
-import { handleSaveEveningReview } from "./tools/save-evening-review.js";
 import { handleLogCheckpoint } from "./tools/log-checkpoint.js";
 import { handleLogWeights } from "./tools/log-weights.js";
 import { handleDistillHnThread } from "./tools/distill-hn-thread.js";
+import { handleWriteVaultArtifact } from "./tools/write-vault-artifact.js";
 import { handleEveningReviewPrompt } from "./prompts/evening-review.js";
 
 export type McpSurface = "mcp-stdio" | "mcp-http";
@@ -56,10 +56,10 @@ export const toolHandlers: Record<string, ToolHandler> = {
   search_content: handleSearchContent,
   sync_obsidian_vault: handleSyncObsidianVault,
   get_obsidian_sync_status: handleGetObsidianSyncStatus,
-  save_evening_review: handleSaveEveningReview,
   log_checkpoint: handleLogCheckpoint,
   log_weights: handleLogWeights,
   distill_hn_thread: handleDistillHnThread,
+  write_vault_artifact: handleWriteVaultArtifact,
 };
 
 export function createServer(
