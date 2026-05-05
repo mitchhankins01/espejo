@@ -11,6 +11,17 @@ set -euo pipefail
 
 # When run from launchd we don't get the user's HOME by default. The plist
 # pins HOME=/Users/mitch and WorkingDirectory=/Users/mitch/Projects/espejo.
+# nvm-installed pnpm/tsx aren't on launchd's PATH; source nvm and fall back
+# to the active node version's bin dir.
+if [ -s "$HOME/.nvm/nvm.sh" ]; then
+  # shellcheck disable=SC1091
+  . "$HOME/.nvm/nvm.sh"
+fi
+if [ -d "$HOME/.nvm/versions/node" ]; then
+  NVM_BIN="$HOME/.nvm/versions/node/$(ls -1 "$HOME/.nvm/versions/node" | tail -1)/bin"
+  export PATH="$NVM_BIN:$PATH"
+fi
+
 cd "$(dirname "$0")/../.."
 
 if [ -f .env.production.local ]; then
