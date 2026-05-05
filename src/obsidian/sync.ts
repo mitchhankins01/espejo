@@ -13,8 +13,19 @@ import {
 } from "../db/queries/artifacts.js";
 import { logUsage } from "../db/queries/usage.js";
 import { createClient, listAllObjects, getObjectContent } from "../storage/r2.js";
-import { notifyError } from "../telegram/notify.js";
+import { notifyAlert, notifyError } from "../telegram/notify.js";
 import { parseObsidianNote } from "./parser.js";
+
+/**
+ * Conflict-sibling path test. Remotely Save names them ` 2.md` / ` 3.md`
+ * or puts them inside ` 2/` / ` 3/` directories (see Note/Vault Sync Conflicts —
+ * Problem Statement.md). Anything matching is benign drift; anything else that
+ * gets soft-deleted is a *canonical loss* worth alerting on.
+ */
+const CONFLICT_PATH_REGEX = /(?: \d+\.md$)|(?: \d+\/)/;
+function isConflictSiblingPath(path: string): boolean {
+  return CONFLICT_PATH_REGEX.test(path);
+}
 
 // ============================================================================
 // Constants
@@ -45,6 +56,8 @@ export interface ObsidianSyncResult {
   filesDeleted: number;
   linksResolved: number;
   errors: Array<{ file: string; error: string }>;
+  deletedPaths: string[];
+  canonicalLossPaths: string[];
   durationMs: number;
 }
 
@@ -69,6 +82,8 @@ export async function runObsidianSync(
   let filesSynced = 0;
   let filesDeleted = 0;
   let linksResolved = 0;
+  let deletedPaths: string[] = [];
+  let canonicalLossPaths: string[] = [];
 
   try {
     const r2Client = createClient();
@@ -143,9 +158,32 @@ export async function runObsidianSync(
 
     // 7. Soft-delete artifacts whose files no longer exist in R2
     const activeKeys = mdFiles.map((obj) => obj.key);
-    filesDeleted = await softDeleteMissingObsidianArtifacts(pool, activeKeys);
+    deletedPaths = await softDeleteMissingObsidianArtifacts(pool, activeKeys);
+    filesDeleted = deletedPaths.length;
+    canonicalLossPaths = deletedPaths.filter((p) => !isConflictSiblingPath(p));
     if (filesDeleted > 0) {
       console.log(`[obsidian-sync] Soft-deleted ${filesDeleted} artifacts (paths no longer in R2)`);
+      if (canonicalLossPaths.length > 0) {
+        console.warn(
+          `[obsidian-sync] CANONICAL LOSS: ${canonicalLossPaths.length} non-conflict path(s) soft-deleted: ${canonicalLossPaths.join(", ")}`
+        );
+        // Tripwire: alert Mitch immediately. Bodies remain in knowledge_artifacts.body
+        // for recovery; see Note/Vault Sync Conflicts — Problem Statement.md.
+        notifyAlert(
+          `Vault canonical lost (${canonicalLossPaths.length})`,
+          [
+            "Non-conflict paths just got soft-deleted by Obsidian sync.",
+            "Bodies remain in knowledge_artifacts.body — restore before R2 settles.",
+            "",
+            ...canonicalLossPaths.slice(0, 20),
+            canonicalLossPaths.length > 20
+              ? `… and ${canonicalLossPaths.length - 20} more`
+              : "",
+          ]
+            .filter(Boolean)
+            .join("\n")
+        );
+      }
     }
 
     // 8. Resolve wiki links (pass 2) — in-memory title map
@@ -177,14 +215,38 @@ export async function runObsidianSync(
       }
     }
 
-    await completeObsidianSyncRun(pool, runId, "success", filesSynced, filesDeleted, linksResolved, errors);
-    return { runId, filesSynced, filesDeleted, linksResolved, errors, durationMs: Date.now() - t0 };
+    await completeObsidianSyncRun(
+      pool,
+      runId,
+      "success",
+      filesSynced,
+      filesDeleted,
+      linksResolved,
+      errors,
+      deletedPaths
+    );
+    return {
+      runId,
+      filesSynced,
+      filesDeleted,
+      linksResolved,
+      errors,
+      deletedPaths,
+      canonicalLossPaths,
+      durationMs: Date.now() - t0,
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown Obsidian sync error";
-    await completeObsidianSyncRun(pool, runId, "error", filesSynced, filesDeleted, linksResolved, [
-      ...errors,
-      { file: "*", error: message },
-    ]);
+    await completeObsidianSyncRun(
+      pool,
+      runId,
+      "error",
+      filesSynced,
+      filesDeleted,
+      linksResolved,
+      [...errors, { file: "*", error: message }],
+      deletedPaths
+    );
     throw err;
   /* v8 ignore next 4 -- finally branch covered by both success and error paths */
   } finally {
@@ -216,6 +278,8 @@ async function syncAndNotify(
             filesDeleted: result.filesDeleted,
             linksResolved: result.linksResolved,
             errors: result.errors,
+            deletedPaths: result.deletedPaths,
+            canonicalLossPaths: result.canonicalLossPaths,
           }
         : { skipped: true },
     });

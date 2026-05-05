@@ -43,6 +43,31 @@ export function notifyError(context: string, err: unknown): void {
   });
 }
 
+/**
+ * Send a non-error alert (e.g. "canonical vault file got soft-deleted").
+ * Same dedup window as notifyError so a stuck condition can't spam the chat.
+ */
+export function notifyAlert(title: string, body: string): void {
+  const chatId = config.telegram.allowedChatId;
+  const token = config.telegram.botToken;
+  if (!token || !chatId) return;
+
+  const dedupKey = `${title}:${body}`;
+  if (isDuplicate(dedupKey)) return;
+
+  const header = `<b>${title}</b>`;
+  const fullBody = `<pre>${body}</pre>`;
+  const full = `${header}\n${fullBody}`;
+  const text =
+    full.length <= MAX_MESSAGE_LENGTH
+      ? full
+      : `${header}\n<pre>${body.slice(0, MAX_MESSAGE_LENGTH - header.length - "\n<pre></pre>".length)}</pre>`;
+  /* v8 ignore next 3 -- fire-and-forget: sendTelegramMessage never rejects visibly */
+  void sendTelegramMessage(chatId, text).catch((sendErr) => {
+    console.error("Failed to send alert notification:", sendErr);
+  });
+}
+
 export function _resetDedupState(): void {
   recentErrors.length = 0;
 }

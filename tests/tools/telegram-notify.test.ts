@@ -14,7 +14,11 @@ const mockConfig = vi.hoisted(() => ({
 
 vi.mock("../../src/config.js", () => mockConfig);
 
-import { notifyError, _resetDedupState } from "../../src/telegram/notify.js";
+import {
+  notifyError,
+  notifyAlert,
+  _resetDedupState,
+} from "../../src/telegram/notify.js";
 
 let errorSpy: ReturnType<typeof vi.spyOn>;
 
@@ -139,5 +143,52 @@ describe("notifyError", () => {
     // Now the entry has expired — should send again
     notifyError("ctx", new Error("timed"));
     expect(mockSendTelegramMessage).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("notifyAlert", () => {
+  it("sends a non-error alert wrapped in HTML", () => {
+    notifyAlert("Vault canonical lost (1)", "Note/Foo.md");
+    const sent = mockSendTelegramMessage.mock.calls[0][1] as string;
+    expect(sent).toContain("<b>Vault canonical lost (1)</b>");
+    expect(sent).toContain("<pre>Note/Foo.md</pre>");
+  });
+
+  it("deduplicates identical alerts within window", () => {
+    notifyAlert("Vault canonical lost", "Note/Foo.md");
+    notifyAlert("Vault canonical lost", "Note/Foo.md");
+    expect(mockSendTelegramMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows differently-keyed alerts through dedup", () => {
+    notifyAlert("Vault canonical lost", "Note/Foo.md");
+    notifyAlert("Vault canonical lost", "Note/Bar.md");
+    expect(mockSendTelegramMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("skips when no botToken", () => {
+    mockConfig.config.telegram.botToken = "";
+    notifyAlert("title", "body");
+    expect(mockSendTelegramMessage).not.toHaveBeenCalled();
+  });
+
+  it("skips when no allowedChatId", () => {
+    mockConfig.config.telegram.allowedChatId = "";
+    notifyAlert("title", "body");
+    expect(mockSendTelegramMessage).not.toHaveBeenCalled();
+  });
+
+  it("truncates long alert bodies", () => {
+    const long = "x".repeat(5000);
+    notifyAlert("Long Alert", long);
+    expect(mockSendTelegramMessage).toHaveBeenCalledTimes(1);
+    const sent = mockSendTelegramMessage.mock.calls[0][1] as string;
+    expect(sent.length).toBeLessThanOrEqual(4096);
+  });
+
+  it("handles send failure gracefully", () => {
+    mockSendTelegramMessage.mockRejectedValueOnce(new Error("send failed"));
+    notifyAlert("Title", "Body");
+    expect(mockSendTelegramMessage).toHaveBeenCalledTimes(1);
   });
 });

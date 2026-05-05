@@ -13,6 +13,7 @@ export interface ObsidianSyncRun {
   files_deleted: number;
   links_resolved: number;
   errors: Array<{ file: string; error: string }>;
+  deleted_paths: string[];
 }
 
 export async function insertObsidianSyncRun(pool: pg.Pool): Promise<string> {
@@ -29,14 +30,24 @@ export async function completeObsidianSyncRun(
   filesSynced: number,
   filesDeleted: number,
   linksResolved: number,
-  errors: Array<{ file: string; error: string }>
+  errors: Array<{ file: string; error: string }>,
+  deletedPaths: string[] = []
 ): Promise<void> {
   await pool.query(
     `UPDATE obsidian_sync_runs
      SET finished_at = NOW(), status = $2, files_synced = $3,
-         files_deleted = $4, links_resolved = $5, errors = $6::jsonb
+         files_deleted = $4, links_resolved = $5, errors = $6::jsonb,
+         deleted_paths = $7::jsonb
      WHERE id = $1`,
-    [id, status, filesSynced, filesDeleted, linksResolved, JSON.stringify(errors)]
+    [
+      id,
+      status,
+      filesSynced,
+      filesDeleted,
+      linksResolved,
+      JSON.stringify(errors),
+      JSON.stringify(deletedPaths),
+    ]
   );
 }
 
@@ -45,7 +56,7 @@ export async function getLatestObsidianSyncRun(
 ): Promise<ObsidianSyncRun | null> {
   const result = await pool.query(
     `SELECT id, started_at, finished_at, status, files_synced, files_deleted,
-            links_resolved, errors
+            links_resolved, errors, deleted_paths
      FROM obsidian_sync_runs
      ORDER BY started_at DESC LIMIT 1`
   );
@@ -60,6 +71,7 @@ export async function getLatestObsidianSyncRun(
     files_deleted: row.files_deleted as number,
     links_resolved: row.links_resolved as number,
     errors: row.errors as Array<{ file: string; error: string }>,
+    deleted_paths: (row.deleted_paths as string[]) ?? [],
   };
 }
 
@@ -130,31 +142,34 @@ export async function upsertObsidianArtifact(
   return result.rows[0].id;
 }
 
-/** Soft-delete obsidian artifacts not in the active keys list */
+/**
+ * Soft-delete obsidian artifacts not in the active keys list.
+ * Returns the source_paths that were deleted (so callers can audit / classify
+ * conflict siblings vs canonicals — see runObsidianSync).
+ */
 export async function softDeleteMissingObsidianArtifacts(
   pool: pg.Pool,
   activeKeys: string[]
-): Promise<number> {
+): Promise<string[]> {
   if (activeKeys.length === 0) {
-    // All files removed — soft-delete everything
-    const result = await pool.query(
+    const result = await pool.query<{ source_path: string }>(
       `UPDATE knowledge_artifacts
        SET deleted_at = NOW(), embedding = NULL
        WHERE source = 'obsidian' AND deleted_at IS NULL
-       RETURNING id`
+       RETURNING source_path`
     );
-    return result.rowCount ?? 0;
+    return result.rows.map((r) => r.source_path).filter((p): p is string => !!p);
   }
-  const result = await pool.query(
+  const result = await pool.query<{ source_path: string }>(
     `UPDATE knowledge_artifacts
      SET deleted_at = NOW(), embedding = NULL
      WHERE source = 'obsidian'
        AND deleted_at IS NULL
        AND NOT (source_path = ANY($1::text[]))
-     RETURNING id`,
+     RETURNING source_path`,
     [activeKeys]
   );
-  return result.rowCount ?? 0;
+  return result.rows.map((r) => r.source_path).filter((p): p is string => !!p);
 }
 
 /** Get counts for sync status */

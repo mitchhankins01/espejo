@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.espejo.vault-fs.eslogger</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/mitch/Projects/espejo/scripts/vault-fs/run-eslogger.sh</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>/Users/mitch</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>VAULT_FS_ROOT</key>
+    <string>/Users/mitch/Documents/Artifacts</string>
+  </dict>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/mitch/Projects/espejo</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <key>UserName</key>
+  <string>root</string>
+
+  <key>StandardOutPath</key>
+  <string>/var/log/espejo-vault-fs-eslogger.stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/var/log/espejo-vault-fs-eslogger.stderr.log</string>
+</dict>
+</plist>

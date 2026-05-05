@@ -1779,6 +1779,40 @@ const migrations: Migration[] = [
           ON chat_messages (chat_id, flow, created_at DESC);
     `,
   },
+  // Migration 052: vault FS observability
+  // - obsidian_sync_runs.deleted_paths captures which paths got soft-deleted (not just count).
+  // - vault_fs_events ingests local FS events from fswatch / eslogger so we can correlate
+  //   "Mitch's rm at T1" with "Remotely Save dropped canonical at T2". Diagnostic for
+  //   the recurring "canonical lost after conflict cleanup" failure mode.
+  {
+    name: "052-vault-fs-observability",
+    getSql: () => `
+      ALTER TABLE obsidian_sync_runs
+        ADD COLUMN IF NOT EXISTS deleted_paths JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+      CREATE TABLE IF NOT EXISTS vault_fs_events (
+          id BIGSERIAL PRIMARY KEY,
+          ts TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          source TEXT NOT NULL,
+          event_type TEXT NOT NULL,
+          path TEXT NOT NULL,
+          process_name TEXT,
+          pid INTEGER,
+          ppid INTEGER,
+          raw JSONB,
+          CONSTRAINT vault_fs_events_source_check
+              CHECK (source IN ('fswatch', 'eslogger', 'manual')),
+          CONSTRAINT vault_fs_events_event_type_check
+              CHECK (event_type IN ('create', 'unlink', 'rename', 'modify', 'other'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_vault_fs_events_ts
+          ON vault_fs_events (ts DESC);
+      CREATE INDEX IF NOT EXISTS idx_vault_fs_events_path_ts
+          ON vault_fs_events (path, ts DESC);
+      CREATE INDEX IF NOT EXISTS idx_vault_fs_events_event_ts
+          ON vault_fs_events (event_type, ts DESC);
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {
