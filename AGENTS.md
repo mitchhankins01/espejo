@@ -85,6 +85,7 @@ src/
       content-search.ts — Unified cross-type search.
       obsidian.ts   — Obsidian vault sync queries.
       usage.ts      — Universal usage_logs writer (logUsage helper).
+      vault-fs.ts   — vault_fs_events writer (FS-event audit log, fed by fswatch).
   tools/
     search.ts       — Hybrid RRF search. The most important tool.
     get-entry.ts    — Single entry by UUID.
@@ -153,9 +154,10 @@ src/
       hrv.ts        — HRV recovery patterns, rolling averages.
     types.ts        — TypeScript interfaces for stored Oura data.
   obsidian/
-    sync.ts         — Obsidian vault sync engine: R2 fetch + DB upserts + timer.
+    sync.ts         — Obsidian vault sync engine: R2 fetch + DB upserts + timer. Tripwire: notifyAlert when a non-conflict canonical soft-deletes.
     parser.ts       — Markdown frontmatter parser for Obsidian notes.
     wiki-links.ts   — Wiki-link parsing and resolution.
+    fs-event-parsers.ts — fswatch / eslogger event-line parsers for the vault-fs-watcher script.
   notifications/
     on-this-day.ts  — "On This Day" morning reflection notification.
   utils/
@@ -190,6 +192,8 @@ scripts/
   deploy-smoke.ts   — Post-deploy smoke test.
   telegram-setup.ts — Set/check/delete Telegram webhook.
   spec-plan.sh      — Wraps the planning workflow.
+  vault-fs-watcher.ts — Stdin reader → vault_fs_events. Parses fswatch (`-x`) lines or eslogger JSON, batches inserts. Run by the launchd agent in scripts/vault-fs/.
+  vault-fs/         — Launchd plists + wrapper scripts for the FS-event watchers (fswatch deployed; eslogger archived as Sequoia TCC dead-end).
   dedup/
     retrieve.ts     — Stage 1: hybrid RRF over Insight ∪ Pending, emits dedup-plan.json (pnpm dedup:retrieve).
     council.mjs     — Stage 2: fans out Claude/Gemini/GPT in parallel, chunks GPT, validates JSON (pnpm dedup:council).
@@ -489,6 +493,7 @@ Then `$PSQL "$PGURL"` + OpenAI embeddings API (`text-embedding-3-small` — same
   - OpenCode prompt history: `~/.local/state/opencode/prompt-history.jsonl`
 - **Slash commands need a session restart.** New `.claude/commands/*.md` files don't register until Claude Code reloads — `/name` returns "Unknown command" until then. Same for edits to existing command files (the body is read at registration time).
 - **`CLAUDE.md` is a symlink to `AGENTS.md`.** Edits to "CLAUDE.md" land in AGENTS.md and that's where `git diff` shows them. Edit AGENTS.md directly to avoid confusion.
+- **Vault FS forensics** (when Mitch asks "what happened with X.md" or reports a missing canonical / new ` 2.md` conflict copy): query in this order: (1) `obsidian_sync_runs.deleted_paths` — exact paths each R2→DB tick soft-deleted; (2) `vault_fs_events` (fed by an fswatch LaunchAgent on Mitch's Mac) for local FS create/unlink/modify/rename timing under `~/Documents/Artifacts`. The `process_name`/`pid`/`ppid` columns exist but stay null — eslogger-based attribution was abandoned (Sequoia TCC dead-end; see `scripts/vault-fs/README.md`). Bodies of soft-deleted artifacts remain in `knowledge_artifacts.body` for recovery; the Telegram tripwire in `src/obsidian/sync.ts` fires `notifyAlert` on canonical loss.
 
 ## Deep Docs
 
