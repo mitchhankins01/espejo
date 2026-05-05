@@ -82,6 +82,22 @@ export async function runPracticeExtraction(
     };
   }
 
+  // Null-session guard: if the user produced fewer than ~5 Spanish words
+  // total, the extractor LLM tends to return chain-of-thought prose instead
+  // of the JSON schema (because there is genuinely nothing to extract).
+  // Skip the call and report cleanly.
+  const userWordCount = messages
+    .filter((m) => m.role === "user")
+    .reduce((sum, m) => sum + m.content.trim().split(/\s+/).filter(Boolean).length, 0);
+  if (userWordCount < 5) {
+    return {
+      diffSummary:
+        `Null session (${userWordCount} user words across ${messages.length} messages) — no state changes.`,
+      messageCount: messages.length,
+      wrotePersisted: false,
+    };
+  }
+
   const currentBody = await getEspanolVivoBody(pool);
   if (!currentBody) {
     return {

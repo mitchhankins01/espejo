@@ -2,25 +2,27 @@
 
 > Back to [AGENTS.md](../AGENTS.md)
 
-A Telegram chatbot with pattern-based long-term memory and an evolving personality. Deployed to Railway, opt-in via `TELEGRAM_BOT_TOKEN`. Original design: `specs/telegram-chatbot-plan.md`.
+A Telegram bot that routes incoming messages to deterministic flows. Deployed to Railway, opt-in via `TELEGRAM_BOT_TOKEN`. Current architecture: `specs/2026-05-04-telegram-refactor-plan.md`. Earlier history: `specs/telegram-chatbot-plan.md`.
 
 **What it does:**
-- Conversational interface powered by Anthropic or OpenAI (configurable provider)
-- Uses MCP tools in the Telegram agent loop (journal retrieval + Spanish learning + Oura analytics + memory tools + todos)
-- Spanish language tutor: conducts conversations primarily in Spanish, corrects conjugation mistakes, tracks vocabulary with FSRS spaced repetition, and adapts difficulty based on real review performance
-- Redirects weight logging to the web Weight page (`/weight`) instead of MCP tool calls
-- Accepts text, voice, photo, and document messages (with OCR/text extraction for media)
-- Voice messages transcribed via OpenAI Whisper
-- Optionally responds with Telegram voice notes using adaptive/fallback rules
-- Stores long-term memory intentionally through `remember`/`save_chat`; compaction is summary + trim only
-- Logs activity per agent run (memories retrieved, tool calls with full results) in `activity_logs` table
+- Tiered router (`src/telegram/router.ts`) dispatches each message to the right flow:
+  - **Tier 1** — media classifiers (iOS Screen Time photo → `daily_screen_time`; RENPHO weight CSV → `log_weights` batch).
+  - **Tier 2** — extraction: voice → Whisper, photo → vision OCR, document → PDF/text.
+  - **Tier 3** — text routing: registered slashes → matching flow, active flow continuation, solo HN URL → distill, otherwise → chat flow.
+- Flows live in `src/telegram/flows/`. Each flow owns its persistence (`chat_messages.flow` column tags every row), so the chat flow can scope context to its own turns.
+- Cross-provider streaming via Vercel AI SDK (`src/llm/chat.ts`); Anthropic ephemeral cache markers on the system message.
 
 **Commands:**
-- `/evening` — Evening review mode: guided journaling session with somatic check-ins, system assessments (escalera, boundaries, attachment), and Spanish-primary conversation
-- `/morning` — Morning flow mode: free-flow morning journal session
-- `/compact` — Force conversation compaction summary (memory note)
-- `/digest` — Spanish learning summary: vocabulary stats, retention rates, grade/lapse trends, adaptive status tier, latest assessment
-- `/assess` — Trigger LLM-as-judge evaluation of recent Spanish conversation quality (complexity, grammar, vocabulary, code-switching ratio)
+- `/checkpoint [substance, body, part_voice, choice]` — start the 3-step Checkpoint Protocol flow. Pre-formed args (4+ comma segments) skip the turns and log immediately. Inserts into `checkpoints`.
+- `/practice` — start a Spanish practice session. End with `/done` (or `/end`/`/fin`) to trigger transcript extraction → Español Vivo update.
+- `/weight 78.2 [today|yesterday|YYYY-MM-DD|last monday|3 days ago]` — deterministic weight log; no LLM.
+- `/hilo` — start the Hilo Spanish-thread vault prompt (`Prompt/Spanish/Hilo.md`).
+- `/evening` — start the Evening Review vault prompt (`Prompt/Review/Evening.md`).
+- `/end` / `/done` / `/fin` / `/cancel` — close the active flow.
+
+Anything else falls through to the **chat flow**: Anthropic Sonnet, 12-message context cap (filtered to `flow IS NULL OR flow='chat'`), full read-only tool catalog (`search_content`, `search_artifacts`, `search_entries`, Oura tools, etc.) plus `write_vault_artifact` for new notes.
+
+**Pre-2026-05-04 features (removed in the refactor):** `/compact` slash + DB→DB compaction, `/morning`, `/digest`, `/assess`, voice-reply synthesis, callback-query inline buttons, `save_evening_review` tool, soul-state evolution, pulse-checks. Spanish learning analytics tables (`spanish_*`) are still in the schema but no longer driven by Telegram commands.
 
 ## Pattern Memory
 

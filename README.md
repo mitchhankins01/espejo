@@ -306,11 +306,14 @@ Observability across three tiers:
 
 | Command | Description |
 |---------|-------------|
-| `/morning` | Free-flow morning journal session |
-| `/evening` | Guided evening review with somatic check-ins |
-| `/compact` | Force compaction summary from recent conversation |
-| `/digest` | Spanish learning summary: vocab stats, retention, trends |
-| `/assess` | LLM-as-judge evaluation of recent Spanish conversation quality |
+| `/checkpoint` | Start the 3-step Checkpoint Protocol; logs into the `checkpoints` table |
+| `/practice` | Start a Spanish practice session; close with `/done` to extract Español Vivo updates |
+| `/weight 78.2 [date]` | Log a weight; date supports today/yesterday/YYYY-MM-DD/last monday/N days ago |
+| `/hilo` | Run the Hilo Spanish-thread vault prompt |
+| `/evening` | Run the Evening Review vault prompt |
+| `/end` / `/done` / `/fin` | Close the active flow |
+
+Anything else routes to the default chat flow (Anthropic Sonnet with full read tools + `write_vault_artifact`).
 
 ## REST API
 

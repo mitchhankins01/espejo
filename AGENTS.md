@@ -104,21 +104,35 @@ src/
     oura-correlate.ts — Pearson correlation between two health metrics.
     sync-obsidian-vault.ts — Trigger Obsidian vault sync from R2.
     get-obsidian-sync-status.ts — Obsidian vault sync status.
-    save-evening-review.ts — Save evening review as knowledge artifact.
+    write-vault-artifact.ts — Write a markdown file to the vault: R2 putObject + synchronous knowledge_artifacts upsert. Path whitelist (Pending/Insight/Review/Note/Project/Reference), frontmatter required, overwrite default false.
     log-weights.ts  — Upsert one or more daily body-weight measurements (single or batch).
+    log-checkpoint.ts — Insert a Checkpoint Protocol toll into the `checkpoints` table; 10-min DB tuple dedup, accepts optional `kind`.
     distill-hn-thread.ts — Distill a Hacker News thread (article + full Algolia comment tree) and email + save to Pending/Reference.
+  llm/              — Cross-provider abstraction over Vercel AI SDK + OpenAI SDK.
+    chat.ts         — chat({provider, model, system, messages, tools, onTextDelta, cacheSystem}) wrapper around streamText.
+    embed.ts        — embedText helper (OpenAI text-embedding-3-small).
+    transcribe.ts   — Whisper wrapper.
+    vision.ts       — Image / PDF text extraction.
+    tts.ts          — OpenAI TTS (synthesizeSpeech).
+    index.ts        — Re-exports.
   telegram/
-    webhook.ts      — Telegram webhook handler. Validates secret token, processes updates, routes commands.
+    webhook.ts      — Telegram webhook handler. Validates secret token, hands updates to router.
     updates.ts      — Update deduplication, per-chat queue, fragment reassembly.
-    agent.ts        — Agent orchestrator. Delegates to agent/ submodules.
-    agent/          — Agent internals, split from monolithic agent.ts.
-      constants.ts  — Token budgets, model defaults, retry limits.
-      context.ts    — System prompt + context building (oura, spanish).
-      tools.ts      — Tool dispatch and result formatting.
-      compaction.ts — Conversation compaction.
-      truncation.ts — Message truncation for context window management.
-    client.ts       — Telegram Bot API client. sendMessage/sendVoice, retry, chunking.
-    voice.ts        — Voice processing: Whisper transcription, TTS synthesis.
+    router.ts       — Tiered routing: Tier 1 media classifiers (screen-time, weight CSV) → Tier 2 extraction (voice/photo/doc → text) → Tier 3 dispatch (registered slashes, active flow, solo HN URL, default chat).
+    flow-state.ts   — Typed Map<chatId, FlowState> for in-memory per-chat flow state. Lost on restart by design.
+    flows/
+      checkpoint.ts — 3-step Checkpoint Protocol state machine + 1 Haiku mirror call at exit. Inserts into `checkpoints` table.
+      distill-hn.ts — Solo HN URL → distill_hn_thread tool. ~70 LOC.
+      weight-slash.ts — /weight value [today|yesterday|YYYY-MM-DD|last monday|N days ago] → log_weights.
+      weight-csv.ts — Tier-1 RENPHO CSV pre-router → log_weights batch.
+      practice.ts   — /practice + /done Spanish coach. Calls llm/chat() directly; extraction handled by practice-session.ts.
+      vault-prompt.ts — /hilo /evening generic vault-prompt runner. Loads body from knowledge_artifacts (R2 fallback), strips frontmatter, runs chat() with full read tools + write_vault_artifact.
+      chat.ts       — Default fallback. Anthropic Sonnet, 12-msg context cap (flow IS NULL OR flow='chat'), full read tools + write_vault_artifact, streams via chat() + createStreamEditor, prompt caching enabled.
+      tool-catalog.ts — Builds the AI-SDK ToolSet from spec handlers for chat + vault-prompt flows.
+    truncation.ts   — Tool-result truncation for chat_messages persistence.
+    practice-session.ts — Practice extraction (Claude call → JSON → R2 + DB upsert of Español Vivo).
+    client.ts       — Telegram Bot API client. sendMessage/sendVoice, retry, chunking, streaming editor.
+    voice.ts        — Voice transcription (Whisper). Synthesis path removed.
     media.ts        — Photo/document processing: vision, text/PDF extraction.
     evening-review.ts — Evening review and morning journal session prompts.
     soul.ts         — Soul state snapshot, evolution, system prompt building.
@@ -164,6 +178,7 @@ scripts/
   embed-entries.ts  — Batch embed all entries missing embeddings.
   ingest-sessions.ts — Ingest Claude Code / OpenCode / Codex session metadata into agent_sessions (pnpm ingest:sessions). See specs/agent-sessions-ingestor.md.
   ingest-activity.ts — Ingest ActivityWatch events into device_events, atuin shell history into usage_logs, Screenpipe OCR/audio chunks into screen_captures (pnpm ingest:activity). Args: --dry-run, --force, --since, --source <aw|atuin|screenpipe>, --skip-if-fresh 24h. See specs/2026-05-03-activity-capture-plan.md.
+  backfill-checkpoints.ts — One-time: parse Artifacts/Checkpoint/*.md from R2 into the `checkpoints` table. Idempotent via the dedup unique index. Default --dry-run; require --apply to mutate.
   import-lookups.ts — Bulk import Spanish verbs + Kindle lookups.
   write-tomo.ts     — Write the next Espejo tomo. Two-step flow: `--plan-only` emits 6 candidates (3 essay + 3 flow) saved to `books/next-plan.json`; `--pick=<1-6>` runs the writer with the chosen candidate. Flags: `--steer "..."`, `--bilingual` / `--no-bilingual`, `--share-julia` / `--no-share-julia`, `--fresh-plan`. See `Artifacts/Prompt/Spanish/Tomo.md`.
   condense-insights.ts — Periodic condensation pass over insights.
@@ -186,7 +201,7 @@ specs/
   tools.spec.ts     — Tool contracts: params, types, descriptions, examples.
   — Implemented:
   agent-sessions-ingestor.md, telegram-chatbot-plan.md, telegram-personality-plan.md,
-  self-healing-organism.md, episodic-memory.md, memory-v2.md,
+  self-healing-organism.md, 2026-05-04-telegram-refactor-plan.md,
   oura-integration-plan.md, knowledge-artifacts.md, insights-dedup-rewrite.md,
   insight-engine.md
   — Removed Features (specs kept for history; feature was removed in 2026-04):

@@ -132,8 +132,20 @@ describe("runPracticeExtraction", () => {
     expect(mockAnthropicCreate).not.toHaveBeenCalled();
   });
 
+  it("skips the LLM call when the user produced fewer than 5 words", async () => {
+    mockMessages([
+      { role: "user", content: "Bien" },
+      { role: "assistant", content: "¿Qué tal el día?" },
+    ]);
+    mockGetEspanolVivoBody.mockResolvedValue("state");
+    const result = await runPracticeExtraction("100", session);
+    expect(result.wrotePersisted).toBe(false);
+    expect(result.diffSummary).toContain("Null session");
+    expect(mockAnthropicCreate).not.toHaveBeenCalled();
+  });
+
   it("returns error state when the state file is missing", async () => {
-    mockMessages([{ role: "user", content: "hola" }]);
+    mockMessages([{ role: "user", content: "hola amigo, cómo estás hoy compañero" }]);
     mockGetEspanolVivoBody.mockResolvedValue(null);
 
     const result = await runPracticeExtraction("100", session);
@@ -143,7 +155,7 @@ describe("runPracticeExtraction", () => {
 
   it("writes updated state to R2 and Postgres on success", async () => {
     mockMessages([
-      { role: "user", content: "he siento cansado" },
+      { role: "user", content: "he siento cansado y un poco vacío hoy" },
       { role: "assistant", content: "(*me* siento — 'he' es auxiliar). ¿El cuerpo cómo lo siente?" },
     ]);
     mockGetEspanolVivoBody.mockResolvedValue("level: A2/B1\naudit_log:\n  - prior\n");
@@ -167,7 +179,7 @@ describe("runPracticeExtraction", () => {
   });
 
   it("handles unparseable JSON from the model", async () => {
-    mockMessages([{ role: "user", content: "hola" }]);
+    mockMessages([{ role: "user", content: "hola amigo, cómo estás hoy compañero" }]);
     mockGetEspanolVivoBody.mockResolvedValue("state");
     mockAnthropicCreate.mockResolvedValue({
       content: [{ type: "text", text: "not json at all" }],
@@ -180,7 +192,7 @@ describe("runPracticeExtraction", () => {
   });
 
   it("strips markdown code fences around JSON", async () => {
-    mockMessages([{ role: "user", content: "hola" }]);
+    mockMessages([{ role: "user", content: "hola amigo, cómo estás hoy compañero" }]);
     mockGetEspanolVivoBody.mockResolvedValue("state");
     mockAnthropicCreate.mockResolvedValue({
       content: [
@@ -196,7 +208,7 @@ describe("runPracticeExtraction", () => {
   });
 
   it("reports a non-destructive failure when R2 write fails", async () => {
-    mockMessages([{ role: "user", content: "hola" }]);
+    mockMessages([{ role: "user", content: "hola amigo, cómo estás hoy compañero" }]);
     mockGetEspanolVivoBody.mockResolvedValue("state");
     mockClaudeJsonReply({ updated_body: "x", diff_summary: "y" });
     mockPutObjectContent.mockRejectedValueOnce(new Error("R2 auth failed"));
@@ -207,7 +219,7 @@ describe("runPracticeExtraction", () => {
   });
 
   it("continues successfully even if Postgres mirror update fails", async () => {
-    mockMessages([{ role: "user", content: "hola" }]);
+    mockMessages([{ role: "user", content: "hola amigo, cómo estás hoy compañero" }]);
     mockGetEspanolVivoBody.mockResolvedValue("state");
     mockClaudeJsonReply({ updated_body: "new body", diff_summary: "summary" });
     mockUpsertObsidianArtifact.mockRejectedValueOnce(new Error("PG down"));
@@ -218,7 +230,7 @@ describe("runPracticeExtraction", () => {
   });
 
   it("rejects json with missing or non-string keys", async () => {
-    mockMessages([{ role: "user", content: "hola" }]);
+    mockMessages([{ role: "user", content: "hola amigo, cómo estás hoy compañero" }]);
     mockGetEspanolVivoBody.mockResolvedValue("state");
     mockAnthropicCreate.mockResolvedValue({
       content: [{ type: "text", text: JSON.stringify({ updated_body: 123, diff_summary: "x" }) }],
