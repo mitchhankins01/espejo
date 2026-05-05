@@ -73,6 +73,7 @@ async function main(): Promise<void> {
 
   const queue: VaultFsEventInput[] = [];
   let flushing = false;
+  let shuttingDown = false;
   let totalWritten = 0;
   let totalDropped = 0;
 
@@ -94,6 +95,28 @@ async function main(): Promise<void> {
     void flush();
   }, BATCH_INTERVAL_MS);
 
+  // Single shutdown path. readline's close event AND SIGTERM both fire when
+  // launchd kills the process; calling pool.end() twice throws. Guard with
+  // shuttingDown so whichever fires first wins.
+  async function shutdown(): Promise<void> {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    clearInterval(interval);
+    await flush();
+    console.error(
+      `[vault-fs-watcher] stream closed: source=${source} written=${totalWritten} dropped=${totalDropped}`
+    );
+    try {
+      await pool.end();
+    } catch (err) {
+      // Ignore double-end / already-closed; log anything else.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!msg.includes("more than once") && !msg.includes("already")) {
+        console.error("[vault-fs-watcher] pool.end failed:", err);
+      }
+    }
+  }
+
   const rl = readline.createInterface({
     input: process.stdin,
     crlfDelay: Infinity,
@@ -112,13 +135,12 @@ async function main(): Promise<void> {
     if (queue.length >= BATCH_MAX_SIZE) void flush();
   });
 
-  rl.on("close", async () => {
-    clearInterval(interval);
-    await flush();
-    console.error(
-      `[vault-fs-watcher] stream closed: source=${source} written=${totalWritten} dropped=${totalDropped}`
-    );
-    await pool.end();
+  rl.on("close", () => {
+    void shutdown().then(() => {
+      // Stream closing is the watcher's terminal state; let the process exit
+      // cleanly so launchd respects ThrottleInterval and doesn't see a crash.
+      process.exit(0);
+    });
   });
 
   // Periodic stats so the launchd log shows we're alive.
@@ -129,11 +151,8 @@ async function main(): Promise<void> {
   }, 5 * 60_000).unref();
 
   for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
-    process.on(sig, async () => {
-      clearInterval(interval);
-      await flush();
-      await pool.end();
-      process.exit(0);
+    process.on(sig, () => {
+      void shutdown().then(() => process.exit(0));
     });
   }
 }
