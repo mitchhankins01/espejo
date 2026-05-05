@@ -49,10 +49,12 @@ export function isVaultPromptCommand(name: string): boolean {
 }
 
 const PROMPT_PREAMBLE =
-  "You are running this prompt via Telegram. Your output renders as Telegram " +
-  "HTML — no markdown code blocks for prose. Use the read tools for context " +
-  "and `write_vault_artifact` for vault writes; if a write fails, fall back " +
-  "to printing the file content in chat with a note to paste manually.";
+  "You are running this prompt via Telegram. Your output renders as Telegram HTML.\n" +
+  "Formatting rules — these override anything the prompt body says about markdown:\n" +
+  "- Emphasis: <i>text</i> for italic, <b>text</b> for bold. NEVER use *text*, _text_, **text**, __text__, or backtick code spans for emphasis — they render as literal characters in the chat.\n" +
+  "- Headings/lists/horizontal rules: don't use markdown syntax (#, -, ---). Use plain line breaks and short labeled paragraphs instead.\n" +
+  "- Code: only use a fenced code block when the content really is code; never wrap prose in backticks.\n" +
+  "- Use the read tools for context and `write_vault_artifact` for vault writes; if a write fails, fall back to printing the file content in chat with a note to paste manually.";
 
 function stripFrontmatter(body: string): string {
   if (!body.startsWith("---")) return body;

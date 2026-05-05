@@ -178,21 +178,25 @@ async function routeText(
   // Registered slashes always reset state and dispatch.
   if (command && REGISTERED_SLASHES.has(command.name)) {
     if (END_FLOW_ALIASES.has(command.name)) {
-      // /done /end /fin /cancel etc. Try practice first, then vault-prompt,
-      // then any other flow.
-      const ended = await endPracticeFlow({ pool: ctx.pool, chatId });
-      if (ended.ended) return;
-      const endedVault = endVaultPromptFlow(chatId);
-      if (endedVault) {
+      // /done /end /fin /cancel etc. Peek the active flow first — each
+      // close handler clears state, so dispatching to the wrong one would
+      // wipe the flow before its real close handler runs.
+      const peek = getFlow(chatId);
+      if (peek?.flow === "practice") {
+        await endPracticeFlow({ pool: ctx.pool, chatId });
+        return;
+      }
+      if (peek?.flow === "vault-prompt") {
+        endVaultPromptFlow(chatId);
         await sendTelegramMessage(chatId, "Sesión cerrada.");
         return;
       }
-      // Generic close — clear any flow.
-      const cleared = clearFlow(chatId);
-      const reply = cleared
-        ? "Sesión cerrada."
-        : "No hay sesión activa.";
-      await sendTelegramMessage(chatId, reply);
+      if (peek) {
+        clearFlow(chatId);
+        await sendTelegramMessage(chatId, "Sesión cerrada.");
+        return;
+      }
+      await sendTelegramMessage(chatId, "No hay sesión activa.");
       return;
     }
     // Other registered slashes — clear any flow that isn't matching.
