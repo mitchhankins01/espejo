@@ -31,7 +31,7 @@ import {
   isVaultPromptCommand,
   startVaultPromptFlow,
   continueVaultPromptFlow,
-  endVaultPromptFlow,
+  closeVaultPromptFlow,
 } from "./flows/vault-prompt.js";
 import { runChatFlow } from "./flows/chat.js";
 
@@ -187,8 +187,13 @@ async function routeText(
         return;
       }
       if (peek?.flow === "vault-prompt") {
-        endVaultPromptFlow(chatId);
-        await sendTelegramMessage(chatId, "Sesión cerrada.");
+        await closeVaultPromptFlow({
+          pool: ctx.pool,
+          chatId,
+          externalMessageId,
+          state: peek,
+          rawCommand: text,
+        });
         return;
       }
       if (peek) {

@@ -328,7 +328,59 @@ async function runVaultPromptTurn(params: {
   });
 }
 
-export function endVaultPromptFlow(chatId: string): boolean {
-  const existing = clearFlow(chatId);
-  return existing?.flow === "vault-prompt";
+const CLOSE_MARKER =
+  "[Session ended by user. This is your final turn — no further user input is coming. " +
+  "Run the prompt's closing phase (mirror, recap, summary as defined in the prompt body). " +
+  "Then write any artifacts the prompt instructs — make the save decision yourself based on " +
+  "the conversation's texture; do NOT ask the user. The prompt's own recommendation logic still " +
+  "applies for picking which artifact(s), you just decide without confirming. Use " +
+  "write_vault_artifact for vault writes. Output the closing message after the writes complete.]";
+
+export async function closeVaultPromptFlow(params: {
+  pool: pg.Pool;
+  chatId: string;
+  externalMessageId: string | null;
+  state: VaultPromptFlowState;
+  rawCommand: string;
+}): Promise<void> {
+  const { pool, chatId, externalMessageId, state, rawCommand } = params;
+  const def = VAULT_PROMPTS[state.name];
+  if (!def) {
+    clearFlow(chatId);
+    return;
+  }
+
+  await insertChatMessage(pool, {
+    chatId,
+    externalMessageId,
+    role: "user",
+    content: rawCommand,
+    flow: FLOW_NAME,
+  });
+
+  const body = await loadPromptBody(pool, def.sourcePath);
+  if (!body) {
+    clearFlow(chatId);
+    await sendTelegramMessage(
+      chatId,
+      "Vault prompt body unavailable; ending session without save."
+    );
+    return;
+  }
+
+  state.conversation.push({ role: "user", content: CLOSE_MARKER });
+  setFlow(chatId, state);
+
+  try {
+    await runVaultPromptTurn({
+      pool,
+      chatId,
+      state,
+      promptBody: body,
+      model: def.model,
+      userText: CLOSE_MARKER,
+    });
+  } finally {
+    clearFlow(chatId);
+  }
 }
