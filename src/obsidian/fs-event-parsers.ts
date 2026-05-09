@@ -22,16 +22,41 @@ const SKIP_PATH_FRAGMENTS = [
   "/.DS_Store",
 ];
 
+const REAL_ACTION_FLAGS = new Set([
+  "Created",
+  "Updated",
+  "Removed",
+  "Renamed",
+  "MovedFrom",
+  "MovedTo",
+]);
+
+const KNOWN_FSWATCH_FLAGS = new Set([
+  ...REAL_ACTION_FLAGS,
+  "OwnerModified",
+  "AttributeModified",
+  "XattrModified",
+  "IsFile",
+  "IsDir",
+  "IsSymLink",
+  "Link",
+  "PlatformSpecific",
+  "NoOp",
+  "Overflow",
+]);
+
 export function shouldSkipVaultPath(absPath: string, vaultRoot: string): boolean {
   if (!absPath.startsWith(vaultRoot)) return true;
   return SKIP_PATH_FRAGMENTS.some((frag) => absPath.includes(frag));
 }
 
 /**
- * fswatch -x emits "PATH FLAG1 FLAG2 ...". Flags are CamelCase. Map to
- * eventType in priority Removed > Renamed > Created > Updated. Drop:
- *   - directory Updated events (chatty noise)
- *   - xattr-only / owner-only modifications
+ * fswatch -x emits "PATH FLAG1 FLAG2 ...". Flags are a fixed set of
+ * CamelCase tokens; we whitelist them so paths with capitalized words
+ * (e.g. "Tapioles Rental Dispute.md") aren't misparsed as flags. Map to
+ * eventType in priority Removed > Renamed/MovedFrom/MovedTo > Created >
+ * Updated. Drop events with no real-action flag (xattr/owner/attribute
+ * modifications are filesystem metadata noise we don't care about).
  */
 export function parseFswatchLine(
   line: string,
@@ -41,30 +66,28 @@ export function parseFswatchLine(
   if (!trimmed) return null;
   const tokens = trimmed.split(/\s+/);
   let flagStart = tokens.length;
-  while (flagStart > 0 && /^[A-Z][a-zA-Z]+$/.test(tokens[flagStart - 1])) {
+  while (flagStart > 0 && KNOWN_FSWATCH_FLAGS.has(tokens[flagStart - 1])) {
     flagStart--;
   }
   if (flagStart === tokens.length || flagStart === 0) return null;
   const absPath = tokens.slice(0, flagStart).join(" ");
   const flags = tokens.slice(flagStart);
   if (shouldSkipVaultPath(absPath, vaultRoot)) return null;
+  if (!flags.some((f) => REAL_ACTION_FLAGS.has(f))) return null;
 
   let eventType: VaultFsEventType;
   if (flags.includes("Removed")) eventType = "unlink";
-  else if (flags.includes("Renamed")) eventType = "rename";
+  else if (
+    flags.includes("Renamed") ||
+    flags.includes("MovedFrom") ||
+    flags.includes("MovedTo")
+  )
+    eventType = "rename";
   else if (flags.includes("Created")) eventType = "create";
   else if (flags.includes("Updated")) eventType = "modify";
   else eventType = "other";
 
-  const isDir = flags.includes("IsDir");
-  if (eventType === "modify" && isDir) return null;
-  if (
-    flags.length === 1 &&
-    (flags[0] === "OwnerModified" ||
-      flags[0] === "AttributeModified" ||
-      flags[0] === "XattrModified")
-  )
-    return null;
+  if (eventType === "modify" && flags.includes("IsDir")) return null;
 
   return {
     source: "fswatch",

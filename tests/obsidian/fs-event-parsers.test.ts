@@ -50,6 +50,15 @@ describe("parseFswatchLine", () => {
     expect(parseFswatchLine(line, ROOT)?.eventType).toBe("rename");
   });
 
+  it("parses MovedFrom / MovedTo as rename", () => {
+    expect(
+      parseFswatchLine(`${ROOT}/Note/Bar.md MovedFrom IsFile`, ROOT)?.eventType
+    ).toBe("rename");
+    expect(
+      parseFswatchLine(`${ROOT}/Note/Bar.md MovedTo IsFile`, ROOT)?.eventType
+    ).toBe("rename");
+  });
+
   it("parses an updated file as modify", () => {
     const line = `${ROOT}/Note/Bar.md Updated IsFile`;
     expect(parseFswatchLine(line, ROOT)?.eventType).toBe("modify");
@@ -77,6 +86,33 @@ describe("parseFswatchLine", () => {
     expect(parseFswatchLine(line, ROOT)).toBeNull();
   });
 
+  it("drops AttributeModified noise on files (Spotlight, Finder tags, etc.)", () => {
+    expect(
+      parseFswatchLine(`${ROOT}/Note/Foo.md IsFile AttributeModified`, ROOT)
+    ).toBeNull();
+    expect(
+      parseFswatchLine(
+        `${ROOT}/Note/Foo.md IsFile AttributeModified PlatformSpecific`,
+        ROOT
+      )
+    ).toBeNull();
+  });
+
+  it("drops AttributeModified noise on directories", () => {
+    expect(
+      parseFswatchLine(`${ROOT}/Note AttributeModified IsDir`, ROOT)
+    ).toBeNull();
+  });
+
+  it("does not eat capitalized path words as flags (Tapioles Rental Dispute bug)", () => {
+    const line = `${ROOT}/Project/Tapioles Rental Dispute/Tapioles Rental Dispute.md Updated IsFile`;
+    const e = parseFswatchLine(line, ROOT);
+    expect(e?.path).toBe(
+      `${ROOT}/Project/Tapioles Rental Dispute/Tapioles Rental Dispute.md`
+    );
+    expect(e?.eventType).toBe("modify");
+  });
+
   it("drops paths outside the vault root", () => {
     const line = `/tmp/elsewhere.md Removed IsFile`;
     expect(parseFswatchLine(line, ROOT)).toBeNull();
@@ -96,9 +132,9 @@ describe("parseFswatchLine", () => {
     expect(parseFswatchLine(`${ROOT}/Note/foo.md`, ROOT)).toBeNull();
   });
 
-  it("falls through to 'other' when flag is unrecognized", () => {
+  it("returns null when no real-action flag is present", () => {
     const line = `${ROOT}/Note/Foo.md SomeNewFlag IsFile`;
-    expect(parseFswatchLine(line, ROOT)?.eventType).toBe("other");
+    expect(parseFswatchLine(line, ROOT)).toBeNull();
   });
 });
 
