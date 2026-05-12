@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "fs/promises";
 import { existsSync } from "fs";
+import type { Domain } from "./planner.js";
 
 const HISTORY_PATH = "books/history.json";
 
@@ -7,19 +8,10 @@ const HISTORY_PATH = "books/history.json";
 // tomos write only "essay" or "flow". Keep the broader union so old rows parse.
 export type TomoFormat = "essay" | "flow" | "myth" | "fiction";
 
-export type TomoDomain =
-  | "neuroscience"
-  | "cognition"
-  | "psychology"
-  | "philosophy"
-  | "hermeticism"
-  | "physics"
-  | "psychedelics"
-  | "ai"
-  | "robotics"
-  | "technology"
-  | "mythology"
-  | "none";
+// Legacy domains appear in older history rows but are no longer valid choices
+// for new tomos. The planner's current enum lives in planner.ts → DOMAINS.
+type LegacyTomoDomain = "robotics" | "technology" | "mythology";
+export type TomoDomain = Domain | LegacyTomoDomain;
 
 export interface TomoRecord {
   n: number;

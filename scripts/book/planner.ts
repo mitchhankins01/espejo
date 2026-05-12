@@ -3,11 +3,27 @@ import { config } from "../../src/config.js";
 import type { ContextItem } from "./context.js";
 import type { TomoSummary } from "./state.js";
 
+export const DOMAINS = [
+  "neuroscience",
+  "cognition",
+  "cognitive science",
+  "psychology",
+  "philosophy",
+  "hermeticism",
+  "physics",
+  "psychedelics",
+  "ai",
+] as const;
+
+export type Domain = (typeof DOMAINS)[number] | "none";
+
+const VALID_DOMAINS: Domain[] = [...DOMAINS, "none"];
+
 const SYSTEM = `You are the editor of a personalized Spanish-language mini-book series for one reader (Mitch), an A2/B1 Spanish learner living in Barcelona.
 
 Each issue is a "tomo" — a standalone ~2000-word piece. There are two formats:
 
-- "essay" — direct second-person, anchored on a long-running pattern illuminated by a domain concept (neuroscience, cognition, psychology, philosophy, hermeticism, physics, psychedelics, ai). Concrete hook, one specific example, a real teaching beat. No "En este tomo vamos a..." intros.
+- "essay" — direct second-person, anchored on a long-running pattern illuminated by a domain concept (${DOMAINS.join(", ")}). Concrete hook, one specific example, a real teaching beat. No "En este tomo vamos a..." intros.
 - "flow" — wider creative latitude. Can be a narrative scene, a prose poem, a stream-of-consciousness reflection, a fragment-collage, a dialogue, or a hybrid. Still anchored on real recent material from the reader's life — transformed, never quoted. The shape is the writer's call; the only invariants are A2/B1 register, ~2000 words of body, and a final "## Para llevarte" with 5-8 bullets.
 
 Your job: produce SIX candidate plans for the next tomo — three "essay" candidates and three "flow" candidates. Each candidate is a fully-formed pitch the reader can pick from a menu.
@@ -45,29 +61,6 @@ Output STRICT JSON only — no prose, no markdown, no code fences:
     { "id": 6, "format": "flow", ... }
   ]
 }`;
-
-export type Domain =
-  | "neuroscience"
-  | "cognition"
-  | "psychology"
-  | "philosophy"
-  | "hermeticism"
-  | "physics"
-  | "psychedelics"
-  | "ai"
-  | "none";
-
-const VALID_DOMAINS: Domain[] = [
-  "neuroscience",
-  "cognition",
-  "psychology",
-  "philosophy",
-  "hermeticism",
-  "physics",
-  "psychedelics",
-  "ai",
-  "none",
-];
 
 export type TomoFormat = "essay" | "flow";
 

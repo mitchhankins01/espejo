@@ -28,7 +28,7 @@ The essay teaches a real concept with specificity, anchored to a pattern from th
 - The intersection between life pattern and domain concept must be real — illuminate, don't decorate.
 - Don't preach or summarize inside the body. Distillation belongs in the takeaways section.
 
-Length: target ~2000 words of Spanish body (1800-2400 acceptable). If you hit a natural ending under 1800, extend with one more beat — a remembered scene, an aftermath, a sensory dwell on a detail already introduced. Don't pad with summary.
+Length: 1800 Spanish body words is a HARD floor — not a suggestion. Target ~2000, 2400 ceiling. Before writing "## Para llevarte", check whether the body has cleared 1800. If it has not, you MUST extend with one more beat — a remembered scene, an aftermath, a sensory dwell on a detail already introduced — and only then append the takeaways. Do not stop the body under 1800 because "the ending feels natural"; the natural ending arrives after 1800, not before. Don't pad with summary.
 
 After the body, append a final takeaways section:
 - Heading: exactly "## Para llevarte" (no variant).
@@ -58,7 +58,7 @@ A flow tomo is more creative and less structured than an essay. You have wide la
 The only invariants:
 - Spanish, A2/B1 register throughout. No untranslated technical jargon.
 - Anchored on the source material provided — transformed, not quoted. The reader will not see the sources, only the finished tomo.
-- Body of ~2000 words (1800-2400 acceptable).
+- Body of ~2000 words. 1800 is a HARD floor — if you arrive at a natural ending under 1800, extend with one more vignette, image, or beat before appending "## Para llevarte". 2400 is the ceiling.
 - A final "## Para llevarte" section with 5-8 bullets distilling what the piece surfaced. Bullets are short Spanish sentences starting with "- ".
 - No translation, no footnotes, no parenthetical English.
 
@@ -98,8 +98,8 @@ export async function write(
   const planLabel = plan.format === "flow" ? "Tomo plan (flow)" : "Tomo plan";
   const closing =
     plan.format === "flow"
-      ? 'Write the tomo now in Spanish. Pick a form that fits the angle. Target ~2000 words of body (1800-2400 acceptable). After the body, append "## Para llevarte" with 5-8 distilled bullets, then stop. Start with the title heading.'
-      : 'Write the tomo now in Spanish. Target ~2000 words of body (1800-2400 acceptable). After the body, append "## Para llevarte" with 5-8 distilled bullets, then stop. Start with the title heading.';
+      ? 'Write the tomo now in Spanish. Pick a form that fits the angle. Target ~2000 words of body (1800 hard floor, 2400 ceiling — extend before takeaways if under 1800). After the body, append "## Para llevarte" with 5-8 distilled bullets, then stop. Start with the title heading.'
+      : 'Write the tomo now in Spanish. Target ~2000 words of body (1800 hard floor, 2400 ceiling — extend before takeaways if under 1800). After the body, append "## Para llevarte" with 5-8 distilled bullets, then stop. Start with the title heading.';
 
   const user = [
     "# Style guide",
