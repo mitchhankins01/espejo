@@ -18,11 +18,12 @@ import { join } from 'path';
 import { spawn } from 'child_process';
 import OpenAI from 'openai';
 import 'dotenv/config';
+import { config } from '../src/config.js';
 
 const INSIGHT_DIR = 'Artifacts/Insight';
 const PREVIEW_DIR = '/tmp/condense-preview';
 const PREVIEW_MD = join(PREVIEW_DIR, 'preview.md');
-const MODEL = 'gpt-4o';
+const MODEL = config.models.openaiCondense;
 const CONCURRENCY = 10;
 
 const apply = process.argv.includes('--apply');

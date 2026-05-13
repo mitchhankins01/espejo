@@ -24,7 +24,7 @@ export async function extractTextFromImage(
     : "Extract all readable text from this image.";
 
   const response = await getOpenAI().chat.completions.create({
-    model: opts.model ?? "gpt-4.1",
+    model: opts.model ?? config.models.openaiVision,
     messages: [
       {
         role: "user",

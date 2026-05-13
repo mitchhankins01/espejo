@@ -60,6 +60,11 @@ function readEnvFile(path) {
 }
 const env = { ...readEnvFile(".env"), ...readEnvFile(".env.production.local"), ...process.env };
 
+// Model ids — overridable via env, mirrors defaults in src/config.ts (config.models.dedupCouncil*)
+const CLAUDE_MODEL = env.DEDUP_COUNCIL_CLAUDE_MODEL || "claude-opus-4-7";
+const GEMINI_MODEL = env.DEDUP_COUNCIL_GEMINI_MODEL || "gemini-2.5-pro";
+const GPT_MODEL = env.DEDUP_COUNCIL_GPT_MODEL || "gpt-5.5";
+
 // ─── wrapper prompt ─────────────────────────────────────────────────────────
 
 // Read Parts.md verbatim so the classifier can resolve part-name aliases
@@ -147,7 +152,7 @@ async function legClaude() {
   const input = buildInput(plan.plan);
   console.error("[council] claude: launching (full batch)");
   const r = await runProc("claude", [
-    "-p", "--model", "claude-opus-4-7", "--dangerously-skip-permissions", input,
+    "-p", "--model", CLAUDE_MODEL, "--dangerously-skip-permissions", input,
   ], null);
   writeFileSync(`${outDir}/claude.raw.txt`, r.stdout);
   if (r.code !== 0) return { ok: false, error: r.stderr || `exit ${r.code}` };
@@ -168,7 +173,7 @@ async function legGemini() {
   });
   const r = await runProc("curl", [
     "-sS",
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${env.GEMINI_API_KEY}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${env.GEMINI_API_KEY}`,
     "-H", "Content-Type: application/json",
     "-d", "@-",
   ], body);
@@ -199,7 +204,7 @@ async function legGpt() {
     // JSON-out task and xhigh stalls past 15min on ~12-item chunks.
     const r = await runProc("codex", [
       "exec", "--skip-git-repo-check",
-      "-m", "gpt-5.5",
+      "-m", GPT_MODEL,
       "-c", "model_reasoning_effort=\"medium\"",
       input,
     ], null);

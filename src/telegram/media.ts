@@ -63,7 +63,7 @@ async function extractTextFromImageBuffer(
     : "Extract all readable text from this image.";
 
   const response = await getOpenAI().chat.completions.create({
-    model: "gpt-4.1",
+    model: config.models.openaiVision,
     messages: [
       {
         role: "user",

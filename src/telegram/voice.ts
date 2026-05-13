@@ -55,7 +55,7 @@ export async function transcribeVoiceMessage(
   // 3. Transcribe via Whisper
   const file = await toFile(buffer, "voice.ogg", { type: "audio/ogg" });
   const transcription = await getOpenAI().audio.transcriptions.create({
-    model: "whisper-1",
+    model: config.models.openaiTranscribe,
     file,
     response_format: "text",
   });

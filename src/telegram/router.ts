@@ -68,6 +68,7 @@ function parseSlashCommand(text: string): ParsedSlash | null {
 
 const REGISTERED_SLASHES = new Set<string>([
   "checkpoint",
+  "c",
   "practice",
   "weight",
   "hilo",
@@ -206,7 +207,7 @@ async function routeText(
     }
     // Other registered slashes — clear any flow that isn't matching.
     if (active && active.flow !== "vault-prompt") clearFlow(chatId);
-    if (command.name === "checkpoint") {
+    if (command.name === "checkpoint" || command.name === "c") {
       await startCheckpointFlow(
         { pool: ctx.pool, chatId, externalMessageId },
         command.argText
@@ -273,7 +274,7 @@ async function routeText(
   if (command && !REGISTERED_SLASHES.has(command.name) && !active) {
     await sendTelegramMessage(
       chatId,
-      "Unknown command — try /checkpoint /practice /hilo /evening /weight."
+      "Unknown command — try /c (or /checkpoint) /practice /hilo /evening /weight."
     );
     return;
   }

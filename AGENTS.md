@@ -107,7 +107,7 @@ src/
     get-obsidian-sync-status.ts — Obsidian vault sync status.
     write-vault-artifact.ts — Write a markdown file to the vault: R2 putObject + synchronous knowledge_artifacts upsert. Path whitelist (Pending/Insight/Review/Note/Project/Reference), frontmatter required, overwrite default false.
     log-weights.ts  — Upsert one or more daily body-weight measurements (single or batch).
-    log-checkpoint.ts — Insert a Checkpoint Protocol toll into the `checkpoints` table; 10-min DB tuple dedup, accepts optional `kind`.
+    log-checkpoint.ts — Insert a Checkpoint Protocol toll into the `checkpoints` table; 10-min DB tuple dedup, accepts optional `kind`. `choice` defaults to `go` (substance kind: passes are mental, never logged — convention since 2026-05-13).
     distill-hn-thread.ts — Distill a Hacker News thread (article + full Algolia comment tree) and email + save to Pending/Reference.
   llm/              — Cross-provider abstraction over Vercel AI SDK + OpenAI SDK.
     chat.ts         — chat({provider, model, system, messages, tools, onTextDelta, cacheSystem}) wrapper around streamText.
@@ -122,7 +122,7 @@ src/
     router.ts       — Tiered routing: Tier 1 media classifiers (screen-time, weight CSV) → Tier 2 extraction (voice/photo/doc → text) → Tier 3 dispatch (registered slashes, active flow, solo HN URL, default chat).
     flow-state.ts   — Typed Map<chatId, FlowState> for in-memory per-chat flow state. Lost on restart by design.
     flows/
-      checkpoint.ts — 3-step Checkpoint Protocol state machine + 1 Haiku mirror call at exit. Inserts into `checkpoints` table.
+      checkpoint.ts — 2-step Checkpoint Protocol state machine (`/checkpoint` and `/c` aliases) + 1 Haiku mirror call at exit. Inserts into `checkpoints` table; substance resolution defaults to `go` (per 2026-05-13 convention — passes are handled mentally, never logged).
       distill-hn.ts — Solo HN URL → distill_hn_thread tool. ~70 LOC.
       weight-slash.ts — /weight value [today|yesterday|YYYY-MM-DD|last monday|N days ago] → log_weights.
       weight-csv.ts — Tier-1 RENPHO CSV pre-router → log_weights batch.

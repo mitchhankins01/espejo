@@ -16,7 +16,6 @@ import {
 } from "../flow-state.js";
 
 const FLOW_NAME = "checkpoint";
-const MIRROR_MODEL = "claude-haiku-4-5-20251001";
 const MIRROR_FEATURE_ON = true;
 const DUPLICATE_WINDOW_MINUTES = 10;
 
@@ -41,6 +40,11 @@ function normalizeResolution(input: string): "pass" | "go" | "unset" {
   if (/^(go|went|fui|sí fui|si fui|did|used)$/.test(lower)) return "go";
   return "unset";
 }
+
+// Substance checkpoints are now always logged as "go" — Mitch handles passes
+// mentally and never triggers the flow for them. An explicit 4th segment can
+// still override (e.g. `/c trigger, body, voice, pass` if you really mean it).
+const DEFAULT_RESOLUTION = "go" as const;
 
 interface ParsedShortcutArgs {
   segments: string[];
@@ -84,7 +88,7 @@ async function generateMirrorLine(
   try {
     const client = new Anthropic({ apiKey: config.anthropic.apiKey });
     const response = await client.messages.create({
-      model: MIRROR_MODEL,
+      model: config.models.anthropicFast,
       max_tokens: 256,
       system:
         "Reflect Mitch's part in one sentence, in the part's own voice. " +
@@ -199,14 +203,19 @@ export async function startCheckpointFlow(
 
   const { segments } = parseShortcutArgs(argText);
 
-  // Pre-formed shortcut: 4+ segments → log immediately, skip turns.
-  if (segments.length >= 4) {
+  // Pre-formed shortcut: 3+ segments → log immediately, skip turns.
+  // 4th segment is an optional override; default resolution is "go".
+  if (segments.length >= 3) {
     const [trigger, body, partVoice, choice] = segments;
+    const resolution =
+      choice && normalizeResolution(choice) !== "unset"
+        ? normalizeResolution(choice)
+        : DEFAULT_RESOLUTION;
     await finalizeCheckpoint(deps, {
       trigger: trigger.trim(),
       bodySignal: body.trim(),
       partVoice: partVoice.trim(),
-      resolution: normalizeResolution(choice),
+      resolution,
       parserFallback: false,
     });
     return;
@@ -302,26 +311,26 @@ export async function continueCheckpointFlow(
       await persistAssistantTurn(deps, prompt);
       return;
     }
-    const next: CheckpointFlowState = {
-      flow: "checkpoint",
-      step: "awaiting_choice",
-      data: { ...state.data, part_voice: text.trim() },
-      startedAt: state.startedAt,
-    };
-    setFlow(deps.chatId, next);
-    const prompt = "Pass or go?";
-    await sendTelegramMessage(deps.chatId, prompt);
-    await persistAssistantTurn(deps, prompt);
+    // Part voice collected → finalize with the default "go" resolution.
+    // (Pass is mental, never logged.)
+    await finalizeCheckpoint(deps, {
+      trigger: state.data.trigger ?? "",
+      bodySignal: state.data.body_signal ?? null,
+      partVoice: text.trim(),
+      resolution: DEFAULT_RESOLUTION,
+      parserFallback: state.data.parser_fallback ?? false,
+    });
     return;
   }
 
   if (state.step === "awaiting_choice") {
-    const resolution = normalizeResolution(text);
+    // Legacy step — left here for any in-flight flows mid-restart. Treat any
+    // text as the part_voice if missing, otherwise just finalize as "go".
     await finalizeCheckpoint(deps, {
-      trigger: state.data.trigger ?? text.trim(),
+      trigger: state.data.trigger ?? "",
       bodySignal: state.data.body_signal ?? null,
-      partVoice: state.data.part_voice ?? null,
-      resolution,
+      partVoice: state.data.part_voice ?? text.trim(),
+      resolution: DEFAULT_RESOLUTION,
       parserFallback: state.data.parser_fallback ?? false,
     });
     return;

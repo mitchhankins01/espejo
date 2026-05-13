@@ -8,13 +8,14 @@ if (process.env.NODE_ENV === "production") {
 import pg from "pg";
 import OpenAI from "openai";
 import { stripSources } from "../src/obsidian/parser.js";
+import { config } from "../src/config.js";
 
 const databaseUrl =
   process.env.DATABASE_URL ||
   "postgresql://dev:dev@localhost:5434/journal_dev";
 
-const EMBEDDING_MODEL = "text-embedding-3-small";
-const EMBEDDING_DIMENSIONS = 1536;
+const EMBEDDING_MODEL = config.openai.embeddingModel;
+const EMBEDDING_DIMENSIONS = config.openai.embeddingDimensions;
 const BATCH_SIZE = 100;
 const SLEEP_MS = 1000;
 // text-embedding-3-small has an 8192 token limit (~32k chars is a safe estimate)

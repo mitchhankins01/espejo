@@ -26,10 +26,11 @@ import { normalize } from "path";
 import OpenAI from "openai";
 import "dotenv/config";
 import { pool } from "../../src/db/client.js";
+import { config } from "../../src/config.js";
 
 const INSIGHT_DIR = "Artifacts/Insight";
 const PENDING_DIR = "Artifacts/Pending";
-const EMBED_MODEL = "text-embedding-3-small";
+const EMBED_MODEL = config.openai.embeddingModel;
 const RRF_K = 60;
 const SEMANTIC_LIMIT = 20;
 const FULLTEXT_LIMIT = 20;

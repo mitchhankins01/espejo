@@ -12,6 +12,7 @@ vi.mock("../../src/config.js", () => ({
     telegram: { botToken: "123:ABC" },
     openai: { apiKey: "sk-test" },
     timezone: "Europe/Madrid",
+    models: { openaiVision: "gpt-4.1" },
   },
 }));
 

@@ -36,11 +36,11 @@ export interface VaultPromptDef {
 export const VAULT_PROMPTS: Record<string, VaultPromptDef> = {
   hilo: {
     sourcePath: "Prompt/Spanish/Hilo.md",
-    model: "claude-sonnet-4-6",
+    model: config.models.anthropicChat,
   },
   evening: {
     sourcePath: "Prompt/Review/Evening.md",
-    model: "claude-sonnet-4-6",
+    model: config.models.anthropicChat,
   },
 };
 

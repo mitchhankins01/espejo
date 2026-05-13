@@ -128,7 +128,7 @@ export async function extractScreenTimeJson(
   }));
 
   const response = await client.chat.completions.create({
-    model: "gpt-4.1",
+    model: config.models.openaiVision,
     response_format: { type: "json_object" },
     messages: [
       {

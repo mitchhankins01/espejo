@@ -12,6 +12,7 @@ vi.mock("../../src/config.js", () => ({
   config: {
     telegram: { botToken: "123:ABC" },
     openai: { apiKey: "sk-test", chatModel: "gpt-5-mini" },
+    models: { openaiVision: "gpt-4.1" },
   },
 }));
 

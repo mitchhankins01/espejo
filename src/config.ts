@@ -120,6 +120,21 @@ export const config = {
     apiKey: process.env.ANTHROPIC_API_KEY || "",
     model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6",
   },
+  models: {
+    anthropicChat: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6",
+    anthropicFast:
+      process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5-20251001",
+    anthropicDistill:
+      process.env.ANTHROPIC_DISTILL_MODEL || "claude-opus-4-7",
+    openaiVision: process.env.OPENAI_VISION_MODEL || "gpt-4.1",
+    openaiTranscribe: process.env.OPENAI_TRANSCRIBE_MODEL || "whisper-1",
+    openaiCondense: process.env.OPENAI_CONDENSE_MODEL || "gpt-4o",
+    dedupCouncilClaude:
+      process.env.DEDUP_COUNCIL_CLAUDE_MODEL || "claude-opus-4-7",
+    dedupCouncilGemini:
+      process.env.DEDUP_COUNCIL_GEMINI_MODEL || "gemini-2.5-pro",
+    dedupCouncilGpt: process.env.DEDUP_COUNCIL_GPT_MODEL || "gpt-5.5",
+  },
   oura: {
     accessToken: process.env.OURA_ACCESS_TOKEN || "",
     syncIntervalMinutes: ouraSyncIntervalMinutes,

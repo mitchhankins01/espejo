@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import type pg from "pg";
 import type { ModelMessage } from "ai";
+import { config } from "../../config.js";
 import {
   insertChatMessage,
   getRecentMessages,
@@ -26,7 +27,6 @@ import {
 } from "../practice-session.js";
 
 const FLOW_NAME = "practice";
-const PRACTICE_MODEL = "claude-haiku-4-5-20251001";
 const PRACTICE_MAX_TOKENS = 1024;
 const PRACTICE_CONTEXT_LIMIT = 14;
 
@@ -119,7 +119,7 @@ export async function continuePracticeFlow(params: {
   try {
     response = await chat({
       provider: "anthropic",
-      model: PRACTICE_MODEL,
+      model: config.models.anthropicFast,
       system,
       messages,
       maxTokens: PRACTICE_MAX_TOKENS,

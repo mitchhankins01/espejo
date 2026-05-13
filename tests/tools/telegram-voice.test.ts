@@ -14,6 +14,7 @@ vi.mock("../../src/config.js", () => ({
       voiceName: "alloy",
     },
     openai: { apiKey: "sk-test" },
+    models: { openaiTranscribe: "whisper-1" },
   },
 }));
 

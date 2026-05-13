@@ -21,7 +21,7 @@ export async function transcribeAudio(opts: TranscribeOptions): Promise<string> 
     type: opts.mimeType ?? "audio/ogg",
   });
   const transcription = await getOpenAI().audio.transcriptions.create({
-    model: opts.model ?? "whisper-1",
+    model: opts.model ?? config.models.openaiTranscribe,
     file,
     response_format: "text",
   });

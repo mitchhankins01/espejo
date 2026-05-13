@@ -2,7 +2,6 @@ import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../config.js";
 import { computeCost, type CostBreakdown, type TokenUsage } from "./pricing.js";
 
-const DISTILL_MODEL = "claude-opus-4-7";
 const MAX_OUTPUT_TOKENS = 4096;
 
 let cachedClient: Anthropic | null = null;
@@ -111,9 +110,10 @@ function buildUserMessage(input: DistillInput): string {
 export async function distillThread(input: DistillInput): Promise<DistillResult> {
   const anthropic = getAnthropic();
   const userMessage = buildUserMessage(input);
+  const model = config.models.anthropicDistill;
 
   const response = await anthropic.messages.create({
-    model: DISTILL_MODEL,
+    model,
     max_tokens: MAX_OUTPUT_TOKENS,
     system: SYSTEM_PROMPT,
     messages: [{ role: "user", content: userMessage }],
@@ -129,7 +129,7 @@ export async function distillThread(input: DistillInput): Promise<DistillResult>
     inputTokens: response.usage.input_tokens,
     outputTokens: response.usage.output_tokens,
   };
-  const cost = computeCost(DISTILL_MODEL, usage);
+  const cost = computeCost(model, usage);
 
-  return { markdown, model: DISTILL_MODEL, usage, cost };
+  return { markdown, model, usage, cost };
 }

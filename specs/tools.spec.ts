@@ -632,7 +632,8 @@ export const toolSpecs = {
       "Insert a Checkpoint Protocol toll into the `checkpoints` table. " +
       "Use the user's words verbatim where possible — don't sanitize 'Nic' to 'Nicotine' or compress texture out of the body/part_voice clauses. " +
       "If a near-identical toll was logged in the last 10 minutes the call returns a no-op. " +
-      "Optionally pass `kind` to log non-substance check-ins (defaults to 'substance').",
+      "Optionally pass `kind` to log non-substance check-ins (defaults to 'substance'). " +
+      "Since 2026-05-13 every logged substance toll is implicitly a 'go' — Mitch handles passes mentally and never asks for them to be logged. Default `choice` to 'go' for substance kind; do not infer a pass/go ratio from this table.",
     params: z.object({
       substance: z.string().min(1).describe(
         "The surface label the user gave (e.g. 'Nic', 'Weed', 'Nic & Weed'). Don't expand."
@@ -643,8 +644,11 @@ export const toolSpecs = {
       part_voice: z.string().min(1).describe(
         "What the part wants — one short clause, the user's words. e.g. 'post-Ritalin surf, keep moving'."
       ),
-      choice: z.enum(["pass", "go", "unset"]).default("unset").describe(
-        "Step-4 outcome, in the protocol's own language. 'pass' = ran the toll and didn't use the substance; 'go' = ran the toll then used (still a win — running the toll IS the win); 'unset' = no answer given. Never moralize."
+      choice: z.enum(["pass", "go", "unset"]).default("go").describe(
+        "Step-4 outcome, in the protocol's own language. " +
+          "Since 2026-05-13 Mitch handles passes mentally and only logs the gos, so the default is 'go' for substance kind — every logged substance toll is a use. " +
+          "Override to 'pass' only if you have explicit confirmation (e.g. the user said 'logged but passed'). " +
+          "'unset' = no answer given. Never moralize."
       ),
       kind: z.string().default("substance").describe(
         "Checkpoint kind. Defaults to 'substance'. Future: 'parts', 'energy', 'decision', 'gratitude'."
@@ -656,17 +660,17 @@ export const toolSpecs = {
           substance: "Nic",
           body: "head + flutter in stomach",
           part_voice: "post-Ritalin surf, keep moving",
-          choice: "pass",
         },
-        behavior: "Appends `- HH:MM Nic. head + flutter in stomach. post-Ritalin surf, keep moving. pass` to today's checkpoint log; creates file with frontmatter if first toll of the day",
+        behavior: "Inserts a substance row with resolution='go' (the new default since 2026-05-13)",
       },
       {
         input: {
           substance: "Weed",
           body: "chest pressure",
           part_voice: "wants to mellow",
+          choice: "go",
         },
-        behavior: "Defaults choice to 'unset', writes bullet ending in `(no answer)`",
+        behavior: "Explicit go — same effect as omitting choice",
       },
     ],
   },

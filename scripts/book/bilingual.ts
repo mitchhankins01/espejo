@@ -15,9 +15,7 @@ Rules:
 
 Example of correct ES↔EN pairing in body:
 
-Imagina que llevas años conduciendo por la misma ciudad. *Imagine you've spent years driving through the same city.*
-
-El mapa está en la cabeza — no tienes que pensar. *The map lives in your head — you don't have to think.*
+Imagina que llevas años conduciendo por la misma ciudad. *Imagine you've spent years driving through the same city.* El mapa está en la cabeza — no tienes que pensar. *The map lives in your head — you don't have to think.*
 
 Example for a Para llevarte bullet:
 

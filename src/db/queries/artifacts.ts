@@ -1,4 +1,5 @@
 import type pg from "pg";
+import { config } from "../../config.js";
 
 // ============================================================================
 // Knowledge artifact types
@@ -426,8 +427,10 @@ export async function updateArtifact(
 
   // Invalidate embedding if content changed
   if (contentChanged) {
+    paramIdx++;
     setClauses.push(`embedding = NULL`);
-    setClauses.push(`embedding_model = 'text-embedding-3-small'`);
+    setClauses.push(`embedding_model = $${paramIdx}`);
+    setParams.push(config.openai.embeddingModel);
   }
 
   const result = await pool.query(

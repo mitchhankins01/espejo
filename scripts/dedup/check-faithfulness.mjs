@@ -18,6 +18,8 @@ const SYNTH = process.argv[2];
 if (!SYNTH) { console.error("usage: check-merge-faithfulness.mjs <synthesis.json>"); process.exit(1); }
 const VAULT = "/Users/mitch/Projects/espejo/Artifacts";
 const THRESHOLD = 0.55;  // cosine sim under this is "novel"; tuned for paraphrase tolerance
+// Embedding model — overridable via env, mirrors default in src/config.ts (config.openai.embeddingModel)
+const EMBED_MODEL = process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small";
 
 // Read .env.production.local for OPENAI_API_KEY
 const envText = readFileSync("/Users/mitch/Projects/espejo/.env.production.local", "utf8");
@@ -52,7 +54,7 @@ async function embed(texts) {
   const res = await fetch("https://api.openai.com/v1/embeddings", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model: "text-embedding-3-small", input: texts }),
+    body: JSON.stringify({ model: EMBED_MODEL, input: texts }),
   });
   if (!res.ok) throw new Error(`embed failed ${res.status}: ${await res.text()}`);
   const json = await res.json();
