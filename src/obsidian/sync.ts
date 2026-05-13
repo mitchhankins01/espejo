@@ -27,6 +27,13 @@ function isConflictSiblingPath(path: string): boolean {
   return CONFLICT_PATH_REGEX.test(path);
 }
 
+// Ephemeral folders whose deletions are expected (dedup approvals move files out
+// of Pending/ into Insight/, leaving the old path soft-deleted on the next tick).
+const EPHEMERAL_PREFIXES = ["Pending/"];
+function isEphemeralPath(path: string): boolean {
+  return EPHEMERAL_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
+
 // ============================================================================
 // Constants
 // ============================================================================
@@ -160,7 +167,9 @@ export async function runObsidianSync(
     const activeKeys = mdFiles.map((obj) => obj.key);
     deletedPaths = await softDeleteMissingObsidianArtifacts(pool, activeKeys);
     filesDeleted = deletedPaths.length;
-    canonicalLossPaths = deletedPaths.filter((p) => !isConflictSiblingPath(p));
+    canonicalLossPaths = deletedPaths.filter(
+      (p) => !isConflictSiblingPath(p) && !isEphemeralPath(p)
+    );
     if (filesDeleted > 0) {
       console.log(`[obsidian-sync] Soft-deleted ${filesDeleted} artifacts (paths no longer in R2)`);
       if (canonicalLossPaths.length > 0) {
