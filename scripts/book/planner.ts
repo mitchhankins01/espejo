@@ -82,7 +82,6 @@ export interface PlannerOutput {
 const SOURCE_PREVIEW_CHARS = 700;
 
 export async function plan(
-  style: string,
   recentTomos: TomoSummary[],
   longArc: ContextItem[],
   recent: ContextItem[],
@@ -129,9 +128,6 @@ export async function plan(
     : [];
 
   const user = [
-    "# Style guide",
-    style,
-    "",
     "# Recent tomos — do not retread these topics/domains",
     recentTomosBlock,
     "",

@@ -75,10 +75,8 @@ Output format:
 
 export async function write(
   plan: Candidate,
-  style: string,
   context: ContextItem[],
   lookupsBlock = "",
-  grammarBlock = "",
   highlightsBlock = ""
 ): Promise<string> {
   if (!config.anthropic.apiKey) {
@@ -102,12 +100,8 @@ export async function write(
       : 'Write the tomo now in Spanish. Target ~2000 words of body (1800 hard floor, 2400 ceiling — extend before takeaways if under 1800). After the body, append "## Para llevarte" with 5-8 distilled bullets, then stop. Start with the title heading.';
 
   const user = [
-    "# Style guide",
-    style,
-    ...(lookupsBlock ? ["", lookupsBlock] : []),
-    ...(grammarBlock ? ["", grammarBlock] : []),
-    ...(highlightsBlock ? ["", highlightsBlock] : []),
-    "",
+    ...(lookupsBlock ? [lookupsBlock, ""] : []),
+    ...(highlightsBlock ? [highlightsBlock, ""] : []),
     `# ${planLabel}`,
     `- Título: ${plan.title}`,
     `- Dominio: ${plan.domain}`,
@@ -154,6 +148,7 @@ export interface TomoParts {
   title: string;
   body: string;
   takeaways: string;
+  nota: string;
 }
 
 export function splitTomo(markdown: string): TomoParts {
@@ -162,11 +157,34 @@ export function splitTomo(markdown: string): TomoParts {
   const withoutTitle = markdown.replace(/^#\s+.+\n?/, "");
 
   const takeawaysIdx = withoutTitle.search(/^##\s+Para llevarte\s*$/m);
-  if (takeawaysIdx === -1) {
-    return { title, body: withoutTitle.trim(), takeaways: "" };
+  const notaIdx = withoutTitle.search(/^##\s+Reader notes\s*$/m);
+
+  if (takeawaysIdx === -1 && notaIdx === -1) {
+    return { title, body: withoutTitle.trim(), takeaways: "", nota: "" };
   }
 
-  const body = withoutTitle.slice(0, takeawaysIdx).trim();
-  const takeaways = withoutTitle.slice(takeawaysIdx).trim();
-  return { title, body, takeaways };
+  if (takeawaysIdx === -1) {
+    return {
+      title,
+      body: withoutTitle.slice(0, notaIdx).trim(),
+      takeaways: "",
+      nota: withoutTitle.slice(notaIdx).trim(),
+    };
+  }
+
+  if (notaIdx === -1) {
+    return {
+      title,
+      body: withoutTitle.slice(0, takeawaysIdx).trim(),
+      takeaways: withoutTitle.slice(takeawaysIdx).trim(),
+      nota: "",
+    };
+  }
+
+  return {
+    title,
+    body: withoutTitle.slice(0, takeawaysIdx).trim(),
+    takeaways: withoutTitle.slice(takeawaysIdx, notaIdx).trim(),
+    nota: withoutTitle.slice(notaIdx).trim(),
+  };
 }

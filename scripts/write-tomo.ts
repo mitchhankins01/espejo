@@ -25,7 +25,6 @@ import { writeFile, mkdir, readFile, unlink } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
 import { pool } from "../src/db/client.js";
-import { ensureStyle } from "./book/style.js";
 import {
   readHistory,
   appendHistory,
@@ -38,11 +37,8 @@ import { plan, type Candidate, type PlannerOutput } from "./book/planner.js";
 import { write, countWords } from "./book/writer.js";
 import { interleave } from "./book/bilingual.js";
 import {
-  formatGrammarFlagsForWriter,
   formatLookupsForWriter,
-  readGrammarFlags,
   readLookups,
-  recentGrammarFlags,
   recentLookups,
 } from "./book/lookups.js";
 import {
@@ -189,17 +185,14 @@ async function main(): Promise<void> {
     console.log("[fresh-plan] cleared books/next-plan.json");
   }
 
-  console.log("[1/6] ensuring style guide is fresh");
-  const style = await ensureStyle();
-
-  console.log("[2/6] reading history");
+  console.log("[1/5] reading history");
   const history = await readHistory();
   const n = nextTomoNumber(history);
   const excluded = recentSourceUuids(history, 30);
   const recent = recentTomoSummaries(history, 30);
   console.log(`      tomo #${n}, ${history.length} prior, ${excluded.size} UUIDs excluded`);
 
-  console.log("[3/6] gathering context (recent 14d + long-arc 365d)");
+  console.log("[2/5] gathering context (recent 14d + long-arc 365d)");
   const context = await gatherContext(excluded, 14);
   const recentUuids = new Set(context.map((c) => c.uuid));
   const longArc = await gatherLongArcContext(excluded, recentUuids, 365);
@@ -215,12 +208,12 @@ async function main(): Promise<void> {
   }
 
   if (args.planOnly) {
-    console.log("[4/6] planning 6 candidates (Claude pass 1)");
+    console.log("[3/5] planning 6 candidates (Claude pass 1)");
     if (args.steer) {
       const preview = args.steer.slice(0, 120);
       console.log(`      steering planner with: ${preview}${args.steer.length > 120 ? "..." : ""}`);
     }
-    const output = await plan(style, recent, longArc, context, args.steer);
+    const output = await plan(recent, longArc, context, args.steer);
     await savePlannerOutput(n, output);
     console.log(`      saved 6 candidates to ${PLAN_PATH}`);
     console.log("\n--- candidates ---");
@@ -238,7 +231,7 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  console.log(`[4/6] loading saved candidates and picking #${args.pick}`);
+  console.log(`[3/5] loading saved candidates and picking #${args.pick}`);
   const candidates = await loadSavedPlan(n);
   if (!candidates) {
     console.error(
@@ -268,21 +261,12 @@ async function main(): Promise<void> {
     );
   }
 
-  console.log("[5/6] writing (Claude pass 2)");
+  console.log("[4/5] writing (Claude pass 2)");
   const lookups = await readLookups();
   const lookupsBlock = formatLookupsForWriter(recentLookups(lookups, 30));
   if (lookups.length > 0) {
     console.log(
-      `      injecting ${Math.min(lookups.length, 30)} recent lookups (${lookups.length} total)`
-    );
-  }
-  const grammarFlags = await readGrammarFlags();
-  const grammarBlock = formatGrammarFlagsForWriter(
-    recentGrammarFlags(grammarFlags, 15)
-  );
-  if (grammarFlags.length > 0) {
-    console.log(
-      `      injecting ${Math.min(grammarFlags.length, 15)} grammar uncertainties (${grammarFlags.length} total)`
+      `      injecting ${Math.min(lookups.length, 30)} recent lookups — vocab (${lookups.length} total)`
     );
   }
   const highlights = await readHighlights();
@@ -291,15 +275,13 @@ async function main(): Promise<void> {
   );
   if (highlights.length > 0) {
     console.log(
-      `      injecting ${Math.min(highlights.length, 12)} sentence-level confusions (${highlights.length} total)`
+      `      injecting ${Math.min(highlights.length, 12)} recent highlights — grammar/conjugation (${highlights.length} total)`
     );
   }
   const markdown = await write(
     picked,
-    style,
     allContext,
     lookupsBlock,
-    grammarBlock,
     highlightsBlock
   );
   const counts = countWords(markdown);
@@ -318,7 +300,7 @@ async function main(): Promise<void> {
   const wantsBilingual =
     args.bilingual !== undefined ? args.bilingual : await askBilingual();
 
-  console.log("[6/6] packaging epub + recording history");
+  console.log("[5/5] packaging epub + recording history");
   const padded = String(n).padStart(4, "0");
   const tomoPath = join(TOMOS_DIR, `${padded}.md`);
   await mkdir(TOMOS_DIR, { recursive: true });

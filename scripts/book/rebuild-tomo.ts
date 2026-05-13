@@ -2,6 +2,7 @@ import { buildEpub, tomoFilename } from "./epub.ts";
 import { sendToKindle } from "./send.ts";
 import { interleave } from "./bilingual.ts";
 import { offerJuliaShare, type ShareJuliaMode } from "./share.ts";
+import { splitTomo } from "./writer.ts";
 import { readFile, writeFile } from "fs/promises";
 
 async function main() {
@@ -26,7 +27,11 @@ async function main() {
   let subject = `Espejo — Tomo ${padded} — ${title}`;
   if (bilingual) {
     console.log("[bilingual] interleaving ES + EN");
-    epubMarkdown = await interleave(md);
+    // Reader notes stay English — split off before interleave, reattach after.
+    const { nota } = splitTomo(md);
+    const mdForInterleave = nota ? md.slice(0, md.indexOf(nota)).trimEnd() : md;
+    const interleaved = await interleave(mdForInterleave);
+    epubMarkdown = nota ? `${interleaved.trimEnd()}\n\n${nota}\n` : interleaved;
     await writeFile(`books/tomos/${padded}-bilingual.md`, epubMarkdown, "utf-8");
     filename = filename.replace(/\.epub$/, " (bilingual).epub");
     subject = `${subject} (bilingual)`;

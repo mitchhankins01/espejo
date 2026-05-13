@@ -44,8 +44,8 @@ export function formatHighlightsForWriter(recent: Highlight[]): string {
     })
     .join("\n");
   return [
-    "# Reader sentence-level confusions",
-    "Sentences and phrases the reader paused on while reading prior tomos — likely syntactic complexity, idiomatic constructions, or register shifts. Don't reuse them verbatim and don't paraphrase to dodge the difficulty. If your topic naturally crosses this terrain, lean in: write the structure cleanly and let context carry the meaning. Controlled exposure beats avoidance.",
+    "# Reader grammar / conjugation uncertainties",
+    "Sentences the reader highlighted on Kindle while reading prior tomos — by convention, highlights mark conjugations or verb forms he wasn't sure about (the verb was familiar, the form wasn't). Don't quote these back. Use the same structures again in clean natural prose so the pattern locks in through repetition. Don't gloss them, don't draw attention to them.",
     "",
     bullets,
   ].join("\n");

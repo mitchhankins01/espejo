@@ -2,9 +2,9 @@
  * One-off batch writer: take all 6 candidates from books/next-plan.json
  * and ship them as tomos #N..N+5, each bilingual + sent to Kindle.
  *
- * Context (style, history snapshot, recent/long-arc, lookups, grammar, highlights)
- * is frozen at script start so candidate source UUIDs stay valid across all 6
- * iterations — appendHistory grows after each write but does NOT re-filter context.
+ * Context (history snapshot, recent/long-arc, lookups, highlights) is frozen at
+ * script start so candidate source UUIDs stay valid across all 6 iterations —
+ * appendHistory grows after each write but does NOT re-filter context.
  *
  * Run: pnpm tsx scripts/batch-tomos.ts
  */
@@ -13,7 +13,6 @@ import { writeFile, mkdir, readFile, unlink } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
 import { pool } from "../src/db/client.js";
-import { ensureStyle } from "./book/style.js";
 import {
   readHistory,
   appendHistory,
@@ -25,11 +24,8 @@ import type { Candidate } from "./book/planner.js";
 import { write, countWords } from "./book/writer.js";
 import { interleave } from "./book/bilingual.js";
 import {
-  formatGrammarFlagsForWriter,
   formatLookupsForWriter,
-  readGrammarFlags,
   readLookups,
-  recentGrammarFlags,
   recentLookups,
 } from "./book/lookups.js";
 import {
@@ -78,7 +74,6 @@ async function main(): Promise<void> {
   const candidates = [...saved.candidates].sort((a, b) => a.id - b.id);
 
   console.log("[batch] freezing context for all 6 candidates");
-  const style = await ensureStyle();
   const history = await readHistory();
   const startN = nextTomoNumber(history);
   if (saved.tomo_n > startN) {
@@ -120,10 +115,6 @@ async function main(): Promise<void> {
 
   const lookups = await readLookups();
   const lookupsBlock = formatLookupsForWriter(recentLookups(lookups, 30));
-  const grammarFlags = await readGrammarFlags();
-  const grammarBlock = formatGrammarFlagsForWriter(
-    recentGrammarFlags(grammarFlags, 15)
-  );
   const highlights = await readHighlights();
   const highlightsBlock = formatHighlightsForWriter(
     recentHighlights(highlights, 12)
@@ -148,7 +139,7 @@ async function main(): Promise<void> {
     } else {
       console.log("  [write] generating Spanish markdown");
       markdown = await retry(() =>
-        write(c, style, allContext, lookupsBlock, grammarBlock, highlightsBlock)
+        write(c, allContext, lookupsBlock, highlightsBlock)
       );
       const counts = countWords(markdown);
       console.log(`  [write] ${counts.total} words`);
