@@ -14,9 +14,15 @@
  *
  * Also prints the preview path on stdout for the caller to open.
  *
- * Recommended-pick heuristic (per Merge): pick the leg whose merge_body has
- * the most wikilinks; ties broken by longer body. Override happens in the
- * preview ("use Y for X") feedback loop with the orchestrating agent.
+ * Recommended-pick heuristic (per Merge): score each leg's merge_body by how
+ * much signal from source ∪ target it preserves — bigram recall (65%), quoted-
+ * span recall (25%), wikilink recall (10%). Penalizes "longest body wins" and
+ * "most refs wins" failure modes where one leg pads out refs but drops content.
+ *
+ * Also detects "supersede" cases: when source is a strict bigram-superset of
+ * target (you wrote a fuller version of an existing Insight under the same
+ * filename), there's nothing to synthesize — the action is just overwrite. The
+ * preview collapses these so they don't waste review attention.
  */
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
@@ -33,6 +39,52 @@ const modeIsB = planFull.mode === "existing";
 // Vault root for reading body files (referenced in preview)
 const VAULT = "/Users/mitch/Projects/espejo/Artifacts";
 const readMd = (rel) => existsSync(join(VAULT, rel)) ? readFileSync(join(VAULT, rel), "utf8") : `[FILE NOT FOUND: ${rel}]`;
+
+// Strip frontmatter + Sources block so signal metrics only see body prose.
+function stripFrontmatter(md) {
+  if (!md) return "";
+  let s = md.startsWith("---\n") ? md.slice(4).replace(/^[\s\S]*?\n---\n?/, "") : md;
+  // Drop trailing "## Sources" block — wikilinks counted separately.
+  s = s.replace(/\n## Sources[\s\S]*$/i, "");
+  return s.trim();
+}
+
+function bigrams(text) {
+  const words = text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter(Boolean);
+  const set = new Set();
+  for (let i = 0; i < words.length - 1; i++) set.add(`${words[i]} ${words[i + 1]}`);
+  return set;
+}
+
+// Quoted/italicized spans — Mitch's deliberately-marked signal (`"..."`, `_..._`).
+function quoteSpans(text) {
+  const out = new Set();
+  // Curly + straight quotes of length ≥6
+  for (const m of text.matchAll(/[“"]([^”"\n]{6,})[”"]/g)) out.add(m[1].trim());
+  // Markdown italic spans of length ≥6
+  for (const m of text.matchAll(/[_*]([^_*\n]{6,})[_*]/g)) out.add(m[1].trim());
+  return out;
+}
+
+function wikilinks(text) {
+  const out = new Set();
+  for (const m of text.matchAll(/\[\[([^\]]+)\]\]/g)) out.add(m[1].trim());
+  return out;
+}
+
+function recall(needles, haystackSet) {
+  if (needles.size === 0) return null; // neutral
+  let hit = 0;
+  for (const n of needles) if (haystackSet.has(n)) hit++;
+  return hit / needles.size;
+}
+
+function recallByInclusion(needles, haystackText) {
+  if (needles.size === 0) return null;
+  let hit = 0;
+  for (const n of needles) if (haystackText.includes(n)) hit++;
+  return hit / needles.size;
+}
 
 // Load each leg (skip if file missing)
 const LEGS = ["claude", "gemini", "gpt", "ollama"];
@@ -95,30 +147,70 @@ const synth = allPaths.map(p => {
     finalAction = "Distinct";
   }
 
-  // Merge body recommended pick (heuristic)
+  // Merge body recommended pick + supersede detection
   let recommendedPick = null;
   let recommendationRationale = null;
+  let isSupersede = false;
+  let scoreBreakdown = null;
   if (finalAction === "Merge") {
+    const planEntry = planFull.plan.find(e => e.source?.source_path === p);
+    const sourceBodyRaw = planEntry?.source?.body || "";
+    const targetBodyRaw = finalTarget ? readMd(finalTarget) : "";
+    const srcCore = stripFrontmatter(sourceBodyRaw);
+    const tgtCore = stripFrontmatter(targetBodyRaw);
+
+    const srcBg = bigrams(srcCore);
+    const tgtBg = bigrams(tgtCore);
+    const unionBg = new Set([...srcBg, ...tgtBg]);
+    const unionSpans = new Set([...quoteSpans(srcCore), ...quoteSpans(tgtCore)]);
+    const unionLinks = new Set([...wikilinks(sourceBodyRaw), ...wikilinks(targetBodyRaw)]);
+
     const candidates = activeLegs
       .filter(l => votes.find(v => v.source_path === p && v === idx[l][p])?.classification === "Merge")
       .filter(l => idx[l][p]?.merge_body)
       .map(l => ({ leg: l, body: idx[l][p].merge_body }));
     if (candidates.length === 0) {
-      // Fall back to any leg with a merge_body
       for (const l of activeLegs) if (idx[l][p]?.merge_body) candidates.push({ leg: l, body: idx[l][p].merge_body });
     }
+    let scored = null;
     if (candidates.length > 0) {
-      // Heuristic: most wikilinks; tiebreaker = longer body
-      const score = (body) => {
-        const links = (body.match(/\[\[[^\]]+\]\]/g) || []).length;
-        return links * 10000 + body.length; // links dominate
-      };
-      candidates.sort((a, b) => score(b.body) - score(a.body));
-      recommendedPick = candidates[0].leg;
-      const linkCounts = candidates.map(c => `${c.leg}=${(c.body.match(/\[\[/g) || []).length}`).join(", ");
-      recommendationRationale = `most wikilinks (${linkCounts})`;
+      scored = candidates.map(({ leg, body }) => {
+        const bg = bigrams(stripFrontmatter(body));
+        const bgRecall = recall(unionBg, bg) ?? 0;
+        const spanRecall = recallByInclusion(unionSpans, body) ?? 1; // neutral if no spans
+        const linkRecall = recall(unionLinks, wikilinks(body)) ?? 1; // neutral if no links
+        const composite = bgRecall * 0.65 + spanRecall * 0.25 + linkRecall * 0.10;
+        return { leg, body, bgRecall, spanRecall, linkRecall, composite };
+      });
+      scored.sort((a, b) => b.composite - a.composite);
+      recommendedPick = scored[0].leg;
+      scoreBreakdown = scored.map(s => ({
+        leg: s.leg,
+        bigram: +s.bgRecall.toFixed(3),
+        span: +s.spanRecall.toFixed(3),
+        link: +s.linkRecall.toFixed(3),
+        composite: +s.composite.toFixed(3),
+      }));
+      const summary = scored.map(s => `${s.leg}=${(s.composite * 100).toFixed(0)}% (bg ${(s.bgRecall * 100).toFixed(0)}, sp ${(s.spanRecall * 100).toFixed(0)}, lk ${(s.linkRecall * 100).toFixed(0)})`).join(" · ");
+      recommendationRationale = `signal recall: ${summary}`;
     }
     if (targetAgreement === "disagree") recommendedPick = "DEFER";
+
+    // Supersede detection: winning leg's body is itself near-identical to source.
+    // Means LLM(s) decided there was nothing to synthesize — the source supersedes
+    // the target wholesale. Skip the alternates view and write source verbatim.
+    if (recommendedPick !== "DEFER" && scored && scored[0]) {
+      const winnerBg = bigrams(stripFrontmatter(scored[0].body));
+      const matchToSrc = recall(srcBg, winnerBg) ?? 0;     // |w∩s|/|s| — is source covered?
+      const winnerFromSrc = recall(winnerBg, srcBg) ?? 0;   // |w∩s|/|w| — is winner mostly source?
+      // Supersede iff winner ≈ source (both directions). If winner adds bigrams not in source
+      // (e.g. target's distinct phrasing), that's real synthesis, not supersede.
+      if (matchToSrc >= 0.95 && winnerFromSrc >= 0.95) {
+        isSupersede = true;
+        recommendedPick = "_supersede";
+        recommendationRationale = `winning leg returned source verbatim (${(matchToSrc * 100).toFixed(0)}% source covered, ${(winnerFromSrc * 100).toFixed(0)}% of winner derives from source) — no synthesis to choose between`;
+      }
+    }
   }
 
   return {
@@ -131,11 +223,21 @@ const synth = allPaths.map(p => {
     votes_n: n,
     recommended_pick: recommendedPick,
     recommendation_rationale: recommendationRationale,
+    score_breakdown: scoreBreakdown,
+    is_supersede: isSupersede,
     classifications: Object.fromEntries(
       activeLegs.map(l => [l, idx[l][p] ? { class: idx[l][p].classification, target: idx[l][p].target_path, conf: idx[l][p].confidence } : null])
     ),
     rationales: Object.fromEntries(activeLegs.map(l => [l, idx[l][p]?.rationale])),
-    merge_bodies: Object.fromEntries(activeLegs.map(l => [l, idx[l][p]?.merge_body])),
+    merge_bodies: (() => {
+      const m = Object.fromEntries(activeLegs.map(l => [l, idx[l][p]?.merge_body]));
+      if (isSupersede) {
+        const planEntry = planFull.plan.find(e => e.source?.source_path === p);
+        const srcBody = stripFrontmatter(planEntry?.source?.body || "");
+        m._supersede = srcBody;
+      }
+      return m;
+    })(),
   };
 });
 
@@ -174,7 +276,8 @@ let i = 0;
 for (const s of synth) {
   i++;
   const distinctLabel = modeIsB ? "📋 keep both" : "📤 promote";
-  const emoji = { Duplicate: "🗑️ delete", Merge: "🔀 merge", Distinct: distinctLabel }[s.final_action];
+  const mergeLabel = s.is_supersede ? "♻️ supersede" : "🔀 merge";
+  const emoji = { Duplicate: "🗑️ delete", Merge: mergeLabel, Distinct: distinctLabel }[s.final_action];
   const tally = activeLegs.map(l => (s.classifications[l]?.class || "–")[0]).join("/");
   const star = s.final_action === "Merge" ? (s.recommended_pick === "DEFER" ? "⚠️ defer" : (s.recommended_pick || "?")) : "";
   md += `| ${i} | ${emoji} | \`${shortSrc(s.source_path)}\` | \`${shortSrc(s.final_target)}\` | ${s.consensus} | ${tally} | ${star} |\n`;
@@ -185,7 +288,7 @@ const distinctLegend = modeIsB
   ? "📋 = no action (Mode B: both files already in Insight/, stay as-is)"
   : "📤 = mv Pending → Insight";
 md += `**Mode:** ${modeIsB ? "B (existing-pairwise sweep within Insight/)" : "A (pending → Insight)"}\n\n`;
-md += `**Legend:** 🗑️ = delete source, ${distinctLegend}, 🔀 = rewrite target body + delete source. ⭐ column = which model's merge body is recommended (heuristic: most wikilinks).\n\n---\n\n`;
+md += `**Legend:** 🗑️ = delete source, ${distinctLegend}, 🔀 = rewrite target body + delete source, ♻️ = source supersedes target (verbatim replace, no synthesis). ⭐ column = leg with highest signal recall over source ∪ target (bigram 65% / quote-span 25% / wikilink 10%).\n\n---\n\n`;
 
 // Phase tables — non-Merge actions need no body
 const dupActions = synth.filter(s => s.final_action === "Duplicate");
@@ -220,10 +323,25 @@ for (const s of distActions) {
 }
 md += `\n---\n\n`;
 
-md += `## Merges (${mergeActions.length}) — REQUIRES YOUR ATTENTION\n\n`;
-md += `Each section: source body, target body BEFORE, ⭐ recommended new body. Alternates collapsed.\n\n`;
+const supersedeActions = mergeActions.filter(s => s.is_supersede);
+const trueMergeActions = mergeActions.filter(s => !s.is_supersede);
+
+if (supersedeActions.length) {
+  md += `## Supersedes (${supersedeActions.length}) — source replaces target verbatim\n\n`;
+  md += `Source body is a strict bigram-superset of target — same filename or near-identical scope, the Pending version is fuller. Action: write source body into target path, delete source. No synthesis to review.\n\n`;
+  md += `| # | File | Consensus |\n|---:|---|---|\n`;
+  let j = 0;
+  for (const s of supersedeActions) {
+    j++;
+    md += `| ${j} | \`${shortSrc(s.source_path)}\` | ${s.consensus} |\n`;
+  }
+  md += `\n---\n\n`;
+}
+
+md += `## Merges (${trueMergeActions.length}) — REQUIRES YOUR ATTENTION\n\n`;
+md += `Each section: source body, target body BEFORE, ⭐ recommended new body (highest signal recall). Alternates collapsed.\n\n`;
 i = 0;
-for (const s of mergeActions) {
+for (const s of trueMergeActions) {
   i++;
   const pick = s.recommended_pick;
   const isDefer = pick === "DEFER";
