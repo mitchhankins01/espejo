@@ -171,6 +171,13 @@ const distincts = plan.filter(s => s.final_action === "Distinct");
 const dups      = plan.filter(s => s.final_action === "Duplicate");
 const merges    = plan.filter(s => s.final_action === "Merge");
 
+// Track which Pending paths get promoted to Insight by Distinct phase, so the
+// Merge phase can redirect targets that pointed to a now-empty Pending path.
+// Without this, a Pending file that's both a Distinct source AND a Merge target
+// gets mv'd to Insight/ by Distinct, then Merge writes a NEW file at the empty
+// Pending/ path — leaving stale + canonical bodies for the same insight.
+const promotedToInsight = new Map();
+
 console.log();
 // In Mode A, Distinct sources live in Pending/ and the Pending→Insight rewrite
 // promotes them. In Mode B, sources are already in Insight/ so the prefix swap
@@ -180,6 +187,9 @@ console.log(`=== Distinct (${distincts.length}) — promote Pending→Insight, n
 for (const s of distincts) {
   log(`Distinct ${s.source_path}`);
   const dst = s.source_path.replace(/^Pending\//, "Insight/");
+  // Mirror mv()'s collision-suffix logic so the redirect targets the right path.
+  const actualDst = existsSync(fp(dst)) && s.source_path !== dst ? dst.replace(/\.md$/, "-1.md") : dst;
+  promotedToInsight.set(s.source_path, actualDst);
   mv(s.source_path, dst);
 }
 
@@ -209,6 +219,13 @@ for (let i = 0; i < merges.length; i++) {
   if (s.classifications[pick]?.target && s.classifications[pick].target !== target) {
     log(`  ⚠️ ${pick} routed to different target: ${s.classifications[pick].target}`);
     target = s.classifications[pick].target;
+  }
+  // If the target was promoted to Insight by the Distinct phase, follow it.
+  // Otherwise the merge writes a new file at the now-empty Pending path.
+  if (promotedToInsight.has(target)) {
+    const promoted = promotedToInsight.get(target);
+    log(`  ↪️ target ${target} was promoted; redirecting to ${promoted}`);
+    target = promoted;
   }
   const body = s.merge_bodies[pick];
   if (!body) { console.error(`  MISSING BODY (${pick}) for merge #${mergeNum}: ${s.source_path}`); continue; }
