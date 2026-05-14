@@ -326,19 +326,19 @@ async function main(): Promise<void> {
 
   console.log("[4/5] writing (Claude pass 2)");
   const lookups = await readLookups();
-  const recent = recentLookups(lookups, 30);
+  const recentLookupRows = recentLookups(lookups, 30);
   const stateMap = await getVocabStateForStems(
     pool,
-    recent.map((l) => l.stem)
+    recentLookupRows.map((l) => l.stem)
   );
   const stateByStem = new Map<string, LookupStateTag | null>();
-  for (const l of recent) {
+  for (const l of recentLookupRows) {
     stateByStem.set(
       l.stem.toLowerCase(),
       classifyVocabState(stateMap.get(l.stem.toLowerCase()))
     );
   }
-  const lookupsBlock = formatLookupsForWriter(recent, stateByStem);
+  const lookupsBlock = formatLookupsForWriter(recentLookupRows, stateByStem);
   if (lookups.length > 0) {
     console.log(
       `      injecting ${Math.min(lookups.length, 30)} recent lookups — vocab (${lookups.length} total)`
