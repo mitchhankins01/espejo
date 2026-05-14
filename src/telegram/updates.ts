@@ -122,10 +122,13 @@ export function isDuplicate(update: TelegramUpdate): boolean {
     keys.push(`reaction:${update.message_reaction.chat.id}:${update.message_reaction.message_id}`);
   }
 
-  // Tier 3: (chat_id, message_id)
-  const msg = update.message ?? update.callback_query?.message;
-  if (msg) {
-    keys.push(`message:${msg.chat.id}:${msg.message_id}`);
+  // Tier 3: (chat_id, message_id) — only for fresh messages, NOT for
+  // callback queries. Multiple callbacks on the same inline keyboard share
+  // the same message_id (Show then Rate, etc.); deduping on it would drop
+  // every tap after the first. Callback queries already have their own
+  // unique id (Tier 2 above).
+  if (update.message) {
+    keys.push(`message:${update.message.chat.id}:${update.message.message_id}`);
   }
 
   const now = Date.now();

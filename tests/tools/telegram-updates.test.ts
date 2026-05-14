@@ -95,6 +95,30 @@ describe("isDuplicate", () => {
     expect(isDuplicate(update2)).toBe(true);
   });
 
+  // Regression: multiple callbacks on the same inline-keyboard message share
+  // a message_id. Deduping on (chat_id, message_id) would silently drop the
+  // second tap (e.g. Show then Rate on an SRS card) and hang the spinner.
+  it("does NOT dedup distinct callbacks on the same message", () => {
+    const showUpdate = makeUpdate({
+      update_id: 1,
+      callback_query: {
+        id: "cb-show",
+        message: { message_id: 42, chat: { id: 100 }, date: 0 },
+        data: "srs:show:1",
+      },
+    });
+    const rateUpdate = makeUpdate({
+      update_id: 2,
+      callback_query: {
+        id: "cb-rate",
+        message: { message_id: 42, chat: { id: 100 }, date: 0 },
+        data: "srs:rate:1:3",
+      },
+    });
+    expect(isDuplicate(showUpdate)).toBe(false);
+    expect(isDuplicate(rateUpdate)).toBe(false);
+  });
+
   it("rejects duplicate (chat_id, message_id)", () => {
     const update = makeTextUpdate("hello", 5, 200);
     expect(isDuplicate(update)).toBe(false);
