@@ -14,3 +14,4 @@ export * from "./daily-screen-time.js";
 export * from "./device-events.js";
 export * from "./checkpoints.js";
 export * from "./vault-fs.js";
+export * from "./vocab-reviews.js";

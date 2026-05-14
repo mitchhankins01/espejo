@@ -73,6 +73,49 @@ export async function gatherContext(
   return items;
 }
 
+export async function fetchContextByUuid(
+  uuids: string[]
+): Promise<ContextItem[]> {
+  if (uuids.length === 0) return [];
+
+  const [entries, insights] = await Promise.all([
+    pool.query(
+      `SELECT uuid, created_at, text
+       FROM entries
+       WHERE uuid = ANY($1::uuid[])`,
+      [uuids]
+    ),
+    pool.query(
+      `SELECT id, title, body, updated_at
+       FROM knowledge_artifacts
+       WHERE id = ANY($1::uuid[])
+         AND deleted_at IS NULL`,
+      [uuids]
+    ),
+  ]);
+
+  const items: ContextItem[] = [];
+  for (const r of entries.rows) {
+    items.push({
+      uuid: r.uuid as string,
+      kind: "entry",
+      date: (r.created_at as Date).toISOString().slice(0, 10),
+      title: null,
+      text: r.text as string,
+    });
+  }
+  for (const r of insights.rows) {
+    items.push({
+      uuid: r.id as string,
+      kind: "insight",
+      date: (r.updated_at as Date).toISOString().slice(0, 10),
+      title: r.title as string,
+      text: r.body as string,
+    });
+  }
+  return items;
+}
+
 export async function gatherLongArcContext(
   excludeUuids: Set<string>,
   excludeRecentUuids: Set<string>,

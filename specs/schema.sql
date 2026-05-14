@@ -621,6 +621,73 @@ CREATE INDEX IF NOT EXISTS screen_captures_embedding_idx
     ON screen_captures USING ivfflat (embedding vector_cosine_ops) WITH (lists = 50);
 
 -- ============================================================================
+-- vocab_reviews + vocab_review_log (migration 053)
+-- ============================================================================
+-- Spaced-repetition state over Kindle lookups. One row per `(LOWER(stem), lang)`.
+-- FSRS Card fields persisted verbatim; ratings flow through `src/fsrs/scheduler.ts`.
+
+CREATE TABLE IF NOT EXISTS vocab_reviews (
+    id              BIGSERIAL PRIMARY KEY,
+    stem            TEXT NOT NULL,
+    lang            TEXT NOT NULL,
+    gloss           TEXT,
+    gloss_override  TEXT,
+    sample_usage    TEXT NOT NULL,
+    sample_word     TEXT NOT NULL,
+    sample_source   TEXT,
+    first_seen_at   TIMESTAMPTZ NOT NULL,
+    last_seen_at    TIMESTAMPTZ NOT NULL,
+    lookups_count   INT NOT NULL DEFAULT 1,
+    status          TEXT NOT NULL DEFAULT 'active',
+    due             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    stability       DOUBLE PRECISION NOT NULL DEFAULT 0,
+    difficulty      DOUBLE PRECISION NOT NULL DEFAULT 0,
+    elapsed_days    DOUBLE PRECISION NOT NULL DEFAULT 0,
+    scheduled_days  DOUBLE PRECISION NOT NULL DEFAULT 0,
+    reps            INT NOT NULL DEFAULT 0,
+    lapses          INT NOT NULL DEFAULT 0,
+    state           TEXT NOT NULL DEFAULT 'new',
+    last_review     TIMESTAMPTZ,
+    current_session_id        UUID,
+    current_session_served_at TIMESTAMPTZ,
+    current_session_rated_at  TIMESTAMPTZ,
+    chat_id         TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT vocab_reviews_state_check  CHECK (state IN ('new','learning','review','relearning')),
+    CONSTRAINT vocab_reviews_status_check CHECK (status IN ('active','suspended'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS vocab_reviews_stem_lang_idx
+    ON vocab_reviews (LOWER(stem), lang);
+CREATE INDEX IF NOT EXISTS vocab_reviews_due_idx        ON vocab_reviews (due);
+CREATE INDEX IF NOT EXISTS vocab_reviews_state_due_idx  ON vocab_reviews (state, due);
+CREATE INDEX IF NOT EXISTS vocab_reviews_status_due_idx ON vocab_reviews (status, due);
+
+CREATE TABLE IF NOT EXISTS vocab_review_log (
+    id                BIGSERIAL PRIMARY KEY,
+    review_id         BIGINT NOT NULL REFERENCES vocab_reviews(id) ON DELETE CASCADE,
+    rating            SMALLINT NOT NULL,
+    state_before      TEXT NOT NULL,
+    state_after       TEXT NOT NULL,
+    stability_before  DOUBLE PRECISION,
+    stability_after   DOUBLE PRECISION,
+    difficulty_before DOUBLE PRECISION,
+    difficulty_after  DOUBLE PRECISION,
+    elapsed_days      DOUBLE PRECISION,
+    scheduled_days    DOUBLE PRECISION,
+    session_id        UUID NOT NULL,
+    chat_id           TEXT,
+    reviewed_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT vocab_review_log_rating_check CHECK (rating IN (1,2,3,4))
+);
+CREATE INDEX IF NOT EXISTS vocab_review_log_review_idx
+    ON vocab_review_log (review_id, reviewed_at DESC);
+CREATE INDEX IF NOT EXISTS vocab_review_log_session_idx
+    ON vocab_review_log (session_id);
+CREATE INDEX IF NOT EXISTS vocab_review_log_reviewed_at_idx
+    ON vocab_review_log (reviewed_at DESC);
+
+-- ============================================================================
 -- Views
 -- ============================================================================
 

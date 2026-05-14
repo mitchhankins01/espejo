@@ -18,7 +18,11 @@
  * If neither --bilingual nor --no-bilingual is passed, a TTY prompt asks after the tomo is written.
  *
  * Plan persistence: `--plan-only` writes books/next-plan.json with all 6 candidates.
- * `--pick=<id>` reuses that file (matching on tomo number) and deletes it after a successful write.
+ * `--pick=<id>` reuses that file; on success, drops the picked candidate from the plan
+ * and bumps tomo_n so the remaining candidates stay pickable across sequential writes.
+ * The file is deleted once all candidates are picked. Source UUIDs that the new tomo's
+ * recent-exclusion filter would normally hide are fetched directly by UUID so the
+ * writer still sees their bodies.
  */
 
 import { writeFile, mkdir, readFile, unlink } from "fs/promises";
@@ -32,7 +36,11 @@ import {
   recentSourceUuids,
   recentTomoSummaries,
 } from "./book/state.js";
-import { gatherContext, gatherLongArcContext } from "./book/context.js";
+import {
+  gatherContext,
+  gatherLongArcContext,
+  fetchContextByUuid,
+} from "./book/context.js";
 import { plan, type Candidate, type PlannerOutput } from "./book/planner.js";
 import { write, countWords } from "./book/writer.js";
 import { interleave } from "./book/bilingual.js";
@@ -40,7 +48,12 @@ import {
   formatLookupsForWriter,
   readLookups,
   recentLookups,
+  type LookupStateTag,
 } from "./book/lookups.js";
+import {
+  classifyVocabState,
+  getVocabStateForStems,
+} from "../src/db/queries/vocab-reviews.js";
 import {
   formatHighlightsForWriter,
   readHighlights,
@@ -49,6 +62,12 @@ import {
 import { buildEpub, tomoFilename } from "./book/epub.js";
 import { sendToKindle } from "./book/send.js";
 import { offerJuliaShare, type ShareJuliaMode } from "./book/share.js";
+import {
+  appendReaderNotesToMarkdown,
+  fetchRecentSpanishEntries,
+  generateReaderLevelParagraph,
+  generateReaderNotes,
+} from "./book/reader-notes.js";
 import { config } from "../src/config.js";
 
 const TOMOS_DIR = "books/tomos";
@@ -58,10 +77,13 @@ const PLAN_PATH = "books/next-plan.json";
 interface SavedPlan {
   tomo_n: number;
   saved_at: string;
+  reader_level?: string;
   candidates: Candidate[];
 }
 
-async function loadSavedPlan(expectedTomoN: number): Promise<Candidate[] | null> {
+async function loadSavedPlan(
+  expectedTomoN: number
+): Promise<{ candidates: Candidate[]; readerLevel: string | undefined } | null> {
   if (!existsSync(PLAN_PATH)) return null;
   const raw = await readFile(PLAN_PATH, "utf-8");
   const saved = JSON.parse(raw) as SavedPlan;
@@ -72,20 +94,46 @@ async function loadSavedPlan(expectedTomoN: number): Promise<Candidate[] | null>
     await unlink(PLAN_PATH).catch(() => {});
     return null;
   }
-  if (!Array.isArray(saved.candidates) || saved.candidates.length !== 6) {
+  if (!Array.isArray(saved.candidates) || saved.candidates.length === 0) {
     console.warn(
-      `      ${PLAN_PATH} has ${saved.candidates?.length ?? 0} candidates (expected 6) — ignoring`
+      `      ${PLAN_PATH} has no candidates left — ignoring`
     );
     await unlink(PLAN_PATH).catch(() => {});
     return null;
   }
-  return saved.candidates;
+  return { candidates: saved.candidates, readerLevel: saved.reader_level };
 }
 
-async function savePlannerOutput(tomoN: number, p: PlannerOutput): Promise<void> {
+async function dropPickedFromPlan(
+  pickedId: number,
+  nextTomoN: number
+): Promise<void> {
+  if (!existsSync(PLAN_PATH)) return;
+  const raw = await readFile(PLAN_PATH, "utf-8");
+  const saved = JSON.parse(raw) as SavedPlan;
+  const remaining = saved.candidates.filter((c) => c.id !== pickedId);
+  if (remaining.length === 0) {
+    await unlink(PLAN_PATH).catch(() => {});
+    return;
+  }
+  const payload: SavedPlan = {
+    tomo_n: nextTomoN,
+    saved_at: saved.saved_at,
+    reader_level: saved.reader_level,
+    candidates: remaining,
+  };
+  await writeFile(PLAN_PATH, JSON.stringify(payload, null, 2) + "\n", "utf-8");
+}
+
+async function savePlannerOutput(
+  tomoN: number,
+  p: PlannerOutput,
+  readerLevel: string
+): Promise<void> {
   const payload: SavedPlan = {
     tomo_n: tomoN,
     saved_at: new Date().toISOString(),
+    reader_level: readerLevel,
     candidates: p.candidates,
   };
   await writeFile(PLAN_PATH, JSON.stringify(payload, null, 2) + "\n", "utf-8");
@@ -214,7 +262,10 @@ async function main(): Promise<void> {
       console.log(`      steering planner with: ${preview}${args.steer.length > 120 ? "..." : ""}`);
     }
     const output = await plan(recent, longArc, context, args.steer);
-    await savePlannerOutput(n, output);
+    console.log("      computing reader-level snapshot (Claude pass 1b)");
+    const recentEntries = await fetchRecentSpanishEntries(90, 5);
+    const readerLevel = await generateReaderLevelParagraph(recentEntries);
+    await savePlannerOutput(n, output, readerLevel);
     console.log(`      saved 6 candidates to ${PLAN_PATH}`);
     console.log("\n--- candidates ---");
     printCandidates(output.candidates);
@@ -232,14 +283,15 @@ async function main(): Promise<void> {
   }
 
   console.log(`[3/5] loading saved candidates and picking #${args.pick}`);
-  const candidates = await loadSavedPlan(n);
-  if (!candidates) {
+  const loaded = await loadSavedPlan(n);
+  if (!loaded) {
     console.error(
       `[error] no saved plan for tomo #${n}. Run --plan-only first.`
     );
     await pool.end();
     process.exit(2);
   }
+  const { candidates, readerLevel: savedReaderLevel } = loaded;
   const picked = candidates.find((c) => c.id === args.pick);
   if (!picked) {
     console.error(
@@ -256,14 +308,37 @@ async function main(): Promise<void> {
   const validUuids = new Set(allContext.map((c) => c.uuid));
   const missing = picked.source_refs.filter((u) => !validUuids.has(u));
   if (missing.length > 0) {
-    throw new Error(
-      `Picked candidate references ${missing.length} source UUIDs no longer in the context pool: ${missing.join(", ")}. Re-plan with --fresh-plan + --plan-only.`
-    );
+    const rescued = await fetchContextByUuid(missing);
+    if (rescued.length > 0) {
+      console.log(
+        `      rescuing ${rescued.length} source UUID(s) excluded by recent-tomo filter`
+      );
+      allContext.push(...rescued);
+      rescued.forEach((c) => validUuids.add(c.uuid));
+    }
+    const stillMissing = picked.source_refs.filter((u) => !validUuids.has(u));
+    if (stillMissing.length > 0) {
+      throw new Error(
+        `Picked candidate references ${stillMissing.length} source UUIDs not in DB: ${stillMissing.join(", ")}. Re-plan with --fresh-plan + --plan-only.`
+      );
+    }
   }
 
   console.log("[4/5] writing (Claude pass 2)");
   const lookups = await readLookups();
-  const lookupsBlock = formatLookupsForWriter(recentLookups(lookups, 30));
+  const recent = recentLookups(lookups, 30);
+  const stateMap = await getVocabStateForStems(
+    pool,
+    recent.map((l) => l.stem)
+  );
+  const stateByStem = new Map<string, LookupStateTag | null>();
+  for (const l of recent) {
+    stateByStem.set(
+      l.stem.toLowerCase(),
+      classifyVocabState(stateMap.get(l.stem.toLowerCase()))
+    );
+  }
+  const lookupsBlock = formatLookupsForWriter(recent, stateByStem);
   if (lookups.length > 0) {
     console.log(
       `      injecting ${Math.min(lookups.length, 30)} recent lookups — vocab (${lookups.length} total)`
@@ -278,17 +353,33 @@ async function main(): Promise<void> {
       `      injecting ${Math.min(highlights.length, 12)} recent highlights — grammar/conjugation (${highlights.length} total)`
     );
   }
-  const markdown = await write(
+  const writtenMarkdown = await write(
     picked,
     allContext,
     lookupsBlock,
     highlightsBlock
   );
-  const counts = countWords(markdown);
+  const counts = countWords(writtenMarkdown);
   console.log(`      ${counts.total} words`);
   if (counts.total < 1700 || counts.total > 2700) {
     console.warn(`      WARN: word count ${counts.total} is outside 1800-2400 target`);
   }
+
+  console.log("      generating Reader notes (Claude pass 3)");
+  const readerLevel =
+    savedReaderLevel ??
+    (await generateReaderLevelParagraph(await fetchRecentSpanishEntries(90, 5)));
+  if (!savedReaderLevel) {
+    console.log("      (no cached reader_level on plan — regenerated)");
+  }
+  const readerNotes = await generateReaderNotes({
+    picked,
+    tomoMarkdown: writtenMarkdown,
+    readerLevel,
+    recentLookups: recentLookups(lookups, 30),
+    recentHighlights: recentHighlights(highlights, 12),
+  });
+  const markdown = appendReaderNotesToMarkdown(writtenMarkdown, readerNotes);
 
   if (args.dry) {
     console.log("\n--- dry run (tomo not saved) ---\n");
@@ -336,7 +427,7 @@ async function main(): Promise<void> {
     word_count: counts.total,
     bilingual: wantsBilingual,
   });
-  await clearSavedPlan();
+  await dropPickedFromPlan(picked.id, n + 1);
 
   const subject = `Espejo — Tomo ${padded} — ${picked.title}${wantsBilingual ? " (bilingual)" : ""}`;
 

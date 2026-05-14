@@ -5,7 +5,8 @@ export type FlowName =
   | "chat"
   | "checkpoint"
   | "vault-prompt"
-  | "practice";
+  | "practice"
+  | "srs";
 
 export interface CheckpointFlowState {
   flow: "checkpoint";
@@ -33,10 +34,25 @@ export interface PracticeFlowState {
   startedAt: number;
 }
 
+export interface SrsFlowState {
+  flow: "srs";
+  sessionId: string;
+  startedAt: number;
+  /** Pre-built queue of review_ids (due first, then up to N new). */
+  queue: string[];
+  /** Index of the next card to serve. */
+  queueIndex: number;
+  reviewedCount: number;
+  countsByRating: { 1: number; 2: number; 3: number; 4: number };
+  lastServedReviewId: string | null;
+  lastServedAt: number | null;
+}
+
 export type FlowState =
   | CheckpointFlowState
   | VaultPromptFlowState
-  | PracticeFlowState;
+  | PracticeFlowState
+  | SrsFlowState;
 
 const flows = new Map<string, FlowState>();
 

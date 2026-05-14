@@ -16,6 +16,9 @@ import {
   readLookups,
   type Lookup,
 } from "./book/lookups.js";
+import { pool } from "../src/db/client.js";
+import { upsertLookup } from "../src/db/queries/vocab-reviews.js";
+import { fillMissingGlosses } from "../src/fsrs/gloss.js";
 
 const DEFAULT_KINDLE_PATH = "/Volumes/NO NAME/system/vocabulary/vocab.db";
 
@@ -124,9 +127,31 @@ async function main(): Promise<void> {
       console.log(`    ${k}: ${v}`);
     }
   }
+
+  // Sync to vocab_reviews. Upsert never touches FSRS state on conflict.
+  console.log("[import-lookups] syncing to vocab_reviews");
+  for (const l of fresh) {
+    await upsertLookup(pool, {
+      stem: l.stem,
+      lang: l.lang,
+      sampleUsage: l.usage,
+      sampleWord: l.word,
+      sampleSource: l.book_title,
+      lookedUpAt: new Date(l.looked_up_at),
+    });
+  }
+
+  // Fill any missing glosses (Haiku batch). Bounded to keep a misconfigured
+  // run from spending the budget; backfill of the historical tail uses
+  // `pnpm backfill:glosses`.
+  console.log("[import-lookups] filling glosses for new rows");
+  const glossed = await fillMissingGlosses(pool, fresh.length + 25);
+  console.log(`  glossed: ${glossed}`);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+main()
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  })
+  .finally(() => pool.end().catch(() => undefined));

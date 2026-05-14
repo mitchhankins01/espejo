@@ -1,15 +1,14 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../../src/config.js";
 
-const SYSTEM = `You are creating a side-by-side bilingual study version of a Spanish essay for an A2/B1 English-speaking learner. The reader wants to scan ES then EN inline to learn translations quickly.
+const SYSTEM = `You are creating a side-by-side bilingual study version of a Spanish essay for an English-speaking learner. The reader wants to scan ES then EN inline to learn translations quickly.
 
-Take the input Spanish markdown and output an interleaved version. For every Spanish sentence, immediately follow it (same line, separated by a single space) with the natural English translation in italics, so each ES↔EN pair reads as one continuous line on a Kindle.
+Take the input Spanish markdown and output an interleaved version. For every Spanish sentence, immediately follow it (same line, separated by a single space) with the English translation in italics, so each ES↔EN pair reads as one continuous line on a Kindle.
 
 Rules:
 - Headings: keep "# " and "## " prefixes. Translate the heading text inline as "Título — English title".
 - Body paragraphs: split into sentences. For each Spanish sentence, write the Spanish sentence, then a single space, then the English translation wrapped in single asterisks for italics. Each ES↔EN pair is one line. Separate pairs with a blank line (so each pair reads as its own paragraph).
 - Bullets in "## Para llevarte": each Spanish bullet stays a bullet ("- ..."). Write the Spanish sentence, a single space, then the English translation in italics, all on one line. The next bullet starts on its own line.
-- Translate naturally, not literally. Preserve nuance, tone, and idiom. The English should read clearly to a learner — not awkward word-for-word.
 - Treat short interjections, fragments, and quoted speech as their own sentence pairs.
 - Output pure markdown. No preamble, no commentary, no closing note.
 

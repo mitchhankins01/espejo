@@ -24,6 +24,9 @@ export default defineConfig({
         // and OpenAI SDK that exercise live HTTP. Covered by integration tests
         // when budgeted.
         "src/llm/*.ts",
+        // Haiku gloss-fill — live Anthropic HTTP. Covered indirectly via
+        // import-lookups; the wrapper itself is data-shaping over the SDK.
+        "src/fsrs/gloss.ts",
         // Telegram flow handlers — assembled in this refactor; rely on R2,
         // OpenAI, and Anthropic side-effects. Add unit + integration coverage
         // as a follow-on; exempted to keep `pnpm check` green during cutover.

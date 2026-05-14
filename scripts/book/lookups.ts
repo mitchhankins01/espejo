@@ -55,14 +55,24 @@ export function countLookupsByTomo(all: Lookup[]): Map<number, number> {
   return counts;
 }
 
-export function formatLookupsForWriter(recent: Lookup[]): string {
+export interface LookupStateTag {
+  tag: "stalling" | "mastered";
+  detail: string;
+}
+
+export function formatLookupsForWriter(
+  recent: Lookup[],
+  stateByStem?: Map<string, LookupStateTag | null>
+): string {
   if (recent.length === 0) return "";
   const bullets = recent
     .map((l) => {
       const source = l.tomo_n != null ? `tomo ${l.tomo_n}` : l.book_title;
       const infl =
         l.word.toLowerCase() !== l.stem.toLowerCase() ? ` (${l.word})` : "";
-      return `- ${l.stem}${infl} — ${source}`;
+      const tagInfo = stateByStem?.get(l.stem.toLowerCase()) ?? null;
+      const tag = tagInfo ? ` [${tagInfo.tag}: ${tagInfo.detail}]` : "";
+      return `- ${l.stem}${infl} — ${source}${tag}`;
     })
     .join("\n");
   return [

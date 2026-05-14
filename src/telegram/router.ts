@@ -33,6 +33,13 @@ import {
   continueVaultPromptFlow,
   closeVaultPromptFlow,
 } from "./flows/vault-prompt.js";
+import {
+  startSrsFlow,
+  endSrsFlow,
+  handleSrsCallback,
+  handleSrsProse,
+} from "./flows/srs.js";
+import { parseSrsCallback } from "./srs-callbacks.js";
 import { runChatFlow } from "./flows/chat.js";
 
 const END_FLOW_ALIASES = new Set([
@@ -73,6 +80,7 @@ const REGISTERED_SLASHES = new Set<string>([
   "weight",
   "hilo",
   "evening",
+  "srs",
   "done",
   "end",
   "stop",
@@ -92,6 +100,23 @@ export async function routeMessage(
 
   // Reactions ignored (consistent with prior behavior).
   if (msg.reactionEmoji) return;
+
+  // Intercept structured callback payloads before they hit slash parsing.
+  // SRS uses `srs:show:<id>` and `srs:rate:<id>:<grade>`; the router parses
+  // any other callback text as a regular message below.
+  if (msg.callbackData) {
+    const srsCb = parseSrsCallback(msg.callbackData);
+    if (srsCb) {
+      await handleSrsCallback({
+        pool: ctx.pool,
+        chatId,
+        externalMessageId,
+        messageId: msg.messageId,
+        callback: srsCb,
+      });
+      return;
+    }
+  }
 
   // Tier 1 — media classifiers (deterministic, pre-extraction).
   if (msg.photos && msg.photos.length > 0) {
@@ -197,12 +222,22 @@ async function routeText(
         });
         return;
       }
+      if (peek?.flow === "srs") {
+        await endSrsFlow({ pool: ctx.pool, chatId, externalMessageId });
+        return;
+      }
       if (peek) {
         clearFlow(chatId);
         await sendTelegramMessage(chatId, "Sesión cerrada.");
         return;
       }
       await sendTelegramMessage(chatId, "No hay sesión activa.");
+      return;
+    }
+    // /srs soft-blocks if any flow is active — handle BEFORE the swap-clear
+    // below so the active flow is visible to startSrsFlow.
+    if (command.name === "srs") {
+      await startSrsFlow({ pool: ctx.pool, chatId, externalMessageId });
       return;
     }
     // Other registered slashes — clear any flow that isn't matching.
@@ -274,8 +309,14 @@ async function routeText(
   if (command && !REGISTERED_SLASHES.has(command.name) && !active) {
     await sendTelegramMessage(
       chatId,
-      "Unknown command — try /c (or /checkpoint) /practice /hilo /evening /weight."
+      "Unknown command — try /c (or /checkpoint) /practice /hilo /evening /weight /srs."
     );
+    return;
+  }
+
+  // SRS only accepts button taps + /done; prose gets nudged back.
+  if (active?.flow === "srs") {
+    await handleSrsProse({ pool: ctx.pool, chatId, externalMessageId });
     return;
   }
 

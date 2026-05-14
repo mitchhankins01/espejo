@@ -231,7 +231,8 @@ export async function editTelegramMessageText(
   chatId: string,
   messageId: number,
   text: string,
-  parseMode?: "HTML"
+  parseMode?: "HTML",
+  replyMarkup?: Record<string, unknown>
 ): Promise<void> {
   try {
     const body: Record<string, unknown> = {
@@ -240,6 +241,7 @@ export async function editTelegramMessageText(
       text,
     };
     if (parseMode) body.parse_mode = parseMode;
+    if (replyMarkup) body.reply_markup = replyMarkup;
     const res = await telegramPost("editMessageText", body);
     if (res.ok) return;
     const description = await extractTelegramDescription(res);
@@ -249,11 +251,13 @@ export async function editTelegramMessageText(
       description?.toLowerCase().includes("can't parse entities")
     ) {
       // Retry without parse_mode so the user still sees the final text.
-      await telegramPost("editMessageText", {
+      const retryBody: Record<string, unknown> = {
         chat_id: chatId,
         message_id: messageId,
         text,
-      });
+      };
+      if (replyMarkup) retryBody.reply_markup = replyMarkup;
+      await telegramPost("editMessageText", retryBody);
       return;
     }
     console.error(
