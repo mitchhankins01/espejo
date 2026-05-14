@@ -237,7 +237,12 @@ async function routeText(
     // /srs soft-blocks if any flow is active — handle BEFORE the swap-clear
     // below so the active flow is visible to startSrsFlow.
     if (command.name === "srs") {
-      await startSrsFlow({ pool: ctx.pool, chatId, externalMessageId });
+      await startSrsFlow({
+        pool: ctx.pool,
+        chatId,
+        externalMessageId,
+        argText: command.argText,
+      });
       return;
     }
     // Other registered slashes — clear any flow that isn't matching.

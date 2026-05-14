@@ -21,7 +21,33 @@ import {
 import { buildRatePayload, buildShowPayload, type SrsCallback } from "../srs-callbacks.js";
 
 const FLOW_NAME = "srs";
-const SRS_NEW_PER_SESSION = 5;
+const SRS_NEW_PER_SESSION_DEFAULT = 20;
+const SRS_NEW_PER_SESSION_MIN = 1;
+const SRS_NEW_PER_SESSION_MAX = 100;
+
+/**
+ * Parse the optional integer argument from `/srs N`. Returns:
+ *   - `{ newCap: undefined }` for `/srs` (use default)
+ *   - `{ newCap: <int> }` for `/srs 30`
+ *   - `{ error: "..." }` for `/srs foo` or out-of-range values
+ */
+export function parseSrsArgs(
+  argText: string
+): { newCap: number | undefined } | { error: string } {
+  const trimmed = argText.trim();
+  if (!trimmed) return { newCap: undefined };
+  const n = Number(trimmed);
+  if (
+    !Number.isInteger(n) ||
+    n < SRS_NEW_PER_SESSION_MIN ||
+    n > SRS_NEW_PER_SESSION_MAX
+  ) {
+    return {
+      error: `Usage: /srs [${SRS_NEW_PER_SESSION_MIN}-${SRS_NEW_PER_SESSION_MAX}]. Got "${argText.trim()}".`,
+    };
+  }
+  return { newCap: n };
+}
 
 const RATING_LABELS: Record<Grade, string> = {
   1: "again",
@@ -87,31 +113,33 @@ export function renderRevealed(row: VocabReviewRow): CardFrontView {
   };
 }
 
-export function formatInterval(scheduledDays: number): string {
-  if (scheduledDays < 1 / 24) {
-    return "<1m";
-  }
-  if (scheduledDays < 1) {
-    const minutes = Math.max(1, Math.round(scheduledDays * 24 * 60));
-    return `${minutes}m`;
-  }
-  if (scheduledDays < 30) {
-    return `${Math.round(scheduledDays)}d`;
-  }
-  if (scheduledDays < 365) {
-    return `${Math.round(scheduledDays / 30)}mo`;
-  }
-  return `${Math.round(scheduledDays / 365)}y`;
+/**
+ * Format the human-facing interval between `now` and `due`. Computed from the
+ * actual due date so learning-state cards (FSRS tracks them in minutes via
+ * `due`, not via `scheduled_days`) get correct labels.
+ */
+export function formatInterval(due: Date, now: Date = new Date()): string {
+  const ms = Math.max(0, due.getTime() - now.getTime());
+  const minutes = ms / 60_000;
+  if (minutes < 1) return "<1m";
+  if (minutes < 60) return `${Math.round(minutes)}m`;
+  const hours = minutes / 60;
+  if (hours < 24) return `${Math.round(hours)}h`;
+  const days = hours / 24;
+  if (days < 30) return `${Math.round(days)}d`;
+  if (days < 365) return `${Math.round(days / 30)}mo`;
+  return `${Math.round(days / 365)}y`;
 }
 
 export function renderRatedSummary(
   row: VocabReviewRow,
   rating: Grade,
-  scheduledDays: number
+  due: Date,
+  now: Date = new Date()
 ): string {
   return (
     `✓ ${escapeHtml(row.stem)} (${RATING_LABELS[rating]}) → ` +
-    `next in ${formatInterval(scheduledDays)}`
+    `next in ${formatInterval(due, now)}`
   );
 }
 
@@ -196,20 +224,31 @@ async function endSessionWithSummary(
   clearFlow(deps.chatId);
 }
 
-export async function startSrsFlow(deps: SrsDeps): Promise<void> {
-  const { pool, chatId, externalMessageId } = deps;
+export async function startSrsFlow(
+  deps: SrsDeps & { argText?: string }
+): Promise<void> {
+  const { pool, chatId, externalMessageId, argText } = deps;
+  const rawCommand = `/srs${argText ? ` ${argText}` : ""}`;
   const active = getFlow(chatId);
   if (active) {
     const reply = `Termina /done primero — tienes flow ${flowLabel(active.flow)} activa.`;
-    await persistUser(pool, chatId, externalMessageId, "/srs");
+    await persistUser(pool, chatId, externalMessageId, rawCommand);
     await sendTelegramMessage(chatId, reply);
     await persistAssistant(pool, chatId, reply);
     return;
   }
 
-  await persistUser(pool, chatId, externalMessageId, "/srs");
+  await persistUser(pool, chatId, externalMessageId, rawCommand);
 
-  const queue = await getDueQueue(pool, SRS_NEW_PER_SESSION);
+  const parsed = parseSrsArgs(argText ?? "");
+  if ("error" in parsed) {
+    await sendTelegramMessage(chatId, parsed.error);
+    await persistAssistant(pool, chatId, parsed.error);
+    return;
+  }
+  const newCap = parsed.newCap ?? SRS_NEW_PER_SESSION_DEFAULT;
+
+  const queue = await getDueQueue(pool, newCap);
   if (queue.length === 0) {
     const reply = "Cola vacía. Vuelve a leer un rato y prueba de nuevo más tarde.";
     await sendTelegramMessage(chatId, reply);
@@ -219,7 +258,7 @@ export async function startSrsFlow(deps: SrsDeps): Promise<void> {
       surface: "flow",
       action: "srs.start",
       actor: chatId,
-      args: { queueSize: 0 },
+      args: { queueSize: 0, newCap },
       ok: true,
     });
     return;
@@ -243,7 +282,7 @@ export async function startSrsFlow(deps: SrsDeps): Promise<void> {
     surface: "flow",
     action: "srs.start",
     actor: chatId,
-    args: { queueSize: queue.length },
+    args: { queueSize: queue.length, newCap },
     ok: true,
   });
 
@@ -338,7 +377,7 @@ export async function handleSrsCallback(
   state.queueIndex += 1;
   setFlow(chatId, state);
 
-  const summary = renderRatedSummary(row, callback.rating, next.scheduled_days);
+  const summary = renderRatedSummary(row, callback.rating, next.due);
   await editTelegramMessageText(chatId, messageId, summary, "HTML");
   await persistAssistant(pool, chatId, summary);
 
