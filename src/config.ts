@@ -145,6 +145,10 @@ export const config = {
     targetHour: parseIntegerEnv("ON_THIS_DAY_HOUR", 16, 0),
   },
   timezone: process.env.TIMEZONE || "Europe/Madrid",
+  github: {
+    owner: process.env.GITHUB_OWNER || "mitchhankins01",
+    repo: process.env.GITHUB_REPO || "espejo",
+  },
   gmail: {
     appPassword: process.env.GMAIL_APP_PASSWORD || "",
     fromEmail: process.env.GMAIL_FROM_EMAIL || "mitchhankins01@gmail.com",

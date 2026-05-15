@@ -5,6 +5,7 @@ import {
   insertCheckpointIdempotent,
   findRecentDuplicate,
   getCheckpointsForDate,
+  getRecentCheckpoints,
 } from "../../src/db/queries/checkpoints.js";
 
 describe("checkpoints queries", () => {
@@ -114,5 +115,31 @@ describe("checkpoints queries", () => {
     expect(all.length).toBeGreaterThanOrEqual(2);
     expect(justSubstance).toHaveLength(1);
     expect(justSubstance[0].trigger).toBe("Nic");
+  });
+
+  it("getRecentCheckpoints returns rows within an inclusive local-date range", async () => {
+    await insertCheckpoint(pool, {
+      kind: "substance",
+      trigger: "Nic",
+      localDate: "2026-05-04",
+    });
+    await insertCheckpoint(pool, {
+      kind: "substance",
+      trigger: "Weed",
+      localDate: "2026-05-06",
+    });
+    await insertCheckpoint(pool, {
+      kind: "substance",
+      trigger: "Caffeine",
+      localDate: "2026-05-09",
+    });
+    const rows = await getRecentCheckpoints(pool, {
+      fromDate: "2026-05-04",
+      toDate: "2026-05-07",
+    });
+    const triggers = rows.map((r) => r.trigger);
+    expect(triggers).toContain("Nic");
+    expect(triggers).toContain("Weed");
+    expect(triggers).not.toContain("Caffeine");
   });
 });

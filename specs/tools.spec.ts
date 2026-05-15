@@ -496,6 +496,31 @@ export const toolSpecs = {
     ],
   },
 
+  sync_oura: {
+    name: "sync_oura" as const,
+    annotations: WRITE_IDEMPOTENT,
+    description:
+      "Pull the latest Oura data into Postgres for the last N days. Equivalent to running `pnpm sync:oura` locally. " +
+      "Returns a count summary per endpoint (sleep, readiness, activity, stress, etc.). " +
+      "Returns null with an explanation when OURA_ACCESS_TOKEN is missing or an existing sync holds the advisory lock. " +
+      "Use this at the start of an evening review when stress/recovery/sleep figures need to reflect the latest ring upload.",
+    params: z.object({
+      lookback_days: z
+        .number()
+        .int()
+        .min(1)
+        .max(30)
+        .default(2)
+        .describe(
+          "How many days back to fetch from the Oura API (default 2 — covers today plus yesterday for incremental syncs)"
+        ),
+    }),
+    examples: [
+      { input: {}, behavior: "Syncs the last 2 days of Oura data and returns counts" },
+      { input: { lookback_days: 7 }, behavior: "Wider lookback (e.g. after a stretch of missed syncs)" },
+    ],
+  },
+
   get_obsidian_sync_status: {
     name: "get_obsidian_sync_status" as const,
     annotations: READ_ONLY,
@@ -503,6 +528,147 @@ export const toolSpecs = {
     params: z.object({}),
     examples: [
       { input: {}, behavior: "Returns sync status with last run info, counts, pending embeddings" },
+    ],
+  },
+
+  get_recent_checkpoints: {
+    name: "get_recent_checkpoints" as const,
+    annotations: READ_ONLY,
+    description:
+      "Return Checkpoint Protocol tolls from the last N days, oldest-first. " +
+      "Each toll is shaped as `HH:MM kind | trigger | body | part_voice | resolution`. " +
+      "Since 2026-05-13 every logged substance toll is implicitly a 'go' — passes are mental and never logged. " +
+      "Do not compute pass/go ratios from this data; treat each row's existence as 'a use happened'.",
+    params: z.object({
+      days: z
+        .number()
+        .int()
+        .min(1)
+        .max(30)
+        .default(7)
+        .describe("How many days back to include, inclusive of today (default 7)"),
+    }),
+    examples: [
+      {
+        input: {},
+        behavior: "Returns the last 7 days of tolls ordered by occurred_at ascending",
+      },
+      {
+        input: { days: 1 },
+        behavior: "Today's tolls only",
+      },
+    ],
+  },
+
+  get_recent_weights: {
+    name: "get_recent_weights" as const,
+    annotations: READ_ONLY,
+    description:
+      "Return body-weight measurements from the last N days, most recent first. " +
+      "Reads from daily_metrics where weight_kg IS NOT NULL.",
+    params: z.object({
+      days: z
+        .number()
+        .int()
+        .min(1)
+        .max(90)
+        .default(7)
+        .describe("How many days back to include, inclusive of today (default 7)"),
+    }),
+    examples: [
+      {
+        input: {},
+        behavior: "Returns the last 7 days of weight measurements newest-first",
+      },
+    ],
+  },
+
+  get_oura_day_context: {
+    name: "get_oura_day_context" as const,
+    annotations: READ_ONLY,
+    description:
+      "Return today's manual Oura context for a given date: enhanced tags (alcohol/caffeine/etc), " +
+      "meditation/rest sessions, and the optimal-bedtime recommendation. " +
+      "Use this to weave specific moments ('you tagged wine at 8pm') into review questions " +
+      "instead of asking abstractly. Defaults to today.",
+    params: z.object({
+      date: dateString
+        .nullable()
+        .optional()
+        .describe("Date to look up; defaults to today in the configured timezone"),
+    }),
+    examples: [
+      {
+        input: {},
+        behavior: "Returns tags, sessions, and optimal-bedtime for today",
+      },
+      {
+        input: { date: "2026-05-14" },
+        behavior: "Returns context for a specific past date",
+      },
+    ],
+  },
+
+  get_recent_agent_chats: {
+    name: "get_recent_agent_chats" as const,
+    annotations: READ_ONLY,
+    description:
+      "Return Mitch's user-turn prompts to coding agents (Claude Code / Codex via agent_sessions) " +
+      "and to the Telegram bot (chat_messages) for the last N days. Use as a witness layer against the journal: " +
+      "what Mitch actually pursued, distinct from what got committed or written. " +
+      "Telegram side excludes utility flows (weight/srs) and the checkpoint flow (which has its own tool). " +
+      "Never recite the list as a status update — surface only as connective tissue when a thread ties into the conversation.",
+    params: z.object({
+      days: z
+        .number()
+        .int()
+        .min(1)
+        .max(7)
+        .default(1)
+        .describe("How many days back to include, inclusive of today (default 1 = today only)"),
+    }),
+    examples: [
+      {
+        input: {},
+        behavior: "Returns today's agent prompts (Claude Code/Codex) and today's Telegram user turns from chat/vault-prompt/practice/distill-hn flows",
+      },
+    ],
+  },
+
+  get_recent_commits: {
+    name: "get_recent_commits" as const,
+    annotations: READ_ONLY_OPEN,
+    description:
+      "Fetch recent commits to the espejo GitHub repo (public, no auth) since a given ISO timestamp. " +
+      "Used as a momentum signal in the evening review — what shipped today, distinct from journal content. " +
+      "Returns short_sha, message subject, author timestamp, and commit URL. " +
+      "Unpushed local commits are NOT visible — if the list looks thin, the agent should ask whether there's unpushed work.",
+    params: z.object({
+      since_iso: z
+        .string()
+        .min(1)
+        .nullable()
+        .optional()
+        .describe(
+          "ISO 8601 timestamp to fetch commits since (inclusive). If omitted, defaults to today 00:00 in the configured timezone."
+        ),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .default(30)
+        .describe("Max commits to return (default 30, max 100)"),
+    }),
+    examples: [
+      {
+        input: {},
+        behavior: "Returns commits to mitchhankins01/espejo since today 00:00 local",
+      },
+      {
+        input: { since_iso: "2026-05-14T00:00:00Z", limit: 50 },
+        behavior: "Returns up to 50 commits since the given UTC timestamp",
+      },
     ],
   },
 

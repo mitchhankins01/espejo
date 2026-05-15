@@ -25,6 +25,12 @@ export const FLOW_TOOL_NAMES: ToolName[] = [
   "get_obsidian_sync_status",
   "sync_obsidian_vault",
   "write_vault_artifact",
+  "get_recent_checkpoints",
+  "get_recent_weights",
+  "get_oura_day_context",
+  "get_recent_agent_chats",
+  "get_recent_commits",
+  "sync_oura",
 ];
 
 function resolveToolResultText(result: ToolResult): string {

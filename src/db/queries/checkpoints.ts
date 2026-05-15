@@ -117,6 +117,19 @@ export async function findRecentDuplicate(
   return result.rows[0] ?? null;
 }
 
+export async function getRecentCheckpoints(
+  pool: pg.Pool,
+  options: { fromDate: string; toDate: string }
+): Promise<CheckpointRow[]> {
+  const result = await pool.query<CheckpointRow>(
+    `SELECT * FROM checkpoints
+     WHERE local_date >= $1::date AND local_date <= $2::date
+     ORDER BY occurred_at ASC`,
+    [options.fromDate, options.toDate]
+  );
+  return result.rows;
+}
+
 export async function getCheckpointsForDate(
   pool: pg.Pool,
   localDate: string,

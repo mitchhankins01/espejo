@@ -136,6 +136,35 @@ export async function purgeCompactedMessages(
 }
 
 /**
+ * User-turn prompts from Telegram chat_messages within a timestamp range,
+ * filtered to the conversational flows that signal *what Mitch reached for*
+ * (chat thinking-out-loud, vault-prompt invocations, practice sessions, HN
+ * distillation). Excludes utility flows like checkpoint/weight/srs.
+ */
+export interface RecentChatPromptRow {
+  created_at: Date;
+  flow: string | null;
+  content: string;
+}
+
+export async function getRecentChatPrompts(
+  pool: pg.Pool,
+  options: { fromDate: string; toDate: string; timezone: string }
+): Promise<RecentChatPromptRow[]> {
+  const result = await pool.query<RecentChatPromptRow>(
+    `SELECT created_at, flow, content
+     FROM chat_messages
+     WHERE (created_at AT TIME ZONE $3)::date >= $1::date
+       AND (created_at AT TIME ZONE $3)::date <= $2::date
+       AND role = 'user'
+       AND flow IN ('chat', 'vault-prompt', 'practice', 'distill-hn')
+     ORDER BY created_at ASC, id ASC`,
+    [options.fromDate, options.toDate, options.timezone]
+  );
+  return result.rows;
+}
+
+/**
  * Get the most recent compaction timestamp for a chat.
  */
 export async function getLastCompactionTime(

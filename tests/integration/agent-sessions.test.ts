@@ -4,6 +4,7 @@ import {
   upsertSession,
   latestSourceMtime,
   latestIngestedAt,
+  getRecentAgentPrompts,
   type AgentSessionRow,
 } from "../../src/db/queries/agent-sessions.js";
 
@@ -79,5 +80,41 @@ describe("agent_sessions queries", () => {
     const after = await latestIngestedAt(pool);
     expect(after).toBeInstanceOf(Date);
     expect(after!.getTime()).toBeGreaterThan(Date.now() - 60_000);
+  });
+
+  it("getRecentAgentPrompts unrolls jsonb prompts and filters system caveats", async () => {
+    await upsertSession(
+      pool,
+      makeRow({
+        session_id: "p-1",
+        started_at: new Date("2026-05-15T08:00:00.000Z"),
+        prompts: [
+          { ts: "2026-05-15T08:00:00.000Z", text: "real question one" },
+          { ts: "2026-05-15T08:05:00.000Z", text: "<local-command-caveat> skip me" },
+          { ts: "2026-05-15T08:10:00.000Z", text: "<command-name>also skip" },
+          { ts: "2026-05-15T08:15:00.000Z", text: "real question two" },
+        ],
+      })
+    );
+    // Out of range — should not appear
+    await upsertSession(
+      pool,
+      makeRow({
+        session_id: "p-2",
+        started_at: new Date("2026-05-10T08:00:00.000Z"),
+        prompts: [{ ts: "2026-05-10T08:00:00.000Z", text: "old one" }],
+      })
+    );
+    const rows = await getRecentAgentPrompts(pool, {
+      fromDate: "2026-05-15",
+      toDate: "2026-05-15",
+      timezone: "UTC",
+    });
+    const texts = rows.map((r) => r.text);
+    expect(texts).toContain("real question one");
+    expect(texts).toContain("real question two");
+    expect(texts.some((t) => t.startsWith("<local-command-caveat>"))).toBe(false);
+    expect(texts.some((t) => t.startsWith("<command-name>"))).toBe(false);
+    expect(texts).not.toContain("old one");
   });
 });

@@ -104,11 +104,17 @@ src/
     oura-compare-periods.ts — Side-by-side metrics comparison between two date ranges.
     oura-correlate.ts — Pearson correlation between two health metrics.
     sync-obsidian-vault.ts — Trigger Obsidian vault sync from R2.
+    sync-oura.ts    — Trigger an Oura → Postgres sync. Mirrors `pnpm sync:oura`; takes a `lookback_days` parameter.
     get-obsidian-sync-status.ts — Obsidian vault sync status.
     write-vault-artifact.ts — Write a markdown file to the vault: R2 putObject + synchronous knowledge_artifacts upsert. Path whitelist (Pending/Insight/Review/Note/Project/Reference), frontmatter required, overwrite default false.
     log-weights.ts  — Upsert one or more daily body-weight measurements (single or batch).
     log-checkpoint.ts — Insert a Checkpoint Protocol toll into the `checkpoints` table; 10-min DB tuple dedup, accepts optional `kind`. `choice` defaults to `go` (substance kind: passes are mental, never logged — convention since 2026-05-13).
     distill-hn-thread.ts — Distill a Hacker News thread (article + full Algolia comment tree) and email + save to Pending/Reference.
+    get-recent-checkpoints.ts — Last N days of checkpoints, oldest-first; used by Section B of the evening review prompt.
+    get-recent-weights.ts — Last N days of weight measurements; thin wrapper over `listWeights`.
+    get-oura-day-context.ts — Tags + meditation sessions + optimal-bedtime recommendation for a given day. Defaults to today.
+    get-recent-agent-chats.ts — User-turn prompts from agent_sessions (Claude Code/Codex) + chat_messages (Telegram conversational flows). Excludes utility flows.
+    get-recent-commits.ts — Public-repo GitHub REST fetch of recent commits to `mitchhankins01/espejo`. No auth. Only pushed commits show up.
   llm/              — Cross-provider abstraction over Vercel AI SDK + OpenAI SDK.
     chat.ts         — chat({provider, model, system, messages, tools, onTextDelta, cacheSystem}) wrapper around streamText.
     embed.ts        — embedText helper (OpenAI text-embedding-3-small).
@@ -135,9 +141,6 @@ src/
     client.ts       — Telegram Bot API client. sendMessage/sendVoice, retry, chunking, streaming editor.
     voice.ts        — Voice transcription (Whisper). Synthesis path removed.
     media.ts        — Photo/document processing: vision, text/PDF extraction.
-    evening-review.ts — Evening review and morning journal session prompts.
-    soul.ts         — Soul state snapshot, evolution, system prompt building.
-    pulse.ts        — Self-healing quality loop: diagnose drift, apply soul repairs.
     network-errors.ts — Recoverable network error classification for retry logic.
   oura/
     client.ts       — Oura API v2 client.
@@ -499,6 +502,3 @@ Then `$PSQL "$PGURL"` + OpenAI embeddings API (`text-embedding-3-small` — same
 
 - [Testing](docs/testing.md) — test tiers, isolation, fixtures, coverage, assertions
 - [Development](docs/development.md) — environments, common tasks, DB access
-- [Deployment](docs/deployment.md) — CI/CD, Railway, Telegram setup
-- [Telegram](docs/telegram.md) — bot features, commands, soul, Spanish, Oura, insights
-- [Architecture](docs/architecture.md) — REST API endpoints, spec workflow

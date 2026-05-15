@@ -27,7 +27,12 @@ import { handleLogCheckpoint } from "./tools/log-checkpoint.js";
 import { handleLogWeights } from "./tools/log-weights.js";
 import { handleDistillHnThread } from "./tools/distill-hn-thread.js";
 import { handleWriteVaultArtifact } from "./tools/write-vault-artifact.js";
-import { handleEveningReviewPrompt } from "./prompts/evening-review.js";
+import { handleGetRecentCheckpoints } from "./tools/get-recent-checkpoints.js";
+import { handleGetRecentWeights } from "./tools/get-recent-weights.js";
+import { handleGetOuraDayContext } from "./tools/get-oura-day-context.js";
+import { handleGetRecentAgentChats } from "./tools/get-recent-agent-chats.js";
+import { handleGetRecentCommits } from "./tools/get-recent-commits.js";
+import { handleSyncOura } from "./tools/sync-oura.js";
 
 export type McpSurface = "mcp-stdio" | "mcp-http";
 
@@ -60,6 +65,12 @@ export const toolHandlers: Record<string, ToolHandler> = {
   log_weights: handleLogWeights,
   distill_hn_thread: handleDistillHnThread,
   write_vault_artifact: handleWriteVaultArtifact,
+  get_recent_checkpoints: handleGetRecentCheckpoints,
+  get_recent_weights: handleGetRecentWeights,
+  get_oura_day_context: handleGetOuraDayContext,
+  get_recent_agent_chats: handleGetRecentAgentChats,
+  get_recent_commits: handleGetRecentCommits,
+  sync_oura: handleSyncOura,
 };
 
 export function createServer(
@@ -122,17 +133,6 @@ export function createServer(
       }
     );
   }
-
-  // Register prompts
-  server.registerPrompt(
-    "evening-review",
-    {
-      title: "Evening Review",
-      description:
-        "Start an evening review session with 7 days of journal context, past reviews, Oura biometrics, and weight data.",
-    },
-    async () => handleEveningReviewPrompt(pool)
-  );
 
   return server;
 }

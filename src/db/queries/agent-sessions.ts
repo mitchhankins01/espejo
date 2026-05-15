@@ -104,3 +104,33 @@ export async function latestIngestedAt(
   );
   return r.rows[0]?.ingested_at ?? null;
 }
+
+/**
+ * Return user-turn prompts from agent_sessions whose started_at falls within
+ * the given local-date range (inclusive). One row per prompt
+ * (jsonb_array_elements); `<local-command-caveat>` and `<command-name>` system
+ * prompts are filtered out.
+ */
+export interface RecentAgentPromptRow {
+  started_at: Date;
+  surface: SessionSurface;
+  category: SessionCategory;
+  text: string;
+}
+
+export async function getRecentAgentPrompts(
+  pool: pg.Pool,
+  options: { fromDate: string; toDate: string; timezone: string }
+): Promise<RecentAgentPromptRow[]> {
+  const result = await pool.query<RecentAgentPromptRow>(
+    `SELECT s.started_at, s.surface, s.category, p->>'text' AS text
+     FROM agent_sessions s, jsonb_array_elements(s.prompts) p
+     WHERE (s.started_at AT TIME ZONE $3)::date >= $1::date
+       AND (s.started_at AT TIME ZONE $3)::date <= $2::date
+       AND p->>'text' NOT LIKE '<local-command-caveat>%'
+       AND p->>'text' NOT LIKE '<command-name>%'
+     ORDER BY s.started_at ASC, (p->>'index')::int ASC NULLS LAST`,
+    [options.fromDate, options.toDate, options.timezone]
+  );
+  return result.rows;
+}

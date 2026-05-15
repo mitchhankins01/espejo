@@ -26,6 +26,9 @@ import {
   markMessagesCompacted,
   purgeCompactedMessages,
   getLastCompactionTime,
+  getRecentChatPrompts,
+  getOuraDayContext,
+  upsertOuraSleepTime,
   insertActivityLog,
   getActivityLog,
   getRecentActivityLogs,
@@ -802,6 +805,108 @@ describe("getLastCompactionTime", () => {
 
     const result = await getLastCompactionTime(pool, "999");
     expect(result).toBeInstanceOf(Date);
+  });
+});
+
+describe("getRecentChatPrompts", () => {
+  it("returns user turns from conversational flows within the date range", async () => {
+    await insertChatMessage(pool, {
+      chatId: "1100",
+      externalMessageId: "rcp-chat",
+      role: "user",
+      content: "thinking out loud",
+      flow: "chat",
+    });
+    await insertChatMessage(pool, {
+      chatId: "1100",
+      externalMessageId: "rcp-vault",
+      role: "user",
+      content: "/evening",
+      flow: "vault-prompt",
+    });
+    await insertChatMessage(pool, {
+      chatId: "1100",
+      externalMessageId: "rcp-weight",
+      role: "user",
+      content: "/weight 78.2",
+      flow: "weight",
+    });
+    await insertChatMessage(pool, {
+      chatId: "1100",
+      externalMessageId: "rcp-assistant",
+      role: "assistant",
+      content: "(assistant reply)",
+      flow: "chat",
+    });
+
+    const today = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "UTC",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+
+    const rows = await getRecentChatPrompts(pool, {
+      fromDate: today,
+      toDate: today,
+      timezone: "UTC",
+    });
+    const contents = rows.map((r) => r.content);
+    expect(contents).toContain("thinking out loud");
+    expect(contents).toContain("/evening");
+    expect(contents).not.toContain("/weight 78.2"); // utility flow filtered out
+    expect(contents).not.toContain("(assistant reply)"); // role filtered out
+  });
+});
+
+describe("getOuraDayContext", () => {
+  it("returns tags, sessions, and optimal bedtime for a date", async () => {
+    await pool.query(
+      `INSERT INTO oura_enhanced_tags (oura_id, start_day, start_time, tag_type_code, custom_name, comment, raw_json)
+       VALUES ($1, $2::date, $3, $4, $5, $6, '{}'::jsonb)
+       ON CONFLICT (oura_id) DO NOTHING`,
+      [
+        "tag-test-1",
+        "2026-05-12",
+        new Date("2026-05-12T20:00:00.000Z"),
+        "alcohol",
+        null,
+        "glass of wine",
+      ]
+    );
+    await pool.query(
+      `INSERT INTO oura_sessions (oura_id, day, type, start_time, end_time, mood, raw_json)
+       VALUES ($1, $2::date, $3, $4, $5, $6, '{}'::jsonb)
+       ON CONFLICT (oura_id) DO NOTHING`,
+      [
+        "sess-test-1",
+        "2026-05-12",
+        "meditation",
+        new Date("2026-05-12T19:00:00.000Z"),
+        new Date("2026-05-12T19:15:00.000Z"),
+        "calm",
+      ]
+    );
+    await upsertOuraSleepTime(pool, {
+      day: "2026-05-12",
+      status: "OK",
+      recommendation: "GOOD",
+      optimal_bedtime: { start: "23:00", end: "24:00" },
+    });
+
+    const ctx = await getOuraDayContext(pool, "2026-05-12");
+    expect(ctx.tags.length).toBeGreaterThan(0);
+    expect(ctx.tags[0].comment).toBe("glass of wine");
+    expect(ctx.sessions.length).toBeGreaterThan(0);
+    expect(ctx.sessions[0].type).toBe("meditation");
+    expect(ctx.sleep_time?.recommendation).toBe("GOOD");
+  });
+
+  it("returns empty arrays + null when there's no data for the day", async () => {
+    const ctx = await getOuraDayContext(pool, "1999-01-01");
+    expect(ctx.tags).toEqual([]);
+    expect(ctx.sessions).toEqual([]);
+    expect(ctx.sleep_time).toBeNull();
   });
 });
 

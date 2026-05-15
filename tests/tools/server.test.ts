@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockRegisterTool, mockRegisterPrompt, mockHandlers } = vi.hoisted(() => ({
+const { mockRegisterTool, mockHandlers } = vi.hoisted(() => ({
   mockRegisterTool: vi.fn(),
-  mockRegisterPrompt: vi.fn(),
   mockHandlers: {
     handleSearchEntries: vi.fn(),
     handleGetEntry: vi.fn(),
@@ -20,7 +19,6 @@ const { mockRegisterTool, mockRegisterPrompt, mockHandlers } = vi.hoisted(() => 
 vi.mock("@modelcontextprotocol/sdk/server/mcp.js", () => ({
   McpServer: vi.fn().mockImplementation(() => ({
     registerTool: mockRegisterTool,
-    registerPrompt: mockRegisterPrompt,
   })),
 }));
 
@@ -59,12 +57,6 @@ vi.mock("../../src/tools/search-artifacts.js", () => ({
 vi.mock("../../src/tools/search-content.js", () => ({
   handleSearchContent: mockHandlers.handleSearchContent,
 }));
-vi.mock("../../src/tools/save-evening-review.js", () => ({
-  handleSaveEveningReview: vi.fn(),
-}));
-vi.mock("../../src/prompts/evening-review.js", () => ({
-  handleEveningReviewPrompt: vi.fn(),
-}));
 import { createServer, toolHandlers } from "../../src/server.js";
 import type { ToolHandler } from "../../src/server.js";
 import { toolSpecs } from "../../specs/tools.spec.js";
@@ -72,7 +64,6 @@ import { toolSpecs } from "../../specs/tools.spec.js";
 describe("createServer", () => {
   beforeEach(() => {
     mockRegisterTool.mockClear();
-    mockRegisterPrompt.mockClear();
     Object.values(mockHandlers).forEach((fn) => fn.mockReset());
   });
 

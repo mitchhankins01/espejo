@@ -827,3 +827,61 @@ export async function getOuraDistinctRings(pool: pg.Pool): Promise<OuraRingConfi
   );
   return result.rows;
 }
+
+export interface OuraDayContextRow {
+  tags: Array<{
+    start_time: Date;
+    tag_type_code: string | null;
+    custom_name: string | null;
+    comment: string | null;
+  }>;
+  sessions: Array<{
+    start_time: Date;
+    type: string | null;
+    mood: string | null;
+  }>;
+  sleep_time: {
+    recommendation: string | null;
+    optimal_bedtime: unknown;
+  } | null;
+}
+
+export async function getOuraDayContext(
+  pool: pg.Pool,
+  day: string
+): Promise<OuraDayContextRow> {
+  const [tagsResult, sessionsResult, sleepTimeResult] = await Promise.all([
+    pool.query<{
+      start_time: Date;
+      tag_type_code: string | null;
+      custom_name: string | null;
+      comment: string | null;
+    }>(
+      `SELECT start_time, tag_type_code, custom_name, comment
+       FROM oura_enhanced_tags
+       WHERE start_day = $1::date
+       ORDER BY start_time ASC`,
+      [day]
+    ),
+    pool.query<{ start_time: Date; type: string | null; mood: string | null }>(
+      `SELECT start_time, type, mood
+       FROM oura_sessions
+       WHERE day = $1::date
+       ORDER BY start_time ASC`,
+      [day]
+    ),
+    pool.query<{ recommendation: string | null; optimal_bedtime: unknown }>(
+      `SELECT recommendation, optimal_bedtime
+       FROM oura_sleep_time
+       WHERE day = $1::date
+       LIMIT 1`,
+      [day]
+    ),
+  ]);
+
+  return {
+    tags: tagsResult.rows,
+    sessions: sessionsResult.rows,
+    sleep_time: sleepTimeResult.rows[0] ?? null,
+  };
+}
