@@ -42,7 +42,7 @@ import {
   fetchContextByUuid,
 } from "./book/context.js";
 import { plan, type Candidate, type PlannerOutput } from "./book/planner.js";
-import { write, countWords } from "./book/writer.js";
+import { write, countWords, splitTomo } from "./book/writer.js";
 import { interleave } from "./book/bilingual.js";
 import {
   formatLookupsForWriter,
@@ -402,7 +402,14 @@ async function main(): Promise<void> {
   let filename = tomoFilename(n, picked.title);
   if (wantsBilingual) {
     console.log("[bilingual] interleaving ES + EN");
-    epubMarkdown = await interleave(markdown);
+    const { nota } = splitTomo(markdown);
+    const mdForInterleave = nota
+      ? markdown.slice(0, markdown.indexOf(nota)).trimEnd()
+      : markdown;
+    const interleaved = await interleave(mdForInterleave);
+    epubMarkdown = nota
+      ? `${interleaved.trimEnd()}\n\n${nota}\n`
+      : interleaved;
     const biPath = join(TOMOS_DIR, `${padded}-bilingual.md`);
     await writeFile(biPath, epubMarkdown, "utf-8");
     filename = filename.replace(/\.epub$/, " (bilingual).epub");
