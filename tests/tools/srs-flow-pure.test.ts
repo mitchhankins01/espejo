@@ -18,6 +18,7 @@ import {
   parseSrsArgs,
   formatInterval,
   renderRatedSummary,
+  pickSampleSentence,
 } from "../../src/telegram/flows/srs.js";
 import type { VocabReviewRow } from "../../src/db/queries/vocab-reviews.js";
 
@@ -89,6 +90,50 @@ describe("formatInterval", () => {
     expect(
       formatInterval(new Date(NOW.getTime() + 400 * 24 * 60 * 60_000), NOW)
     ).toBe("1y");
+  });
+});
+
+describe("pickSampleSentence", () => {
+  const BASE = {
+    id: "1",
+    stem: "x",
+    examples: [],
+    sample_usage: "fallback",
+    reps: 0,
+  } as unknown as VocabReviewRow;
+
+  it("rotates through examples by reps", () => {
+    const row = {
+      ...BASE,
+      examples: [
+        { es: "A" },
+        { es: "B" },
+        { es: "C" },
+      ],
+    } as VocabReviewRow;
+    expect(pickSampleSentence({ ...row, reps: 0 } as VocabReviewRow)).toBe("A");
+    expect(pickSampleSentence({ ...row, reps: 1 } as VocabReviewRow)).toBe("B");
+    expect(pickSampleSentence({ ...row, reps: 2 } as VocabReviewRow)).toBe("C");
+    // wraps
+    expect(pickSampleSentence({ ...row, reps: 3 } as VocabReviewRow)).toBe("A");
+  });
+
+  it("falls back to sample_usage when examples is empty", () => {
+    expect(pickSampleSentence(BASE)).toBe("fallback");
+  });
+
+  it("truncates long sample_usage fallback", () => {
+    const longText = "x".repeat(200);
+    const row = { ...BASE, sample_usage: longText } as VocabReviewRow;
+    const out = pickSampleSentence(row);
+    expect(out.length).toBeLessThan(longText.length);
+    expect(out.endsWith("…")).toBe(true);
+  });
+
+  it("does not truncate sample_usage at the boundary", () => {
+    const text = "x".repeat(140);
+    const row = { ...BASE, sample_usage: text } as VocabReviewRow;
+    expect(pickSampleSentence(row)).toBe(text);
   });
 });
 

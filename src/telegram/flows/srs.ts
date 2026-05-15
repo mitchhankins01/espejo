@@ -79,10 +79,29 @@ interface CardFrontView {
   replyMarkup: Record<string, unknown>;
 }
 
+const SAMPLE_MAX_LEN = 140;
+
+/**
+ * Pick which example to surface for this review. Rotates through the
+ * enriched examples by `reps` so successive reviews of the same card
+ * (across separate /srs sessions) see different sentences. Falls back to
+ * the original Kindle excerpt (truncated) when enrichment hasn't run yet.
+ */
+export function pickSampleSentence(row: VocabReviewRow): string {
+  if (Array.isArray(row.examples) && row.examples.length > 0) {
+    const idx = row.reps % row.examples.length;
+    return row.examples[idx].es;
+  }
+  const fallback = row.sample_usage;
+  if (fallback.length <= SAMPLE_MAX_LEN) return fallback;
+  return fallback.slice(0, SAMPLE_MAX_LEN - 1).trimEnd() + "…";
+}
+
 export function renderCardFront(row: VocabReviewRow): CardFrontView {
+  const sample = pickSampleSentence(row);
   const text =
     `<b>${escapeHtml(row.stem)}</b>\n\n` +
-    `<i>${escapeHtml(row.sample_usage)}</i>`;
+    `<i>${escapeHtml(sample)}</i>`;
   return {
     text,
     replyMarkup: {
@@ -95,9 +114,13 @@ export function renderCardFront(row: VocabReviewRow): CardFrontView {
 
 export function renderRevealed(row: VocabReviewRow): CardFrontView {
   const gloss = row.gloss_override ?? row.gloss ?? "(no gloss)";
+  const pron = row.pronunciation
+    ? ` <code>${escapeHtml(row.pronunciation)}</code>`
+    : "";
+  const sample = pickSampleSentence(row);
   const text =
-    `<b>${escapeHtml(row.stem)}</b> → ${escapeHtml(gloss)}\n\n` +
-    `<i>${escapeHtml(row.sample_usage)}</i>`;
+    `<b>${escapeHtml(row.stem)}</b>${pron} → ${escapeHtml(gloss)}\n\n` +
+    `<i>${escapeHtml(sample)}</i>`;
   return {
     text,
     replyMarkup: {

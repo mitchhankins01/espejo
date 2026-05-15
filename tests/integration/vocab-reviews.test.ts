@@ -9,7 +9,7 @@ import {
   getSessionCounts,
   getReviewById,
   getVocabStateForStems,
-  setGloss,
+  setGlossPack,
   getRowsNeedingGloss,
 } from "../../src/db/queries/vocab-reviews.js";
 import { emptyCard, nextState } from "../../src/fsrs/scheduler.js";
@@ -117,7 +117,7 @@ describe("vocab-reviews queries", () => {
     expect(row.rows[0].lookups_count).toBe(2);
   });
 
-  it("getDueQueue returns due cards first (oldest due first), then new (cap)", async () => {
+  it("getDueQueue caps TOTAL queue size, due first then new", async () => {
     // 3 new cards
     for (const stem of ["aaa", "bbb", "ccc"]) {
       await upsertLookup(pool, {
@@ -151,12 +151,23 @@ describe("vocab-reviews queries", () => {
       [newId]
     );
 
-    const q = await getDueQueue(pool, 2);
+    // totalCap=4 → 2 due (priority, oldest first) + 2 new
+    const q = await getDueQueue(pool, 4);
     expect(q.length).toBe(4);
     expect(q[0].id).toBe(oldId);
     expect(q[1].id).toBe(newId);
     expect(q[2].state).toBe("new");
     expect(q[3].state).toBe("new");
+
+    // totalCap=1 → just the oldest due card, no new
+    const q1 = await getDueQueue(pool, 1);
+    expect(q1.length).toBe(1);
+    expect(q1[0].id).toBe(oldId);
+
+    // totalCap=2 → both due cards, no new
+    const q2 = await getDueQueue(pool, 2);
+    expect(q2.length).toBe(2);
+    expect(q2.every((r) => r.state === "review")).toBe(true);
   });
 
   it("excludes status='suspended' from queue and counts", async () => {
@@ -314,7 +325,7 @@ describe("vocab-reviews queries", () => {
     expect(map.size).toBe(0);
   });
 
-  it("setGloss + getRowsNeedingGloss", async () => {
+  it("setGlossPack + getRowsNeedingGloss writes all three enrichment fields", async () => {
     await upsertLookup(pool, {
       stem: "needGloss",
       lang: "es",
@@ -326,8 +337,40 @@ describe("vocab-reviews queries", () => {
     const rowsBefore = await getRowsNeedingGloss(pool, 10);
     const target = rowsBefore.find((r) => r.stem === "needGloss");
     expect(target).toBeDefined();
-    await setGloss(pool, target!.id, "test gloss");
+    await setGlossPack(pool, target!.id, {
+      gloss: "test gloss (noun)",
+      pronunciation: "/test/",
+      examples: [
+        { es: "Una prueba.", en: "A test." },
+        { es: "Otra prueba aquí.", en: "Another test here." },
+      ],
+    });
     const rowsAfter = await getRowsNeedingGloss(pool, 10);
     expect(rowsAfter.find((r) => r.stem === "needGloss")).toBeUndefined();
+
+    const row = await getReviewById(pool, target!.id);
+    expect(row?.gloss).toBe("test gloss (noun)");
+    expect(row?.pronunciation).toBe("/test/");
+    expect(row?.examples).toHaveLength(2);
+    expect(row?.examples[0].es).toBe("Una prueba.");
+  });
+
+  it("getRowsNeedingGloss flags rows missing pronunciation or examples", async () => {
+    await upsertLookup(pool, {
+      stem: "partial",
+      lang: "es",
+      sampleUsage: "partial",
+      sampleWord: "partial",
+      sampleSource: null,
+      lookedUpAt: new Date(),
+    });
+    const id = await findIdByStem("partial");
+    // Gloss-only row (pre-054 state) — should still be flagged.
+    await pool.query(
+      "UPDATE vocab_reviews SET gloss='just gloss' WHERE id=$1",
+      [id]
+    );
+    const rows = await getRowsNeedingGloss(pool, 50);
+    expect(rows.find((r) => r.stem === "partial")).toBeDefined();
   });
 });

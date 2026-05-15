@@ -632,6 +632,8 @@ CREATE TABLE IF NOT EXISTS vocab_reviews (
     lang            TEXT NOT NULL,
     gloss           TEXT,
     gloss_override  TEXT,
+    pronunciation   TEXT,
+    examples        JSONB NOT NULL DEFAULT '[]'::jsonb,
     sample_usage    TEXT NOT NULL,
     sample_word     TEXT NOT NULL,
     sample_source   TEXT,

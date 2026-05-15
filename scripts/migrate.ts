@@ -1878,6 +1878,14 @@ const migrations: Migration[] = [
           ON vocab_review_log (reviewed_at DESC);
     `,
   },
+  {
+    name: "054-vocab-pronunciation-examples",
+    getSql: () => `
+      ALTER TABLE vocab_reviews
+        ADD COLUMN IF NOT EXISTS pronunciation TEXT,
+        ADD COLUMN IF NOT EXISTS examples JSONB NOT NULL DEFAULT '[]'::jsonb;
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

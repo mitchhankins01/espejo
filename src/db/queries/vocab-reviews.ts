@@ -1,12 +1,19 @@
 import type pg from "pg";
 import type { CardStateName, Grade, NextCardState } from "../../fsrs/scheduler.js";
 
+export interface VocabExample {
+  es: string;
+  en?: string;
+}
+
 export interface VocabReviewRow {
   id: string;
   stem: string;
   lang: string;
   gloss: string | null;
   gloss_override: string | null;
+  pronunciation: string | null;
+  examples: VocabExample[];
   sample_usage: string;
   sample_word: string;
   sample_source: string | null;
@@ -75,7 +82,9 @@ export async function upsertLookup(
 }
 
 /**
- * Rows that need a Haiku gloss (gloss IS NULL and not suspended).
+ * Rows that need a Haiku enrichment pass — missing gloss, missing
+ * pronunciation, or no examples yet. Used for both initial backfill and
+ * upgrade passes after the schema gains new enrichment fields.
  */
 export async function getRowsNeedingGloss(
   pool: pg.Pool,
@@ -89,7 +98,10 @@ export async function getRowsNeedingGloss(
   }>(
     `SELECT id::text, stem, lang, sample_usage
        FROM vocab_reviews
-      WHERE gloss IS NULL AND status = 'active'
+      WHERE status = 'active'
+        AND (gloss IS NULL
+             OR pronunciation IS NULL
+             OR jsonb_array_length(examples) = 0)
       ORDER BY last_seen_at DESC
       LIMIT $1`,
     [limit]
@@ -97,36 +109,56 @@ export async function getRowsNeedingGloss(
   return result.rows;
 }
 
-export async function setGloss(
+export interface GlossPack {
+  gloss: string;
+  pronunciation: string | null;
+  examples: VocabExample[];
+}
+
+export async function setGlossPack(
   pool: pg.Pool,
   id: string,
-  gloss: string
+  pack: GlossPack
 ): Promise<void> {
   await pool.query(
-    `UPDATE vocab_reviews SET gloss = $1, updated_at = NOW() WHERE id = $2`,
-    [gloss, id]
+    `UPDATE vocab_reviews
+        SET gloss         = $1,
+            pronunciation = $2,
+            examples      = $3::jsonb,
+            updated_at    = NOW()
+      WHERE id = $4`,
+    [pack.gloss, pack.pronunciation, JSON.stringify(pack.examples), id]
   );
 }
 
 /**
- * Build the queue for a fresh session. Returns due cards (oldest first), then
- * up to `newCap` cards in state='new' (oldest last_seen_at first).
+ * Build the queue for a fresh session, capped at `totalCap` cards. Due cards
+ * (oldest first) take priority; remainder filled with state='new' rows in
+ * `first_seen_at` order.
+ *
+ * `/srs N` semantics: N is the TOTAL session length, not the new-card cap.
+ * The earlier design uncapped due cards, which surfaced 30 cards for a
+ * `/srs 10` when there were 20 due — the opposite of the user expectation.
  */
 export async function getDueQueue(
   pool: pg.Pool,
-  newCap: number
+  totalCap: number
 ): Promise<VocabReviewRow[]> {
   const dueResult = await pool.query<VocabReviewRow>(
     `SELECT * FROM vocab_reviews
       WHERE status = 'active' AND state <> 'new' AND due <= NOW()
-      ORDER BY due ASC`
+      ORDER BY due ASC
+      LIMIT $1`,
+    [totalCap]
   );
+  const remaining = totalCap - dueResult.rows.length;
+  if (remaining <= 0) return dueResult.rows;
   const newResult = await pool.query<VocabReviewRow>(
     `SELECT * FROM vocab_reviews
       WHERE status = 'active' AND state = 'new'
       ORDER BY first_seen_at ASC
       LIMIT $1`,
-    [newCap]
+    [remaining]
   );
   return [...dueResult.rows, ...newResult.rows];
 }
