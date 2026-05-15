@@ -59,6 +59,10 @@ import {
   readHighlights,
   recentHighlights,
 } from "./book/highlights.js";
+import {
+  formatOpenQuestionsForWriter,
+  readOpenQuestions,
+} from "./book/open-questions.js";
 import { buildEpub, tomoFilename } from "./book/epub.js";
 import { sendToKindle } from "./book/send.js";
 import { offerJuliaShare, type ShareJuliaMode } from "./book/share.js";
@@ -353,11 +357,19 @@ async function main(): Promise<void> {
       `      injecting ${Math.min(highlights.length, 12)} recent highlights — grammar/conjugation (${highlights.length} total)`
     );
   }
+  const openQuestions = await readOpenQuestions();
+  const openQuestionsBlock = formatOpenQuestionsForWriter(openQuestions);
+  if (openQuestions.length > 0) {
+    console.log(
+      `      injecting ${openQuestions.length} open Spanish question(s) — gloss every occurrence`
+    );
+  }
   const writtenMarkdown = await write(
     picked,
     allContext,
     lookupsBlock,
-    highlightsBlock
+    highlightsBlock,
+    openQuestionsBlock
   );
   const counts = countWords(writtenMarkdown);
   console.log(`      ${counts.total} words`);

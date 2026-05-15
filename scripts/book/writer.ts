@@ -3,6 +3,8 @@ import { config } from "../../src/config.js";
 import type { Candidate } from "./planner.js";
 import type { ContextItem } from "./context.js";
 
+const OPEN_QUESTIONS_RULE = `Open Spanish questions — if the user message includes an "Open Spanish questions" block, those are structures the reader is actively trying to lock in. Every time the tomo exercises one of those structures, briefly gloss the rule in Spanish inline — one short clarifying clause in parentheses or em-dashes (e.g. "(indicativo aquí porque 'creo que' afirma)" or "— hubo, un acontecimiento puntual —"). Gloss EVERY occurrence, not just the first; the repetition is what makes the pattern recognizable. Keep each gloss short and varied in phrasing so it doesn't read as boilerplate, but don't skip one. Don't footnote, don't lecture, don't add a parenthetical translation. If no Open Spanish questions block is present, ignore this rule.`;
+
 const GRAMMAR_GUARDRAILS = `Spanish grammar guardrails — recurring writer-model errors to avoid:
 
 - Subjuntivo only when triggered. Use subjuntivo ONLY after explicit triggers: querer/esperar/dudar/preferir que; para que; antes/después de que; sin que; cuando + future event ("cuando llegue"); relative clauses with non-specific or hypothetical antecedent ("busco a alguien que sepa"); negative belief ("no creo que sea"). Outside these, use indicative.
@@ -45,6 +47,8 @@ After the body, append a final takeaways section:
 
 ${GRAMMAR_GUARDRAILS}
 
+${OPEN_QUESTIONS_RULE}
+
 Output format:
 - "# <title>" on the first line.
 - Blank line, then prose body in paragraphs. 2-4 optional "## <heading>" Spanish section breaks allowed (never named "Para llevarte").
@@ -78,6 +82,8 @@ Specificity over evocation — recurring failure mode in prior flow tomos:
 
 ${GRAMMAR_GUARDRAILS}
 
+${OPEN_QUESTIONS_RULE}
+
 Output format:
 - "# <title>" on the first line.
 - Blank line, then the body. Optional "## <heading>" Spanish section breaks allowed if the form calls for them (never named "Para llevarte").
@@ -89,7 +95,8 @@ export async function write(
   plan: Candidate,
   context: ContextItem[],
   lookupsBlock = "",
-  highlightsBlock = ""
+  highlightsBlock = "",
+  openQuestionsBlock = ""
 ): Promise<string> {
   if (!config.anthropic.apiKey) {
     throw new Error("ANTHROPIC_API_KEY is required for the writer");
@@ -114,6 +121,7 @@ export async function write(
   const user = [
     ...(lookupsBlock ? [lookupsBlock, ""] : []),
     ...(highlightsBlock ? [highlightsBlock, ""] : []),
+    ...(openQuestionsBlock ? [openQuestionsBlock, ""] : []),
     `# ${planLabel}`,
     `- Título: ${plan.title}`,
     `- Dominio: ${plan.domain}`,
