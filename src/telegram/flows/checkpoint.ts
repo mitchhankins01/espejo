@@ -43,7 +43,7 @@ function normalizeResolution(input: string): "pass" | "go" | "unset" {
 
 // Substance checkpoints are now always logged as "go" — Mitch handles passes
 // mentally and never triggers the flow for them. An explicit 4th segment can
-// still override (e.g. `/c trigger, body, voice, pass` if you really mean it).
+// still override (e.g. `/c trigger. body. voice. pass` if you really mean it).
 const DEFAULT_RESOLUTION = "go" as const;
 
 interface ParsedShortcutArgs {
@@ -52,7 +52,7 @@ interface ParsedShortcutArgs {
 
 function parseShortcutArgs(argText: string): ParsedShortcutArgs {
   const segments = argText
-    .split(",")
+    .split(".")
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
   return { segments };
