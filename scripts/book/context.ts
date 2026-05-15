@@ -82,7 +82,7 @@ export async function fetchContextByUuid(
     pool.query(
       `SELECT uuid, created_at, text
        FROM entries
-       WHERE uuid = ANY($1::uuid[])`,
+       WHERE uuid = ANY($1::text[])`,
       [uuids]
     ),
     pool.query(
