@@ -1,0 +1,12 @@
+Conjugation data in this directory is derived from `bretttolbert/verbecc`
+(https://github.com/bretttolbert/verbecc), which is distributed under the
+GNU Lesser General Public License v3.0 (LGPL-3.0).
+
+Per LGPL-3.0:
+- The derivative data preserves attribution to the upstream project.
+- Redistribution of this data must keep this license file alongside it.
+- Modifications to verbecc's source data (normalization, pruning to the
+  fifteen v1 tenses, dropping voseo rows) are documented in SOURCE.md.
+
+For the full LGPL-3.0 text see:
+https://www.gnu.org/licenses/lgpl-3.0.txt

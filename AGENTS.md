@@ -86,6 +86,10 @@ src/
       obsidian.ts   — Obsidian vault sync queries.
       usage.ts      — Universal usage_logs writer (logUsage helper).
       vault-fs.ts   — vault_fs_events writer (FS-event audit log, fed by fswatch).
+      vocab-reviews.ts — Kindle-lookup vocab review FSRS state (queue/serve/rate).
+      conjugations.ts — Read-only access to the vendored `conjugations` table.
+      conjugation-reviews.ts — Lazy-promotion + race-safe rate for `(lemma, tense, person)` cells. Pattern selection (most-due / cold-start bootstrap), queue build, session counts.
+      cloze-source.ts — Hybrid corpus lookup for cloze sentences (vocab_reviews.examples → entries → knowledge_artifacts). `looksSpanish` post-filter; `imperative_negative` anchors on `no <form>`.
   tools/
     search.ts       — Hybrid RRF search. The most important tool.
     get-entry.ts    — Single entry by UUID.
@@ -121,7 +125,12 @@ src/
     transcribe.ts   — Whisper wrapper.
     vision.ts       — Image / PDF text extraction.
     tts.ts          — OpenAI TTS (synthesizeSpeech).
+    cloze-gen.ts    — Haiku one-shot cloze sentence generator. Only fires on corpus-miss for /conj; output is cached on `conjugation_reviews.generated_sentence`.
     index.ts        — Re-exports.
+  fsrs/
+    scheduler.ts    — Thin ts-fsrs wrapper. CardState ↔ FsrsCard adapters and `nextState(card, grade)`.
+    conj-grading.ts — Pure typed-conjugation grader (case-insensitive, whitespace-normalized, accent-sensitive). `-ra`/`-se` equivalence for imperfecto / pluscuamperfecto subjuntivo.
+    gloss.ts        — Haiku gloss-fill batched for vocab_reviews enrichment.
   telegram/
     webhook.ts      — Telegram webhook handler. Validates secret token, hands updates to router.
     updates.ts      — Update deduplication, per-chat queue, fragment reassembly.
@@ -135,6 +144,7 @@ src/
       practice.ts   — /practice + /done Spanish coach. Calls llm/chat() directly; extraction handled by practice-session.ts.
       vault-prompt.ts — /hilo /evening generic vault-prompt runner. Loads body from knowledge_artifacts (R2 fallback), strips frontmatter, runs chat() with full read tools + write_vault_artifact.
       chat.ts       — Default fallback. Anthropic Sonnet, 12-msg context cap (flow IS NULL OR flow='chat'), full read tools + write_vault_artifact, streams via chat() + createStreamEditor, prompt caching enabled.
+      conj.ts       — /conj typed Spanish conjugation drill. One pattern per session, FSRS-scheduled per (lemma, tense, person) cell. `/hint` and `/easy` are sub-commands of the conj flow (not globally registered). Cloze sentences come from corpus first (vocab_reviews.examples → entries → knowledge_artifacts), fall back to Haiku one-shot cached on the row.
       tool-catalog.ts — Builds the AI-SDK ToolSet from spec handlers for chat + vault-prompt flows.
     truncation.ts   — Tool-result truncation for chat_messages persistence.
     practice-session.ts — Practice extraction (Claude call → JSON → R2 + DB upsert of Español Vivo).
@@ -142,6 +152,7 @@ src/
     voice.ts        — Voice transcription (Whisper). Synthesis path removed.
     media.ts        — Photo/document processing: vision, text/PDF extraction.
     network-errors.ts — Recoverable network error classification for retry logic.
+    conj-hints.ts   — Pure pattern-hint builder for `/conj /hint`. 33 templates, never leaks expected_form.
   oura/
     client.ts       — Oura API v2 client.
     sync.ts         — Oura sync engine: API fetch + DB upserts + advisory lock + timer.
@@ -185,6 +196,9 @@ scripts/
   ingest-activity.ts — Ingest ActivityWatch events into device_events, atuin shell history into usage_logs, Screenpipe OCR/audio chunks into screen_captures (pnpm ingest:activity). Args: --dry-run, --force, --since, --source <aw|atuin|screenpipe>, --skip-if-fresh 24h. See specs/2026-05-03-activity-capture-plan.md.
   backfill-checkpoints.ts — One-time: parse Artifacts/Checkpoint/*.md from R2 into the `checkpoints` table. Idempotent via the dedup unique index. Default --dry-run; require --apply to mutate.
   import-lookups.ts — Bulk import Spanish verbs + Kindle lookups.
+  import-conjugations.ts — One-shot import of `data/conjugations-es/verbs.json` + `data/verb-frequency-es.txt` into the `conjugations` table. Idempotent (`ON CONFLICT (lemma,tense,person) DO UPDATE`). Run as `pnpm import:conjugations`.
+  lib/
+    pattern-classifier.ts — Pure: `(lemma, tense, person, form) → one of 33 conjugation pattern buckets`. Person-scoped rules (e.g. yo-go separate from stem-changing tu/el/ellos) + small hardcoded irregular sets.
   write-tomo.ts     — Write the next Espejo tomo. Two-step flow: `--plan-only` emits 6 candidates (3 essay + 3 flow) saved to `books/next-plan.json`; `--pick=<1-6>` runs the writer with the chosen candidate. Flags: `--steer "..."`, `--bilingual` / `--no-bilingual`, `--share-julia` / `--no-share-julia`, `--fresh-plan`. See `Artifacts/Prompt/Spanish/Tomo.md`.
   condense-insights.ts — Periodic condensation pass over insights.
   migrate.ts        — Runs SQL files, tracks applied migrations in _migrations table.
@@ -219,6 +233,10 @@ specs/
   — Planned/Stub: aws-sst-migration-plan.md, chat-archive.md, project-management.md
   fixtures/
     seed.ts         — Test data with pre-computed embeddings for determinism.
+data/
+  conjugations-es/  — Vendored verbecc-derived Spanish conjugation cells (LGPL-3.0). `verbs.json` is the flat raw form/lemma/tense/person/template list consumed by `scripts/import-conjugations.ts`.
+  verb-frequency-es.txt — Hermit Dave FrequencyWords Spanish list (CC-BY-SA-4.0). Lemma rank seeds `conjugations.frequency_rank` and promotion ordering for /conj.
+  LICENSE-frequency-words.txt — Attribution + CC-BY-SA license preserved alongside the frequency list.
 docs/               — Deep documentation (see Deep Docs section below).
 ```
 
@@ -497,6 +515,7 @@ Then `$PSQL "$PGURL"` + OpenAI embeddings API (`text-embedding-3-small` — same
 - **Slash commands need a session restart.** New `.claude/commands/*.md` files don't register until Claude Code reloads — `/name` returns "Unknown command" until then. Same for edits to existing command files (the body is read at registration time).
 - **`CLAUDE.md` is a symlink to `AGENTS.md`.** Edits to "CLAUDE.md" land in AGENTS.md and that's where `git diff` shows them. Edit AGENTS.md directly to avoid confusion.
 - **Vault FS forensics** (when Mitch asks "what happened with X.md" or reports a missing canonical / new ` 2.md` conflict copy): query in this order: (1) `obsidian_sync_runs.deleted_paths` — exact paths each R2→DB tick soft-deleted; (2) `vault_fs_events` (fed by an fswatch LaunchAgent on Mitch's Mac) for local FS create/unlink/modify/rename timing under `~/Documents/Artifacts`. The `process_name`/`pid`/`ppid` columns exist but stay null — eslogger-based attribution was abandoned (Sequoia TCC dead-end; see `scripts/vault-fs/README.md`). Bodies of soft-deleted artifacts remain in `knowledge_artifacts.body` for recovery; the Telegram tripwire in `src/obsidian/sync.ts` fires `notifyAlert` on canonical loss.
+- **`conjugations` is read-only post-import**. Rebuild via `pnpm import:conjugations` — idempotent (`ON CONFLICT (lemma,tense,person) DO UPDATE`). Refresh frequency-rank ordering after updating `data/verb-frequency-es.txt` by re-running the same script. The runtime flow only writes to `conjugation_reviews` / `conjugation_review_log`. `/conj` is the only entry point — `/hint` and `/easy` are sub-commands of the conj flow (not globally registered slashes).
 
 ## Deep Docs
 

@@ -1,0 +1,20 @@
+verb-frequency-es.txt is derived from Hermit Dave's FrequencyWords project
+(https://github.com/hermitdave/FrequencyWords), which packages OpenSubtitles
+2018 word-frequency data.
+
+The repository code is MIT-licensed, but the generated frequency content
+itself is distributed under CC BY-SA 4.0 (Creative Commons
+Attribution-ShareAlike 4.0 International).
+
+Per CC BY-SA 4.0:
+- Attribution: Hermit Dave's FrequencyWords / OpenSubtitles 2018.
+- ShareAlike: derivative frequency data must be shared under the same
+  license.
+
+For the full CC BY-SA 4.0 text see:
+https://creativecommons.org/licenses/by-sa/4.0/legalcode
+
+The list shipped with this repo is filtered to verbs (intersected with
+verbecc's Spanish lemma set) and trimmed to a development-sized subset.
+Replace with the full Hermit Dave list before relying on it for production
+frequency ordering.

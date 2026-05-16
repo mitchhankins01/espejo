@@ -39,6 +39,11 @@ import {
   handleSrsCallback,
   handleSrsProse,
 } from "./flows/srs.js";
+import {
+  startConjFlow,
+  continueConjFlow,
+  endConjFlow,
+} from "./flows/conj.js";
 import { parseSrsCallback } from "./srs-callbacks.js";
 import { runChatFlow } from "./flows/chat.js";
 
@@ -81,6 +86,7 @@ const REGISTERED_SLASHES = new Set<string>([
   "hilo",
   "evening",
   "srs",
+  "conj",
   "done",
   "end",
   "stop",
@@ -226,6 +232,10 @@ async function routeText(
         await endSrsFlow({ pool: ctx.pool, chatId, externalMessageId });
         return;
       }
+      if (peek?.flow === "conj") {
+        await endConjFlow({ pool: ctx.pool, chatId, externalMessageId });
+        return;
+      }
       if (peek) {
         clearFlow(chatId);
         await sendTelegramMessage(chatId, "Sesión cerrada.");
@@ -238,6 +248,17 @@ async function routeText(
     // below so the active flow is visible to startSrsFlow.
     if (command.name === "srs") {
       await startSrsFlow({
+        pool: ctx.pool,
+        chatId,
+        externalMessageId,
+        argText: command.argText,
+      });
+      return;
+    }
+    // /conj behaves the same way: soft-block on active flow, so dispatch
+    // BEFORE the swap-clear below.
+    if (command.name === "conj") {
+      await startConjFlow({
         pool: ctx.pool,
         chatId,
         externalMessageId,
@@ -316,6 +337,18 @@ async function routeText(
       chatId,
       "Unknown command — try /c (or /checkpoint) /practice /hilo /evening /weight /srs."
     );
+    return;
+  }
+
+  // Conj: typed answers, /hint, /easy, and unknown slashes are all routed
+  // to the flow's continue handler before SRS's prose nudge fires.
+  if (active?.flow === "conj") {
+    await continueConjFlow({
+      pool: ctx.pool,
+      chatId,
+      externalMessageId,
+      text,
+    });
     return;
   }
 

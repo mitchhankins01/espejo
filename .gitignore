@@ -15,7 +15,14 @@ Journal.json
 *.sqlite-wal
 .claude/
 .svelte-kit/
-data/
+# Ignore most of data/ (large local-only datasets like jehle_verb_database.csv)
+# but commit the vendored conjugation drill data so /conj imports work in
+# CI/prod without external fetches. Licenses live alongside per
+# LGPL-3.0 / CC-BY-SA-4.0.
+data/*
+!data/conjugations-es/
+!data/verb-frequency-es.txt
+!data/LICENSE-frequency-words.txt
 test-results/
 playwright-report/
 .playwright-mcp/

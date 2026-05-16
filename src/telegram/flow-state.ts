@@ -6,7 +6,8 @@ export type FlowName =
   | "checkpoint"
   | "vault-prompt"
   | "practice"
-  | "srs";
+  | "srs"
+  | "conj";
 
 export interface CheckpointFlowState {
   flow: "checkpoint";
@@ -48,11 +49,42 @@ export interface SrsFlowState {
   lastServedAt: number | null;
 }
 
+export interface ConjCountsByGradeKind {
+  exact: number;
+  wrong: number;
+  easy: number;
+  hint_correct: number;
+  hint_wrong: number;
+  hint_easy: number;
+}
+
+export interface ConjFlowState {
+  flow: "conj";
+  sessionId: string;
+  startedAt: number;
+  pattern: string;
+  queue: string[];
+  queueIndex: number;
+  reviewedCount: number;
+  countsByGradeKind: ConjCountsByGradeKind;
+  hintCount: number;
+  currentCardId: string | null;
+  currentExpected: string | null;
+  currentTense: string | null;
+  currentPattern: string | null;
+  currentPerson: string | null;
+  currentLemma: string | null;
+  currentSentence: string | null;
+  currentClozeSource: "corpus" | "generated" | null;
+  hintUsed: boolean;
+}
+
 export type FlowState =
   | CheckpointFlowState
   | VaultPromptFlowState
   | PracticeFlowState
-  | SrsFlowState;
+  | SrsFlowState
+  | ConjFlowState;
 
 const flows = new Map<string, FlowState>();
 

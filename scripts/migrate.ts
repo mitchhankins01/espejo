@@ -1886,6 +1886,111 @@ const migrations: Migration[] = [
         ADD COLUMN IF NOT EXISTS examples JSONB NOT NULL DEFAULT '[]'::jsonb;
     `,
   },
+  {
+    name: "055-conjugations",
+    getSql: () => `
+      CREATE TABLE IF NOT EXISTS conjugations (
+          id              BIGSERIAL PRIMARY KEY,
+          lemma           TEXT NOT NULL,
+          tense           TEXT NOT NULL,
+          person          TEXT NOT NULL,
+          form            TEXT NOT NULL,
+          pattern         TEXT NOT NULL,
+          source_template TEXT,
+          frequency_rank  INT,
+          CONSTRAINT conjugations_tense_check  CHECK (tense IN (
+              'present_indicative','preterite','imperfect','future_indicative','conditional',
+              'present_perfect','pluperfect','future_perfect','conditional_perfect',
+              'present_subjunctive','imperfect_subjunctive',
+              'present_perfect_subjunctive','pluperfect_subjunctive',
+              'imperative_affirmative','imperative_negative')),
+          CONSTRAINT conjugations_person_check CHECK (person IN (
+              'yo','tu','el','nosotros','vosotros','ellos'))
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS conjugations_cell_idx
+          ON conjugations (lemma, tense, person);
+      CREATE INDEX IF NOT EXISTS conjugations_pattern_idx       ON conjugations (pattern);
+      CREATE INDEX IF NOT EXISTS conjugations_lemma_idx         ON conjugations (lemma);
+      CREATE INDEX IF NOT EXISTS conjugations_pattern_freq_idx
+          ON conjugations (pattern, frequency_rank NULLS LAST);
+
+      CREATE TABLE IF NOT EXISTS conjugation_reviews (
+          id              BIGSERIAL PRIMARY KEY,
+          lemma           TEXT NOT NULL,
+          tense           TEXT NOT NULL,
+          person          TEXT NOT NULL,
+          expected_form   TEXT NOT NULL,
+          pattern         TEXT NOT NULL,
+          generated_sentence TEXT,
+          generated_form     TEXT,
+          due             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          stability       DOUBLE PRECISION NOT NULL DEFAULT 0,
+          difficulty      DOUBLE PRECISION NOT NULL DEFAULT 0,
+          elapsed_days    DOUBLE PRECISION NOT NULL DEFAULT 0,
+          scheduled_days  DOUBLE PRECISION NOT NULL DEFAULT 0,
+          reps            INT NOT NULL DEFAULT 0,
+          lapses          INT NOT NULL DEFAULT 0,
+          state           TEXT NOT NULL DEFAULT 'new',
+          last_review     TIMESTAMPTZ,
+          current_session_id        UUID,
+          current_session_served_at TIMESTAMPTZ,
+          current_session_rated_at  TIMESTAMPTZ,
+          chat_id         TEXT,
+          status          TEXT NOT NULL DEFAULT 'active',
+          created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          CONSTRAINT conj_reviews_tense_check  CHECK (tense IN (
+              'present_indicative','preterite','imperfect','future_indicative','conditional',
+              'present_perfect','pluperfect','future_perfect','conditional_perfect',
+              'present_subjunctive','imperfect_subjunctive',
+              'present_perfect_subjunctive','pluperfect_subjunctive',
+              'imperative_affirmative','imperative_negative')),
+          CONSTRAINT conj_reviews_person_check CHECK (person IN (
+              'yo','tu','el','nosotros','vosotros','ellos')),
+          CONSTRAINT conj_reviews_state_check  CHECK (state IN ('new','learning','review','relearning')),
+          CONSTRAINT conj_reviews_status_check CHECK (status IN ('active','suspended'))
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS conjugation_reviews_cell_idx
+          ON conjugation_reviews (lemma, tense, person);
+      CREATE INDEX IF NOT EXISTS conjugation_reviews_pattern_due_idx
+          ON conjugation_reviews (pattern, due);
+      CREATE INDEX IF NOT EXISTS conjugation_reviews_state_due_idx
+          ON conjugation_reviews (state, due);
+      CREATE INDEX IF NOT EXISTS conjugation_reviews_status_due_idx
+          ON conjugation_reviews (status, due);
+
+      CREATE TABLE IF NOT EXISTS conjugation_review_log (
+          id                BIGSERIAL PRIMARY KEY,
+          review_id         BIGINT NOT NULL REFERENCES conjugation_reviews(id) ON DELETE CASCADE,
+          rating            SMALLINT NOT NULL,
+          grade_kind        TEXT NOT NULL,
+          typed_answer      TEXT,
+          hint_used         BOOLEAN NOT NULL DEFAULT false,
+          cloze_source      TEXT NOT NULL,
+          state_before      TEXT NOT NULL,
+          state_after       TEXT NOT NULL,
+          stability_before  DOUBLE PRECISION,
+          stability_after   DOUBLE PRECISION,
+          difficulty_before DOUBLE PRECISION,
+          difficulty_after  DOUBLE PRECISION,
+          elapsed_days      DOUBLE PRECISION,
+          scheduled_days    DOUBLE PRECISION,
+          session_id        UUID NOT NULL,
+          chat_id           TEXT,
+          reviewed_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          CONSTRAINT conj_review_log_rating_check     CHECK (rating IN (1,2,3,4)),
+          CONSTRAINT conj_review_log_grade_kind_check CHECK (grade_kind IN
+              ('exact','wrong','easy','hint_correct','hint_wrong','hint_easy')),
+          CONSTRAINT conj_review_log_source_check     CHECK (cloze_source IN ('corpus','generated'))
+      );
+      CREATE INDEX IF NOT EXISTS conjugation_review_log_review_idx
+          ON conjugation_review_log (review_id, reviewed_at DESC);
+      CREATE INDEX IF NOT EXISTS conjugation_review_log_session_idx
+          ON conjugation_review_log (session_id);
+      CREATE INDEX IF NOT EXISTS conjugation_review_log_reviewed_at_idx
+          ON conjugation_review_log (reviewed_at DESC);
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

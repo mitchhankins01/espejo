@@ -53,7 +53,9 @@
     "import-lookups": "NODE_ENV=production tsx scripts/import-lookups.ts",
     "import-highlights": "tsx scripts/import-highlights.ts",
     "seed:vocab": "NODE_ENV=production tsx scripts/seed-vocab-reviews.ts",
-    "backfill:glosses": "NODE_ENV=production tsx scripts/backfill-vocab-glosses.ts"
+    "backfill:glosses": "NODE_ENV=production tsx scripts/backfill-vocab-glosses.ts",
+    "import:conjugations": "tsx scripts/import-conjugations.ts",
+    "import:conjugations:prod": "NODE_ENV=production tsx scripts/import-conjugations.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.74",
