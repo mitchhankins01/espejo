@@ -614,10 +614,12 @@ export const toolSpecs = {
     annotations: READ_ONLY,
     description:
       "Return Mitch's user-turn prompts to coding agents (Claude Code / Codex via agent_sessions) " +
-      "and to the Telegram bot (chat_messages) for the last N days. Use as a witness layer against the journal: " +
-      "what Mitch actually pursued, distinct from what got committed or written. " +
-      "Telegram side excludes utility flows (weight/srs) and the checkpoint flow (which has its own tool). " +
-      "Never recite the list as a status update — surface only as connective tissue when a thread ties into the conversation.",
+      "and every Telegram user turn (chat_messages, all flows) for the last N days. Use as a witness layer " +
+      "against the journal: what Mitch actually pursued, distinct from what got committed or written. " +
+      "Telegram side is the complete interaction timeline — chat/vault-prompt/practice/srs/distill-hn/checkpoint/weight. " +
+      "Richer per-flow data is in dedicated tools (get_recent_checkpoints, get_recent_weights); this one carries the " +
+      "shape and timing across all flows. Don't recite as a status update — weave into the day's narrative when " +
+      "a real build window, SRS cluster, or sustained agent thread connects to the body/relational threads.",
     params: z.object({
       days: z
         .number()
@@ -630,7 +632,7 @@ export const toolSpecs = {
     examples: [
       {
         input: {},
-        behavior: "Returns today's agent prompts (Claude Code/Codex) and today's Telegram user turns from chat/vault-prompt/practice/distill-hn flows",
+        behavior: "Returns today's agent prompts (Claude Code/Codex) and every Telegram user turn (all flows)",
       },
     ],
   },

@@ -209,6 +209,6 @@ describe("handleGetRecentAgentChats", () => {
     mockChat.getRecentChatPrompts.mockResolvedValueOnce([]);
     const result = await handleGetRecentAgentChats(mockPool, { days: 1 });
     expect(result).toContain("Agent sessions (Claude Code / Codex) — 0 prompts");
-    expect(result).toContain("Telegram (chat/vault-prompt/practice/distill-hn) — 0 turns");
+    expect(result).toContain("Telegram (all flows) — 0 turns");
   });
 });

@@ -136,10 +136,14 @@ export async function purgeCompactedMessages(
 }
 
 /**
- * User-turn prompts from Telegram chat_messages within a timestamp range,
- * filtered to the conversational flows that signal *what Mitch reached for*
- * (chat thinking-out-loud, vault-prompt invocations, practice sessions, HN
- * distillation). Excludes utility flows like checkpoint/weight/srs.
+ * User-turn prompts from Telegram chat_messages within a timestamp range.
+ * Returns every user-side interaction with the bot regardless of flow —
+ * chat (thinking out loud), vault-prompt (which prompts ran), practice/srs
+ * (Spanish engagement), distill-hn (reading), checkpoint (tolls), weight
+ * (body logs), plus untagged flows. Cluster shape and timing carry the
+ * signal across flow types; richer per-flow data lives in dedicated tools
+ * (get_recent_checkpoints, get_recent_weights) but this query is the
+ * complete Telegram interaction timeline.
  */
 export interface RecentChatPromptRow {
   created_at: Date;
@@ -157,7 +161,6 @@ export async function getRecentChatPrompts(
      WHERE (created_at AT TIME ZONE $3)::date >= $1::date
        AND (created_at AT TIME ZONE $3)::date <= $2::date
        AND role = 'user'
-       AND flow IN ('chat', 'vault-prompt', 'practice', 'distill-hn')
      ORDER BY created_at ASC, id ASC`,
     [options.fromDate, options.toDate, options.timezone]
   );

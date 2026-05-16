@@ -58,7 +58,7 @@ export async function handleGetRecentAgentChats(
     }
   }
 
-  sections.push(`\nTelegram (chat/vault-prompt/practice/distill-hn) — ${chatRows.length} turn${chatRows.length === 1 ? "" : "s"}:`);
+  sections.push(`\nTelegram (all flows) — ${chatRows.length} turn${chatRows.length === 1 ? "" : "s"}:`);
   if (chatRows.length === 0) {
     sections.push("  (none)");
   } else {

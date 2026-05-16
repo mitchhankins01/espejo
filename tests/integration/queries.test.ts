@@ -809,7 +809,7 @@ describe("getLastCompactionTime", () => {
 });
 
 describe("getRecentChatPrompts", () => {
-  it("returns user turns from conversational flows within the date range", async () => {
+  it("returns every user turn within the date range across all flows", async () => {
     await insertChatMessage(pool, {
       chatId: "1100",
       externalMessageId: "rcp-chat",
@@ -830,6 +830,13 @@ describe("getRecentChatPrompts", () => {
       role: "user",
       content: "/weight 78.2",
       flow: "weight",
+    });
+    await insertChatMessage(pool, {
+      chatId: "1100",
+      externalMessageId: "rcp-srs",
+      role: "user",
+      content: "/srs 30",
+      flow: "srs",
     });
     await insertChatMessage(pool, {
       chatId: "1100",
@@ -854,7 +861,8 @@ describe("getRecentChatPrompts", () => {
     const contents = rows.map((r) => r.content);
     expect(contents).toContain("thinking out loud");
     expect(contents).toContain("/evening");
-    expect(contents).not.toContain("/weight 78.2"); // utility flow filtered out
+    expect(contents).toContain("/weight 78.2"); // utility flows now included
+    expect(contents).toContain("/srs 30");
     expect(contents).not.toContain("(assistant reply)"); // role filtered out
   });
 });
