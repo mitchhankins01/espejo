@@ -5,7 +5,7 @@
 
 import type pg from "pg";
 
-export type ClozeHitSource = "examples" | "entries" | "artifacts";
+export type ClozeHitSource = "examples" | "artifacts";
 
 export interface ClozeHit {
   source: ClozeHitSource;
@@ -93,6 +93,12 @@ export async function findClozeSentence(
     : escapedForm;
   const fullPattern = `(^|[^a-záéíóúüñ])${innerPattern}([^a-záéíóúüñ]|$)`;
 
+  // Entries (Day One journal) are deliberately excluded — they contain
+  // Mitch's own Spanish, complete with the grammatical slips a drill is
+  // supposed to correct. Sourcing cloze sentences from there would test the
+  // user against their own mistakes. Keep curated content only: Haiku-
+  // generated `vocab_reviews.examples` and vault `knowledge_artifacts`
+  // (Tomos, References — LLM-written or external).
   const result = await pool.query<{ source: ClozeHitSource; sentence: string; cursor: string }>(
     `WITH form_pat AS (SELECT $1::text AS p)
      SELECT 'examples' AS source, ex->>'es' AS sentence, vr.id::text AS cursor
@@ -101,11 +107,6 @@ export async function findClozeSentence(
             form_pat
       WHERE LOWER(vr.stem) = $2 AND vr.lang=$3
         AND lower(ex->>'es') ~ form_pat.p
-     UNION ALL
-     SELECT 'entries', e.text, e.uuid
-       FROM entries e, form_pat
-      WHERE e.text ~* form_pat.p
-        AND char_length(e.text) <= 6000
      UNION ALL
      SELECT 'artifacts', ka.body, ka.id::text
        FROM knowledge_artifacts ka, form_pat

@@ -89,7 +89,7 @@ src/
       vocab-reviews.ts — Kindle-lookup vocab review FSRS state (queue/serve/rate).
       conjugations.ts — Read-only access to the vendored `conjugations` table.
       conjugation-reviews.ts — Lazy-promotion + race-safe rate for `(lemma, tense, person)` cells. Pattern selection (most-due / cold-start bootstrap), queue build, session counts.
-      cloze-source.ts — Hybrid corpus lookup for cloze sentences (vocab_reviews.examples → entries → knowledge_artifacts). `looksSpanish` post-filter; `imperative_negative` anchors on `no <form>`.
+      cloze-source.ts — Corpus lookup for cloze sentences. Curated sources only: vocab_reviews.examples → knowledge_artifacts.body (Tomos, References). Day One `entries.text` is excluded by design — those are Mitch's own Spanish and contain the very errors a drill is meant to correct. `looksSpanish` post-filter; `imperative_negative` anchors on `no <form>`.
   tools/
     search.ts       — Hybrid RRF search. The most important tool.
     get-entry.ts    — Single entry by UUID.
@@ -144,7 +144,7 @@ src/
       practice.ts   — /practice + /done Spanish coach. Calls llm/chat() directly; extraction handled by practice-session.ts.
       vault-prompt.ts — /hilo /evening generic vault-prompt runner. Loads body from knowledge_artifacts (R2 fallback), strips frontmatter, runs chat() with full read tools + write_vault_artifact.
       chat.ts       — Default fallback. Anthropic Sonnet, 12-msg context cap (flow IS NULL OR flow='chat'), full read tools + write_vault_artifact, streams via chat() + createStreamEditor, prompt caching enabled.
-      conj.ts       — /conj typed Spanish conjugation drill. One pattern per session, FSRS-scheduled per (lemma, tense, person) cell. `/hint` and `/easy` are sub-commands of the conj flow (not globally registered). Cloze sentences come from corpus first (vocab_reviews.examples → entries → knowledge_artifacts), fall back to Haiku one-shot cached on the row.
+      conj.ts       — /conj typed Spanish conjugation drill. One pattern per session, FSRS-scheduled per (lemma, tense, person) cell. `/hint` and `/easy` are sub-commands of the conj flow (not globally registered). Cloze sentences come from curated sources only — vocab_reviews.examples first, then knowledge_artifacts.body — falling back to Haiku one-shot cached on the row. **`entries.text` (Day One journal) is deliberately excluded**: it contains Mitch's own Spanish slips, and using it as the model would test him against his own mistakes.
       tool-catalog.ts — Builds the AI-SDK ToolSet from spec handlers for chat + vault-prompt flows.
     truncation.ts   — Tool-result truncation for chat_messages persistence.
     practice-session.ts — Practice extraction (Claude call → JSON → R2 + DB upsert of Español Vivo).

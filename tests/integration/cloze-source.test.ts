@@ -6,18 +6,10 @@ import {
   extractContaining,
 } from "../../src/db/queries/cloze-source.js";
 
-async function seedEntry(uuid: string, text: string): Promise<void> {
+async function seedArtifact(body: string, title = "cloze-test"): Promise<void> {
   await pool.query(
-    `INSERT INTO entries (uuid, text, created_at) VALUES ($1, $2, NOW())
-     ON CONFLICT (uuid) DO UPDATE SET text=EXCLUDED.text`,
-    [uuid, text]
-  );
-}
-
-async function seedArtifact(body: string): Promise<void> {
-  await pool.query(
-    `INSERT INTO knowledge_artifacts (kind, title, body) VALUES ('note', 'cloze-test', $1)`,
-    [body]
+    `INSERT INTO knowledge_artifacts (kind, title, body) VALUES ('reference', $1, $2)`,
+    [title, body]
   );
 }
 
@@ -35,7 +27,7 @@ async function seedExample(
 
 describe("findClozeSentence", () => {
   it("returns a corpus sentence containing the form", async () => {
-    await seedEntry("e1", "Cuando era joven, viajé mucho por España.");
+    await seedArtifact("Cuando era joven, viajé mucho por España.");
     const hit = await findClozeSentence(pool, {
       lemma: "ser",
       lang: "es",
@@ -43,12 +35,11 @@ describe("findClozeSentence", () => {
     });
     expect(hit).not.toBeNull();
     expect(hit!.sentence).toContain("era");
-    expect(hit!.source).toBe("entries");
+    expect(hit!.source).toBe("artifacts");
   });
 
   it("word-boundary: 'era' matches but 'verdadera' does not", async () => {
-    await seedEntry(
-      "e1",
+    await seedArtifact(
       "Una pregunta verdadera me molesta porque siempre cuestiona la naturaleza."
     );
     const hit = await findClozeSentence(pool, {
@@ -56,12 +47,12 @@ describe("findClozeSentence", () => {
       lang: "es",
       form: "era",
     });
-    // No Spanish sentence has bare `era` in this entry — verdadera shouldn't match.
+    // No Spanish sentence has bare `era` in this artifact — verdadera shouldn't match.
     expect(hit).toBeNull();
   });
 
   it("English homograph 'the modern era' is rejected by looksSpanish", async () => {
-    await seedEntry("e1", "The modern era brings great changes.");
+    await seedArtifact("The modern era brings great changes.");
     const hit = await findClozeSentence(pool, {
       lemma: "ser",
       lang: "es",
@@ -71,7 +62,7 @@ describe("findClozeSentence", () => {
   });
 
   it("compound forms: multi-word literal matches", async () => {
-    await seedEntry("e1", "Ya he comido hoy con mucha hambre.");
+    await seedArtifact("Ya he comido hoy con mucha hambre.");
     const hit = await findClozeSentence(pool, {
       lemma: "comer",
       lang: "es",
@@ -82,7 +73,7 @@ describe("findClozeSentence", () => {
   });
 
   it("English 'he went home' does not match Spanish 'he comido'", async () => {
-    await seedEntry("e1", "He went home today after the long meeting.");
+    await seedArtifact("He went home today after the long meeting.");
     const hit = await findClozeSentence(pool, {
       lemma: "comer",
       lang: "es",
@@ -94,13 +85,13 @@ describe("findClozeSentence", () => {
   it("imperative_negative anchors on `no <form>` (Spanish only)", async () => {
     // Insert clearly Spanish sentences. "Quiero que hables" should NOT match
     // imperative_negative anchor; "No hables tan rápido por favor" should.
-    await seedEntry(
-      "e1",
-      "Quiero que hables conmigo sobre la cena de mañana."
+    await seedArtifact(
+      "Quiero que hables conmigo sobre la cena de mañana.",
+      "subj"
     );
-    await seedEntry(
-      "e2",
-      "No hables tan rápido por favor, no entiendo bien."
+    await seedArtifact(
+      "No hables tan rápido por favor, no entiendo bien.",
+      "neg"
     );
     const hit = await findClozeSentence(pool, {
       lemma: "hablar",
@@ -113,13 +104,13 @@ describe("findClozeSentence", () => {
   });
 
   it("rotates candidates by reps", async () => {
-    await seedEntry(
-      "e1",
-      "Cuando era joven, vivía en Madrid con mi familia."
+    await seedArtifact(
+      "Cuando era joven, vivía en Madrid con mi familia.",
+      "rot1"
     );
-    await seedEntry(
-      "e2",
-      "Mi padre era muy estricto en aquella época de mi vida."
+    await seedArtifact(
+      "Mi padre era muy estricto en aquella época de mi vida.",
+      "rot2"
     );
     const a = await findClozeSentence(pool, {
       lemma: "ser",
@@ -148,10 +139,9 @@ describe("findClozeSentence", () => {
     expect(hit).toBeNull();
   });
 
-  it("examples take priority over entries", async () => {
+  it("examples take priority over artifacts", async () => {
     await seedExample("tener", "Yo tuve hambre ayer en la tarde.");
-    await seedEntry(
-      "e1",
+    await seedArtifact(
       "Cuando tuve el perro, era niño y vivía en el campo."
     );
     const hit = await findClozeSentence(pool, {
@@ -163,15 +153,18 @@ describe("findClozeSentence", () => {
     expect(hit!.source).toBe("examples");
   });
 
-  it("artifacts source fires when entries are empty", async () => {
-    await seedArtifact("Yo tuve la sensación de que algo cambió esa noche en la cena.");
+  it("entries.text is NOT a cloze source (regression: don't drill against the user's own errors)", async () => {
+    await pool.query(
+      `INSERT INTO entries (uuid, text, created_at)
+       VALUES ('e-no-source', 'Yo tuve la sensación de que algo cambió.', NOW())
+       ON CONFLICT (uuid) DO UPDATE SET text=EXCLUDED.text`
+    );
     const hit = await findClozeSentence(pool, {
       lemma: "tener",
       lang: "es",
       form: "tuve",
     });
-    expect(hit).not.toBeNull();
-    expect(hit!.source).toBe("artifacts");
+    expect(hit).toBeNull();
   });
 
   it("deleted artifacts are excluded", async () => {

@@ -38,9 +38,8 @@ async function seedCells(): Promise<void> {
        SET form=EXCLUDED.form, pattern=EXCLUDED.pattern, frequency_rank=EXCLUDED.frequency_rank`
   );
   await pool.query(
-    `INSERT INTO entries (uuid, text, created_at)
-     VALUES ('e1', 'Cuando era joven, vivía en Madrid.', NOW())
-     ON CONFLICT (uuid) DO UPDATE SET text=EXCLUDED.text`
+    `INSERT INTO knowledge_artifacts (kind, title, body)
+     VALUES ('reference', 'cloze-router', 'Cuando era joven, vivía en Madrid con mi familia.')`
   );
 }
 

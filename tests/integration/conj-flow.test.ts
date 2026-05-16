@@ -48,11 +48,10 @@ async function seedCells(): Promise<void> {
        SET form=EXCLUDED.form, pattern=EXCLUDED.pattern, frequency_rank=EXCLUDED.frequency_rank`
   );
   await pool.query(
-    `INSERT INTO entries (uuid, text, created_at)
+    `INSERT INTO knowledge_artifacts (kind, title, body)
      VALUES
-       ('e1', 'Cuando era joven, vivía en Madrid con mi familia.', NOW()),
-       ('e2', 'Mi padre era muy estricto en aquella época, no le gustaba el ruido.', NOW())
-     ON CONFLICT (uuid) DO UPDATE SET text=EXCLUDED.text`
+       ('reference', 'cloze-1', 'Cuando era joven, vivía en Madrid con mi familia.'),
+       ('reference', 'cloze-2', 'Mi padre era muy estricto en aquella época, no le gustaba el ruido.')`
   );
 }
 
