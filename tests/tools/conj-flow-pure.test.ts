@@ -19,6 +19,7 @@ import {
   renderCardFront,
   renderResult,
   renderSessionSummary,
+  highlightAnswer,
 } from "../../src/telegram/flows/conj.js";
 import type { ConjFlowState } from "../../src/telegram/flow-state.js";
 
@@ -130,10 +131,17 @@ describe("renderResult", () => {
     expect(renderResult("easy", "era", "Cuando era joven.", DUE_4D, NOW)).toContain("⏭");
   });
 
-  it("wrong renders ✗ with the filled sentence", () => {
-    const out = renderResult("wrong", "tuve", "Cuando tuve niño.", DUE_4D, NOW);
+  it("wrong renders ✗ with the answer bolded in-context (case preserved)", () => {
+    const out = renderResult(
+      "wrong",
+      "somos",
+      "Somos amigos desde hace muchos años.",
+      DUE_4D,
+      NOW
+    );
     expect(out).toContain("✗");
-    expect(out).toContain("Cuando tuve niño.");
+    // Answer should be bolded inline, preserving the original capitalization.
+    expect(out).toContain("<b>Somos</b> amigos desde hace muchos años.");
   });
 
   it("hint_correct labels as hint→hard", () => {
@@ -146,10 +154,47 @@ describe("renderResult", () => {
     expect(out).toContain("hint+easy");
   });
 
-  it("hint_wrong includes hint→again with filled sentence", () => {
-    const out = renderResult("hint_wrong", "tuve", "Cuando tuve niño.", DUE_4D, NOW);
+  it("hint_wrong includes hint→again with bolded inline answer", () => {
+    const out = renderResult(
+      "hint_wrong",
+      "tuve",
+      "Cuando tuve el perro, era niño.",
+      DUE_4D,
+      NOW
+    );
     expect(out).toContain("hint");
     expect(out).toContain("again");
+    expect(out).toContain("Cuando <b>tuve</b> el perro");
+  });
+});
+
+describe("highlightAnswer", () => {
+  it("bolds the word-bounded match preserving case", () => {
+    expect(
+      highlightAnswer("Somos amigos desde hace años.", "somos")
+    ).toBe("<b>Somos</b> amigos desde hace años.");
+  });
+
+  it("matches mid-sentence", () => {
+    expect(
+      highlightAnswer("Cuando tuve el perro, era niño.", "tuve")
+    ).toBe("Cuando <b>tuve</b> el perro, era niño.");
+  });
+
+  it("HTML-escapes surrounding text but not the bold tags", () => {
+    expect(
+      highlightAnswer("<script>tuve</script>", "tuve")
+    ).toContain("<b>tuve</b>");
+  });
+
+  it("falls back to plain escape when form is not found", () => {
+    expect(highlightAnswer("Nothing here.", "xyz")).toBe("Nothing here.");
+  });
+
+  it("word-bounded — 'era' does not match inside 'verdadera'", () => {
+    expect(highlightAnswer("Una verdadera pena.", "era")).toBe(
+      "Una verdadera pena."
+    );
   });
 });
 

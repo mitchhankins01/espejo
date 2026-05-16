@@ -207,6 +207,31 @@ export function renderCardFront(
   return { text };
 }
 
+/**
+ * Bold the answer in-context within the un-masked sentence so the user can
+ * see exactly where the form lives. Preserves the case as it appears in the
+ * sentence (e.g. `Somos` at the start, not `somos`). HTML-escapes everything
+ * around the matched span so user-provided sentence text can't inject markup.
+ */
+export function highlightAnswer(sentence: string, form: string): string {
+  const escapedForm = form.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`\\b(${escapedForm})\\b`, "i");
+  const match = sentence.match(re);
+  if (!match || match.index === undefined) {
+    return escapeHtml(sentence);
+  }
+  const before = sentence.slice(0, match.index);
+  const matched = sentence.slice(match.index, match.index + match[0].length);
+  const after = sentence.slice(match.index + match[0].length);
+  return (
+    escapeHtml(before) +
+    "<b>" +
+    escapeHtml(matched) +
+    "</b>" +
+    escapeHtml(after)
+  );
+}
+
 export function renderResult(
   gradeKind: GradeKind,
   expected: string,
@@ -227,13 +252,13 @@ export function renderResult(
     case "wrong":
       return (
         `✗ Expected: <b>${escapeHtml(expected)}</b>\n` +
-        `${escapeHtml(maskedFilled)}\n` +
+        `${highlightAnswer(maskedFilled, expected)}\n` +
         `(again → next in ${interval})`
       );
     case "hint_wrong":
       return (
         `✗ Expected: <b>${escapeHtml(expected)}</b>\n` +
-        `${escapeHtml(maskedFilled)}\n` +
+        `${highlightAnswer(maskedFilled, expected)}\n` +
         `(hint → again → next in ${interval})`
       );
   }
