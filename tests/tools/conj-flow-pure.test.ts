@@ -50,8 +50,11 @@ describe("parseConjArgs", () => {
 describe("formatInterval", () => {
   const NOW = new Date("2026-05-15T12:00:00Z");
 
-  it("<1m for due in the past", () => {
-    expect(formatInterval(new Date(NOW.getTime() - 1000), NOW)).toBe("<1m");
+  it("1m for due in the past or sub-minute (never returns a leading `<`)", () => {
+    // Returning "<1m" would poison Telegram's HTML parser and strip every
+    // <b>/<i> in the message. The minimum interval label is "1m".
+    expect(formatInterval(new Date(NOW.getTime() - 1000), NOW)).toBe("1m");
+    expect(formatInterval(NOW, NOW)).toBe("1m");
   });
 
   it("returns minute / hour / day labels", () => {

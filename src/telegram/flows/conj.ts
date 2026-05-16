@@ -149,7 +149,10 @@ function personTag(person: string): string {
 export function formatInterval(due: Date, now: Date = new Date()): string {
   const ms = Math.max(0, due.getTime() - now.getTime());
   const minutes = ms / 60_000;
-  if (minutes < 1) return "<1m";
+  // Use "1m" (not "<1m") for sub-minute intervals — the leading `<` poisons
+  // Telegram's HTML parser, which then falls back to plain text and renders
+  // every `<b>` and `<i>` in the message as literal characters.
+  if (minutes < 1) return "1m";
   if (minutes < 60) return `${Math.round(minutes)}m`;
   const hours = minutes / 60;
   if (hours < 24) return `${Math.round(hours)}h`;
