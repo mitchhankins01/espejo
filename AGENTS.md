@@ -89,7 +89,7 @@ src/
       vocab-reviews.ts — Kindle-lookup vocab review FSRS state (queue/serve/rate).
       conjugations.ts — Read-only access to the vendored `conjugations` table.
       conjugation-reviews.ts — Lazy-promotion + race-safe rate for `(lemma, tense, person)` cells. Pattern selection (most-due / cold-start bootstrap), queue build, session counts.
-      cloze-source.ts — Corpus lookup for cloze sentences. Curated sources only: vocab_reviews.examples → knowledge_artifacts.body (Tomos, References). Day One `entries.text` is excluded by design — those are Mitch's own Spanish and contain the very errors a drill is meant to correct. `looksSpanish` post-filter; `imperative_negative` anchors on `no <form>`.
+      cloze-source.ts — Corpus lookup for cloze sentences. Curated sources only: vocab_reviews.examples (returns `{sentence, gloss}` so the reveal step can show English) → knowledge_artifacts.body with `kind='reference'` (Tomos, external Spanish references). Excluded by design: Day One `entries.text` (Mitch's Spanish errors); knowledge_artifacts with `kind IN ('insight','review','note','project')` (English-paraphrased about-Mitch text or YAML-structured notes — the insight body "Mitch has gone three days without weed" trivially matched on `has`/`son`/`es`). Post-filters: `looksSpanish` (rejects English-heavy passages via English-token counter), `looksStructured` (rejects YAML/bullets/headings/multi-line blocks); `imperative_negative` anchors on `no <form>`.
   tools/
     search.ts       — Hybrid RRF search. The most important tool.
     get-entry.ts    — Single entry by UUID.

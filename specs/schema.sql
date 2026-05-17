@@ -727,6 +727,7 @@ CREATE TABLE IF NOT EXISTS conjugation_reviews (
     pattern         TEXT NOT NULL,
     generated_sentence TEXT,
     generated_form     TEXT,
+    generated_gloss    TEXT,
     due             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     stability       DOUBLE PRECISION NOT NULL DEFAULT 0,
     difficulty      DOUBLE PRECISION NOT NULL DEFAULT 0,

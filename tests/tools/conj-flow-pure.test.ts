@@ -93,6 +93,20 @@ describe("maskForm", () => {
       maskForm("No hables tan rápido.", "hables", "imperative_negative")
     ).toBe("no ___ tan rápido.");
   });
+
+  it("returns null when the form has no word-bounded match (no substring fallback)", () => {
+    // form 'es' must NOT mask inside 'request' — regression for the
+    // `requ___t` bug.
+    expect(
+      maskForm("A proportional request: 5 seconds.", "es")
+    ).toBeNull();
+    // 'era' must NOT mask inside 'verdadera'.
+    expect(maskForm("Una pregunta verdadera me molesta.", "era")).toBeNull();
+  });
+
+  it("accent-adjacent word boundaries still mask", () => {
+    expect(maskForm("¿Cómo estás hoy?", "estás")).toBe("¿Cómo ___ hoy?");
+  });
 });
 
 describe("renderCardFront", () => {
@@ -169,6 +183,36 @@ describe("renderResult", () => {
     expect(out).toContain("again");
     expect(out).toContain("Cuando <b>tuve</b> el perro");
   });
+
+  it("includes the English gloss when supplied (reveal step)", () => {
+    const out = renderResult(
+      "exact",
+      "somos",
+      "",
+      DUE_4D,
+      NOW,
+      "We've been friends for many years."
+    );
+    expect(out).toContain("<i>We've been friends for many years.</i>");
+  });
+
+  it("omits the gloss line when no gloss is supplied", () => {
+    const out = renderResult("exact", "somos", "", DUE_4D, NOW, null);
+    expect(out).not.toContain("<i>");
+  });
+
+  it("wrong-render includes gloss below the bolded answer", () => {
+    const out = renderResult(
+      "wrong",
+      "somos",
+      "Somos amigos desde hace muchos años.",
+      DUE_4D,
+      NOW,
+      "We've been friends for many years."
+    );
+    expect(out).toContain("<b>Somos</b>");
+    expect(out).toContain("<i>We've been friends for many years.</i>");
+  });
 });
 
 describe("highlightAnswer", () => {
@@ -227,6 +271,7 @@ describe("renderSessionSummary", () => {
       currentPerson: null,
       currentLemma: null,
       currentSentence: null,
+      currentGloss: null,
       currentClozeSource: null,
       hintUsed: false,
     };

@@ -75,6 +75,7 @@ export interface ConjFlowState {
   currentPerson: string | null;
   currentLemma: string | null;
   currentSentence: string | null;
+  currentGloss: string | null;
   currentClozeSource: "corpus" | "generated" | null;
   hintUsed: boolean;
 }

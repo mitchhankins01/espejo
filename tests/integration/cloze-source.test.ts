@@ -3,6 +3,7 @@ import { pool } from "../../src/db/client.js";
 import {
   findClozeSentence,
   looksSpanish,
+  looksStructured,
   extractContaining,
 } from "../../src/db/queries/cloze-source.js";
 
@@ -167,10 +168,81 @@ describe("findClozeSentence", () => {
     expect(hit).toBeNull();
   });
 
+  it("kind='insight' artifacts are NOT a cloze source (regression: 'Mitch has gone three days without weed' was an English insight body matched on 'has')", async () => {
+    await pool.query(
+      `INSERT INTO knowledge_artifacts (kind, title, body)
+       VALUES ('insight', 'eng-insight', 'Mitch has gone three days without weed despite cravings, anchored by a no-weed-in-April agreement.')`
+    );
+    const hit = await findClozeSentence(pool, {
+      lemma: "haber",
+      lang: "es",
+      form: "has",
+    });
+    expect(hit).toBeNull();
+  });
+
+  it("kind='note' artifacts are NOT a cloze source (regression: Español Vivo YAML body matched on 'estoy')", async () => {
+    await pool.query(
+      `INSERT INTO knowledge_artifacts (kind, title, body)
+       VALUES ('note', 'note-skip', 'Cuando estoy cansado en la oficina hablamos de descansar.')`
+    );
+    const hit = await findClozeSentence(pool, {
+      lemma: "estar",
+      lang: "es",
+      form: "estoy",
+    });
+    expect(hit).toBeNull();
+  });
+
+  it("kind='reference' artifacts are allowed", async () => {
+    await pool.query(
+      `INSERT INTO knowledge_artifacts (kind, title, body)
+       VALUES ('reference', 'ref-ok', 'Cuando era niño, jugaba mucho en el parque con amigos.')`
+    );
+    const hit = await findClozeSentence(pool, {
+      lemma: "ser",
+      lang: "es",
+      form: "era",
+    });
+    expect(hit).not.toBeNull();
+    expect(hit!.source).toBe("artifacts");
+  });
+
+  it("rejects YAML/structured artifact segments even when kind='reference'", async () => {
+    await pool.query(
+      `INSERT INTO knowledge_artifacts (kind, title, body)
+       VALUES ('reference', 'yaml-skip',
+               'common_traps:\n  - sabía vs supe\n  - estoy vs soy\n  - ser vs estar')`
+    );
+    const hit = await findClozeSentence(pool, {
+      lemma: "estar",
+      lang: "es",
+      form: "estoy",
+    });
+    expect(hit).toBeNull();
+  });
+
+  it("examples carry the English gloss when available", async () => {
+    await pool.query(
+      `INSERT INTO vocab_reviews
+         (stem, lang, sample_usage, sample_word, sample_source, first_seen_at, last_seen_at, examples)
+       VALUES ('ser','es','s','ser',NULL,NOW(),NOW(), $1::jsonb)`,
+      [JSON.stringify([{ es: "Somos amigos desde hace años.", en: "We've been friends for years." }])]
+    );
+    const hit = await findClozeSentence(pool, {
+      lemma: "ser",
+      lang: "es",
+      form: "somos",
+    });
+    expect(hit).not.toBeNull();
+    expect(hit!.source).toBe("examples");
+    expect(hit!.gloss).toBe("We've been friends for years.");
+  });
+
   it("deleted artifacts are excluded", async () => {
     await pool.query(
       `INSERT INTO knowledge_artifacts (kind, title, body, deleted_at)
-       VALUES ('note', 'deleted', 'Yo tuve hambre ayer pero también frío toda la noche.', NOW())`
+       VALUES ('reference', 'deleted', 'Yo tuve hambre ayer pero también frío toda la noche.', NOW())`
     );
     const hit = await findClozeSentence(pool, {
       lemma: "tener",
@@ -195,6 +267,34 @@ describe("looksSpanish", () => {
   it("rejects English-only sentences", () => {
     expect(looksSpanish("the modern era brings change")).toBe(false);
     expect(looksSpanish("he went home today")).toBe(false);
+  });
+
+  it("rejects English passages with a stray accented Spanish token (regression: insight matched on 'has')", () => {
+    expect(
+      looksSpanish(
+        "Mitch has gone three days without weed despite cravings, anchored by an agreement with Nicolás."
+      )
+    ).toBe(false);
+  });
+});
+
+describe("looksStructured", () => {
+  it("flags YAML mapping rows", () => {
+    expect(looksStructured("common_traps:")).toBe(true);
+    expect(looksStructured("    - sabía vs supe")).toBe(true);
+  });
+
+  it("flags markdown bullets and headings", () => {
+    expect(looksStructured("# Heading")).toBe(true);
+    expect(looksStructured("* bullet item")).toBe(true);
+  });
+
+  it("flags multi-line non-prose blocks", () => {
+    expect(looksStructured("line one\nline two\nline three")).toBe(true);
+  });
+
+  it("does not flag a normal sentence", () => {
+    expect(looksStructured("Somos amigos desde hace años.")).toBe(false);
   });
 });
 

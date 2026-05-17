@@ -60,7 +60,7 @@ beforeEach(() => {
   clearAllFlows();
   mockSend.mockClear();
   mockGenerate.mockReset();
-  mockGenerate.mockResolvedValue({ sentence: "X", form: "x" });
+  mockGenerate.mockResolvedValue({ sentence: "X", form: "x", gloss: null });
 });
 
 describe("router: /conj registration", () => {

@@ -155,4 +155,67 @@ describe("buildHint", () => {
     expect(hint).toContain("infinitivo");
     expect(noLeak(hint, "hablarán")).toBe(true);
   });
+
+  describe("paradigm peek for irregular paradigms", () => {
+    const haberPresent = [
+      { person: "yo", form: "he" },
+      { person: "tu", form: "has" },
+      { person: "el", form: "ha" },
+      { person: "nosotros", form: "hemos" },
+      { person: "vosotros", form: "habéis" },
+      { person: "ellos", form: "han" },
+    ];
+    const serImperfect = [
+      { person: "yo", form: "era" },
+      { person: "tu", form: "eras" },
+      { person: "el", form: "era" },
+      { person: "nosotros", form: "éramos" },
+      { person: "vosotros", form: "erais" },
+      { person: "ellos", form: "eran" },
+    ];
+
+    it("present_irregular renders the paradigm with the asked slot blanked", () => {
+      const hint = buildHint({
+        pattern: "present_irregular",
+        tense: "present_indicative",
+        person: "yo",
+        expected_form: "he",
+        paradigm: haberPresent,
+      });
+      expect(hint).toContain("yo:___");
+      expect(hint).toContain("tu:has");
+      expect(hint).toContain("el:ha");
+      expect(hint).toContain("nosotros:hemos");
+      expect(hint).toContain("vosotros:habéis");
+      expect(hint).toContain("ellos:han");
+      expect(noLeak(hint, "he")).toBe(true);
+    });
+
+    it("imperfect_irregular blanks every cell sharing the answer form (yo+el of ser → era)", () => {
+      const hint = buildHint({
+        pattern: "imperfect_irregular",
+        tense: "imperfect",
+        person: "yo",
+        expected_form: "era",
+        paradigm: serImperfect,
+      });
+      // both yo and el should be blanked, since both forms are "era"
+      expect(hint).toContain("yo:___");
+      expect(hint).toContain("el:___");
+      expect(hint).toContain("tu:eras");
+      expect(hint).toContain("ellos:eran");
+      expect(noLeak(hint, "era")).toBe(true);
+    });
+
+    it("falls back to the generic hint when no paradigm is supplied", () => {
+      const hint = buildHint({
+        pattern: "present_irregular",
+        tense: "present_indicative",
+        person: "yo",
+        expected_form: "he",
+      });
+      // No paradigm → original generic phrasing.
+      expect(hint.toLowerCase()).toContain("paradigm");
+    });
+  });
 });

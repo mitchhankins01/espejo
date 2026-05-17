@@ -1991,6 +1991,13 @@ const migrations: Migration[] = [
           ON conjugation_review_log (reviewed_at DESC);
     `,
   },
+  {
+    name: "056-conjugation-reviews-generated-gloss",
+    getSql: () => `
+      ALTER TABLE conjugation_reviews
+        ADD COLUMN IF NOT EXISTS generated_gloss TEXT;
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

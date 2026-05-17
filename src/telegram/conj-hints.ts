@@ -8,6 +8,39 @@ export interface HintInput {
   tense: string;
   person: string;
   expected_form: string;
+  /**
+   * Optional full paradigm for the (lemma, tense). When supplied, hints for
+   * irregular-paradigm patterns (`present_irregular`, `imperfect_irregular`,
+   * `present_subj_irregular`) render the six forms with the asked slot
+   * blanked instead of the generic "recall the paradigm" cop-out. The flow
+   * fetches it via `getParadigm` for those patterns only.
+   */
+  paradigm?: Array<{ person: string; form: string }>;
+}
+
+const PERSON_ORDER = ["yo", "tu", "el", "nosotros", "vosotros", "ellos"] as const;
+
+function paradigmPeekHint(input: HintInput): string | null {
+  if (!input.paradigm || input.paradigm.length === 0) return null;
+  const byPerson = new Map(input.paradigm.map((c) => [c.person, c.form]));
+  const lcAnswer = input.expected_form.trim().toLowerCase();
+  const cells: string[] = [];
+  for (const p of PERSON_ORDER) {
+    const form = byPerson.get(p);
+    if (!form) {
+      cells.push(`${p}:?`);
+      continue;
+    }
+    // Blank every cell whose form matches the answer (covers degenerate
+    // paradigms where two persons share a form, e.g. yo/él imperfect of
+    // ser → "era"; blanking both keeps the answer fully hidden).
+    if (form.trim().toLowerCase() === lcAnswer) {
+      cells.push(`${p}:___`);
+    } else {
+      cells.push(`${p}:${form}`);
+    }
+  }
+  return cells.join("  ");
 }
 
 const NO_HINT = "sin pista disponible";
@@ -101,6 +134,17 @@ function regularEndingHint(tense: string, person: string): string | null {
 
 function buildRaw(input: HintInput): string {
   const { pattern, tense, person, expected_form } = input;
+  // For fully-irregular paradigms, a paradigm peek (5 known forms + 1 blank)
+  // is far more useful than the generic "recall the paradigm" — for ser,
+  // estar, haber, ir, etc. the paradigm IS the test.
+  if (
+    pattern === "present_irregular" ||
+    pattern === "imperfect_irregular" ||
+    pattern === "present_subj_irregular"
+  ) {
+    const peek = paradigmPeekHint(input);
+    if (peek) return peek;
+  }
   switch (pattern) {
     case "present_yo_go":
       return `yo stem: ${stemFromForm(expected_form, tense)} (yo-go pattern)`;

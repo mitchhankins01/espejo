@@ -16,6 +16,7 @@ import {
   type ClozeSource,
 } from "../../db/queries/conjugation-reviews.js";
 import { findClozeSentence } from "../../db/queries/cloze-source.js";
+import { getParadigm } from "../../db/queries/conjugations.js";
 import { gradeAnswer } from "../../fsrs/conj-grading.js";
 import { generateClozeSentence } from "../../llm/cloze-gen.js";
 import { nextState, type Grade } from "../../fsrs/scheduler.js";
@@ -60,13 +61,17 @@ const TENSE_LABEL_ES: Record<string, string> = {
   imperative_negative: "imperativo negativo",
 };
 
+// Show the actual pronoun on cards instead of "1pp" / "2ps" abbreviations —
+// users were spending the cue line decoding which person they were being
+// asked about ("could be están / estáis etc"). Pronouns also disambiguate
+// the few persons where the form alone doesn't (e.g. yo vs él in imperfect).
 const PERSON_TAG: Record<string, string> = {
-  yo: "1ps",
-  tu: "2ps",
-  el: "3ps",
-  nosotros: "1pp",
-  vosotros: "2pp",
-  ellos: "3pp",
+  yo: "yo",
+  tu: "tú",
+  el: "él / ella / usted",
+  nosotros: "nosotros",
+  vosotros: "vosotros",
+  ellos: "ellos / ellas / ustedes",
 };
 
 const PATTERN_LABEL_ES: Record<string, string> = {
@@ -164,31 +169,36 @@ export function formatInterval(due: Date, now: Date = new Date()): string {
 
 /**
  * Replace the inflected form in the sentence with a single `___` cloze.
- * Accent-/case-insensitive, single match per sentence. For
+ * Case-insensitive, word-bounded, single match per sentence. For
  * `imperative_negative`, strips the leading `no ` so the renderer can add it
  * back outside the blank.
+ *
+ * Returns `null` when no word-bounded match exists — caller should treat this
+ * as an unusable candidate and fall through to a generated sentence. (No
+ * substring fallback: that path was responsible for `requ___t` — masking
+ * "es" inside "request" when the form failed to word-bound.)
  */
 export function maskForm(
   sentence: string,
   form: string,
   tense?: string
-): string {
+): string | null {
   const isImpNeg = tense === "imperative_negative";
   const escapedForm = form.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const pattern = isImpNeg
-    ? `\\bno\\s+${escapedForm}\\b`
-    : `\\b${escapedForm}\\b`;
-  const re = new RegExp(pattern, "i");
-  const replaced = sentence.replace(re, isImpNeg ? "no ___" : "___");
-  if (replaced !== sentence) return replaced;
-  // Fallback: case-insensitive substring replace if word-boundary failed
-  // (forms with leading/trailing punctuation already absorbed by \b).
-  const lcSentence = sentence.toLowerCase();
-  const idx = lcSentence.indexOf(form.toLowerCase());
-  if (idx === -1) return sentence;
-  const before = sentence.slice(0, idx);
-  const after = sentence.slice(idx + form.length);
-  return before + "___" + after;
+  // Use explicit non-letter boundaries (incl. accented chars) instead of
+  // ASCII-only `\b`, so `está` adjacent to an accent counts as bounded.
+  const lookBehind = `(^|[^A-Za-zÀ-ÿ])`;
+  const lookAhead = `([^A-Za-zÀ-ÿ]|$)`;
+  const inner = isImpNeg ? `no\\s+${escapedForm}` : escapedForm;
+  const re = new RegExp(`${lookBehind}(${inner})${lookAhead}`, "i");
+  const match = sentence.match(re);
+  if (!match || match.index === undefined) return null;
+  const lead = match[1];
+  const innerMatch = match[2];
+  const start = match.index + lead.length;
+  const end = start + innerMatch.length;
+  const replacement = isImpNeg ? "no ___" : "___";
+  return sentence.slice(0, start) + replacement + sentence.slice(end);
 }
 
 export function renderCardFront(
@@ -198,7 +208,11 @@ export function renderCardFront(
   cardIndex: number,
   totalCards: number
 ): { text: string } {
-  const masked = maskForm(sentence, row.expected_form, row.tense);
+  // Last-resort safety: if masking fails after the resolver already vetted
+  // the sentence, fall back to a minimal context-free frame so the user can
+  // still play. The resolver should normally have caught this and routed to
+  // a generated sentence instead.
+  const masked = maskForm(sentence, row.expected_form, row.tense) ?? "___";
   const head =
     cardIndex === 0
       ? `🇪🇸 Hoy: ${patternLabel(pattern)}. ${totalCards} cartas.\n\n`
@@ -235,33 +249,40 @@ export function highlightAnswer(sentence: string, form: string): string {
   );
 }
 
+function glossLine(gloss: string | null): string {
+  if (!gloss) return "";
+  return `\n<i>${escapeHtml(gloss)}</i>`;
+}
+
 export function renderResult(
   gradeKind: GradeKind,
   expected: string,
   maskedFilled: string,
   due: Date,
-  now: Date = new Date()
+  now: Date = new Date(),
+  gloss: string | null = null
 ): string {
   const interval = formatInterval(due, now);
+  const g = glossLine(gloss);
   switch (gradeKind) {
     case "exact":
-      return `✓ ${escapeHtml(expected)} (good) → next in ${interval}`;
+      return `✓ ${escapeHtml(expected)} (good) → next in ${interval}${g}`;
     case "hint_correct":
-      return `✓ ${escapeHtml(expected)} (hint → hard) → next in ${interval}`;
+      return `✓ ${escapeHtml(expected)} (hint → hard) → next in ${interval}${g}`;
     case "easy":
-      return `⏭ ${escapeHtml(expected)} (easy → next in ${interval})`;
+      return `⏭ ${escapeHtml(expected)} (easy → next in ${interval})${g}`;
     case "hint_easy":
-      return `⏭ ${escapeHtml(expected)} (hint+easy → hard → next in ${interval})`;
+      return `⏭ ${escapeHtml(expected)} (hint+easy → hard → next in ${interval})${g}`;
     case "wrong":
       return (
         `✗ Expected: <b>${escapeHtml(expected)}</b>\n` +
-        `${highlightAnswer(maskedFilled, expected)}\n` +
+        `${highlightAnswer(maskedFilled, expected)}${g}\n` +
         `(again → next in ${interval})`
       );
     case "hint_wrong":
       return (
         `✗ Expected: <b>${escapeHtml(expected)}</b>\n` +
-        `${highlightAnswer(maskedFilled, expected)}\n` +
+        `${highlightAnswer(maskedFilled, expected)}${g}\n` +
         `(hint → again → next in ${interval})`
       );
   }
@@ -328,7 +349,7 @@ async function persistUser(
 async function resolveClozeSentence(
   deps: ConjDeps,
   row: ConjugationReviewRow
-): Promise<{ sentence: string; source: ClozeSource }> {
+): Promise<{ sentence: string; gloss: string | null; source: ClozeSource }> {
   const hit = await findClozeSentence(deps.pool, {
     lemma: row.lemma,
     lang: "es",
@@ -336,11 +357,23 @@ async function resolveClozeSentence(
     tense: row.tense,
     reps: row.reps,
   });
-  if (hit) {
-    return { sentence: truncateSentence(hit.sentence), source: "corpus" };
+  // Verify masking is actually possible (word-bound match). When the corpus
+  // pulls a candidate whose form lives inside a longer word, maskForm returns
+  // null and we fall through to a cached/generated sentence instead of
+  // showing a broken `requ___t`-style mask.
+  if (hit && maskForm(hit.sentence, row.expected_form, row.tense) !== null) {
+    return {
+      sentence: truncateSentence(hit.sentence),
+      gloss: hit.gloss,
+      source: "corpus",
+    };
   }
   if (row.generated_sentence) {
-    return { sentence: row.generated_sentence, source: "generated" };
+    return {
+      sentence: row.generated_sentence,
+      gloss: row.generated_gloss,
+      source: "generated",
+    };
   }
   const generated = await generateClozeSentence({
     lemma: row.lemma,
@@ -352,7 +385,8 @@ async function resolveClozeSentence(
     deps.pool,
     row.id,
     generated.sentence,
-    generated.form
+    generated.form,
+    generated.gloss
   );
   logUsage(deps.pool, {
     source: "telegram",
@@ -367,7 +401,11 @@ async function resolveClozeSentence(
     },
     ok: true,
   });
-  return { sentence: generated.sentence, source: "generated" };
+  return {
+    sentence: generated.sentence,
+    gloss: generated.gloss,
+    source: "generated",
+  };
 }
 
 async function serveNextCard(
@@ -393,21 +431,22 @@ async function serveNextCard(
   });
 
   let sentence: string;
+  let gloss: string | null;
   let source: ClozeSource;
   try {
     const resolved = await resolveClozeSentence(deps, row);
     sentence = resolved.sentence;
+    gloss = resolved.gloss;
     source = resolved.source;
   } catch (err) {
     console.error(
       `[conj] cloze resolution failed for review ${row.id}:`,
       err instanceof Error ? err.message : err
     );
-    // Last-ditch fallback: use a person-cue-only minimal frame so the user
-    // can still play. Mark as generated for telemetry honesty.
-    sentence = `(${row.lemma}) — ${row.expected_form}`;
-    // Re-mask: we don't want to show the answer, so build a generic.
+    // Last-ditch fallback: a person-cue-only frame so the user can still
+    // play. No reliable gloss in this path; mark as generated for telemetry.
     sentence = `(sin contexto) — ${row.expected_form}`;
+    gloss = null;
     source = "generated";
   }
 
@@ -418,6 +457,7 @@ async function serveNextCard(
   state.currentPerson = row.person;
   state.currentLemma = row.lemma;
   state.currentSentence = sentence;
+  state.currentGloss = gloss;
   state.currentClozeSource = source;
   state.hintUsed = false;
   setFlow(deps.chatId, state);
@@ -563,6 +603,7 @@ export async function startConjFlow(
     currentPerson: null,
     currentLemma: null,
     currentSentence: null,
+    currentGloss: null,
     currentClozeSource: null,
     hintUsed: false,
   };
@@ -606,11 +647,21 @@ export async function continueConjFlow(
       await persistAssistant(pool, chatId, reply);
       return;
     }
+    const currentPattern = state.currentPattern ?? state.pattern;
+    const needsParadigm =
+      currentPattern === "present_irregular" ||
+      currentPattern === "imperfect_irregular" ||
+      currentPattern === "present_subj_irregular";
+    const paradigm =
+      needsParadigm && state.currentLemma
+        ? await getParadigm(pool, state.currentLemma, state.currentTense)
+        : undefined;
     const hint = buildHint({
-      pattern: state.currentPattern ?? state.pattern,
+      pattern: currentPattern,
       tense: state.currentTense,
       person: state.currentPerson ?? "yo",
       expected_form: state.currentExpected,
+      paradigm,
     });
     state.hintUsed = true;
     state.hintCount += 1;
@@ -758,6 +809,7 @@ export async function continueConjFlow(
     state.currentExpected
   );
 
+  const revealGloss = state.currentGloss;
   state.hintUsed = false;
   state.currentCardId = null;
   state.currentExpected = null;
@@ -766,6 +818,7 @@ export async function continueConjFlow(
   state.currentPerson = null;
   state.currentLemma = null;
   state.currentSentence = null;
+  state.currentGloss = null;
   state.currentClozeSource = null;
   state.queueIndex += 1;
   setFlow(chatId, state);
@@ -774,7 +827,9 @@ export async function continueConjFlow(
     gradeKind,
     row.expected_form,
     filled,
-    next.due
+    next.due,
+    new Date(),
+    revealGloss
   );
   await sendTelegramMessage(chatId, resultText);
   await persistAssistant(pool, chatId, resultText);

@@ -18,6 +18,7 @@ export interface ConjugationReviewRow {
   pattern: string;
   generated_sentence: string | null;
   generated_form: string | null;
+  generated_gloss: string | null;
   due: Date;
   stability: number;
   difficulty: number;
@@ -39,7 +40,7 @@ export interface ConjugationReviewRow {
 
 const ROW_SELECT = `
   SELECT cr.id::text, cr.lemma, cr.tense, cr.person, cr.expected_form, cr.pattern,
-         cr.generated_sentence, cr.generated_form,
+         cr.generated_sentence, cr.generated_form, cr.generated_gloss,
          cr.due, cr.stability, cr.difficulty, cr.elapsed_days, cr.scheduled_days,
          cr.reps, cr.lapses, cr.state, cr.last_review,
          cr.current_session_id::text, cr.current_session_served_at, cr.current_session_rated_at,
@@ -226,15 +227,17 @@ export async function cacheGeneratedSentence(
   pool: pg.Pool,
   id: string,
   sentence: string,
-  form: string
+  form: string,
+  gloss: string | null
 ): Promise<void> {
   await pool.query(
     `UPDATE conjugation_reviews
         SET generated_sentence = $1,
             generated_form     = $2,
+            generated_gloss    = $3,
             updated_at         = NOW()
-      WHERE id = $3`,
-    [sentence, form, id]
+      WHERE id = $4`,
+    [sentence, form, gloss, id]
   );
 }
 

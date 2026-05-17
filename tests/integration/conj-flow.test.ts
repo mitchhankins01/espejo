@@ -61,7 +61,11 @@ beforeEach(() => {
   clearAllFlows();
   mockSend.mockClear();
   mockGenerate.mockReset();
-  mockGenerate.mockResolvedValue({ sentence: "Sentencia de respaldo.", form: "x" });
+  mockGenerate.mockResolvedValue({
+    sentence: "Sentencia de respaldo.",
+    form: "x",
+    gloss: null,
+  });
 });
 
 describe("conj flow lifecycle", () => {
@@ -287,6 +291,7 @@ describe("conj flow lifecycle", () => {
     mockGenerate.mockResolvedValueOnce({
       sentence: "Yo zucudo todos los días por la mañana.",
       form: "zucudo",
+      gloss: "I shake every morning.",
     });
     // Promote and start by inserting a review row directly to avoid pickPattern fallback.
     await pool.query(

@@ -43,6 +43,34 @@ export async function getCellsForLemma(
   return result.rows;
 }
 
+/**
+ * Return all 6 person→form cells for a single (lemma, tense). Used by
+ * paradigm-peek hints for fully-irregular families where listing the
+ * paradigm with the asked slot blanked is more useful than "recall it".
+ */
+export async function getParadigm(
+  pool: pg.Pool,
+  lemma: string,
+  tense: string
+): Promise<Array<{ person: string; form: string }>> {
+  const result = await pool.query<{ person: string; form: string }>(
+    `SELECT person, form
+       FROM conjugations
+      WHERE lemma=$1 AND tense=$2
+      ORDER BY CASE person
+        WHEN 'yo' THEN 1
+        WHEN 'tu' THEN 2
+        WHEN 'el' THEN 3
+        WHEN 'nosotros' THEN 4
+        WHEN 'vosotros' THEN 5
+        WHEN 'ellos' THEN 6
+        ELSE 7
+      END`,
+    [lemma, tense]
+  );
+  return result.rows;
+}
+
 export async function getCellsByPattern(
   pool: pg.Pool,
   pattern: string,

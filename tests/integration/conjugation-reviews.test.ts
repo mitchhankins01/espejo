@@ -321,16 +321,34 @@ describe("getPatternBucketCounts", () => {
 });
 
 describe("cacheGeneratedSentence", () => {
-  it("stores sentence + form on the row", async () => {
+  it("stores sentence + form + gloss on the row", async () => {
     const ins = await pool.query<{ id: string }>(
       `INSERT INTO conjugation_reviews (lemma, tense, person, expected_form, pattern)
        VALUES ('tener','preterite','yo','tuve','preterite_strong')
        RETURNING id::text`
     );
-    await cacheGeneratedSentence(pool, ins.rows[0].id, "Yo tuve hambre.", "tuve");
+    await cacheGeneratedSentence(
+      pool,
+      ins.rows[0].id,
+      "Yo tuve hambre.",
+      "tuve",
+      "I was hungry."
+    );
     const row = await getConjugationReviewById(pool, ins.rows[0].id);
     expect(row?.generated_sentence).toBe("Yo tuve hambre.");
     expect(row?.generated_form).toBe("tuve");
+    expect(row?.generated_gloss).toBe("I was hungry.");
+  });
+
+  it("accepts null gloss when generator didn't produce one", async () => {
+    const ins = await pool.query<{ id: string }>(
+      `INSERT INTO conjugation_reviews (lemma, tense, person, expected_form, pattern)
+       VALUES ('haber','present_indicative','yo','he','present_irregular')
+       RETURNING id::text`
+    );
+    await cacheGeneratedSentence(pool, ins.rows[0].id, "He llegado.", "he", null);
+    const row = await getConjugationReviewById(pool, ins.rows[0].id);
+    expect(row?.generated_gloss).toBeNull();
   });
 });
 

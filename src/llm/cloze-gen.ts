@@ -15,19 +15,24 @@ export interface ClozeGenInput {
 export interface ClozeGenResult {
   sentence: string;
   form: string;
+  /** Natural-English translation of the sentence, used for the reveal step. */
+  gloss: string | null;
 }
 
 const SYSTEM_PROMPT =
   "You generate one short Spanish sentence that uses a specific conjugated " +
-  "verb form. Constraints:\n" +
-  "- The sentence must contain the exact form you were given (case- and " +
-  "accent-sensitive).\n" +
+  "verb form, plus its English translation. Constraints:\n" +
+  "- The Spanish sentence must contain the exact form you were given " +
+  "(case- and accent-sensitive).\n" +
   "- ≤ 80 characters.\n" +
   "- Natural, everyday register (Spain Spanish).\n" +
-  "- Output strict JSON `{\"sentence\": \"…\"}` only. No commentary.";
+  "- `gloss` is a natural English translation (not word-for-word).\n" +
+  "- Output strict JSON `{\"sentence\": \"…\", \"gloss\": \"…\"}` only. " +
+  "No commentary.";
 
 interface RawGen {
   sentence?: unknown;
+  gloss?: unknown;
 }
 
 export async function generateClozeSentence(
@@ -60,5 +65,9 @@ export async function generateClozeSentence(
   if (typeof parsed.sentence !== "string" || parsed.sentence.length === 0) {
     throw new Error("Haiku returned malformed cloze sentence");
   }
-  return { sentence: parsed.sentence.trim(), form: input.form };
+  const gloss =
+    typeof parsed.gloss === "string" && parsed.gloss.trim().length > 0
+      ? parsed.gloss.trim()
+      : null;
+  return { sentence: parsed.sentence.trim(), form: input.form, gloss };
 }

@@ -1,7 +1,18 @@
-// Hybrid corpus lookup for cloze sentences. Tries vocab_reviews.examples
-// first (already short Spanish examples), then entries.text and
-// knowledge_artifacts.body. App code post-filters with looksSpanish to keep
-// English homographs from polluting results.
+// Hybrid corpus lookup for cloze sentences. Tries vocab_reviews.examples first
+// (Haiku-produced {en, es} pairs — short, clean, and translated), then falls
+// through to knowledge_artifacts but ONLY kind='reference' (Tomos, external).
+//
+// Insights / reviews / notes / projects / journal-derived artifacts are
+// deliberately excluded:
+//   - insight: LLM-paraphrased English about Mitch's life ("Mitch has gone
+//     three days without weed…") trivially matches `has`/`es`/`son` and
+//     trains the user against English with a Spanish quiz attached.
+//   - note: structurally heavy (YAML, bullets, headings) — Español Vivo
+//     dumped its `common_traps:` YAML as a clue body.
+//   - review/project: contain Mitch's own Spanish errors verbatim.
+//
+// Even within `reference` we post-filter: looksSpanish + not-structured +
+// English-balance check.
 
 import type pg from "pg";
 
@@ -10,6 +21,8 @@ export type ClozeHitSource = "examples" | "artifacts";
 export interface ClozeHit {
   source: ClozeHitSource;
   sentence: string;
+  /** English gloss, when available (vocab_reviews.examples carries {en,es}). */
+  gloss: string | null;
   cursor: string;
 }
 
@@ -36,22 +49,75 @@ const SPANISH_TOKENS = new Set([
   "cuando","porque","como","si","es","ser","estar","fue","muy","más",
   "ya","sin","aquí","allí","ahí","entre","sobre","desde","hasta","hace",
   "qué","quién","cuál","cuándo","cómo","dónde","ahora","sí","mi","tu","su",
+  "soy","eres","somos","sois","son","está","están","están","estoy","estás",
+  "estamos","estáis","ha","han","hemos","habéis","tengo","tienes","tiene",
+  "tenemos","tenéis","tienen","ayer","hoy","mañana","todo","todos","toda",
+  "todas","muchos","muchas","poco","poca","pocos","pocas","gente","casa",
+  "vez","veces","años","año","día","días","tiempo","mundo","vida","mismo",
+  "misma","otro","otra","otros","otras","cosa","cosas","mejor","peor",
+]);
+
+// English-only tokens used to fail-fast on English passages that happen to
+// contain a Spanish form (e.g. "Mitch has gone three days without weed"
+// matches `has`). Function words + the handful of insight-template phrases.
+const ENGLISH_TOKENS = new Set([
+  "the","and","is","was","were","are","be","been","being","have","had",
+  "having","of","to","for","with","without","from","in","on","at","by",
+  "this","that","these","those","an","a","or","but","not","no","so",
+  "if","when","while","after","before","because","as","it","its","he",
+  "she","they","them","their","his","her","you","your","we","our","us",
+  "i","me","my","mine","yours","theirs","hers","him","what","which",
+  "who","whom","whose","how","why","where","there","then","than","also",
+  "just","very","really","get","got","go","goes","gone","going","came",
+  "come","says","said","make","makes","made","take","takes","took",
+  "would","could","should","might","will","won","can","cannot","does",
+  "did","done","do","doing",
 ]);
 const ACCENT_RE = /[áéíóúüñÁÉÍÓÚÜÑ¡¿]/;
 
 export function looksSpanish(sentence: string): boolean {
-  let signals = 0;
-  if (ACCENT_RE.test(sentence)) signals += 1;
   const tokens = sentence
     .toLowerCase()
     .replace(/[^a-záéíóúüñ\s]+/g, " ")
     .split(/\s+/)
     .filter(Boolean);
+  let spanishSignals = ACCENT_RE.test(sentence) ? 1 : 0;
+  let englishSignals = 0;
   for (const t of tokens) {
-    if (SPANISH_TOKENS.has(t)) signals += 1;
-    if (signals >= 2) return true;
+    if (SPANISH_TOKENS.has(t)) spanishSignals += 1;
+    if (ENGLISH_TOKENS.has(t)) englishSignals += 1;
   }
-  return signals >= 2;
+  // Heavy English content (≥3 English-only tokens) AND ≤ Spanish signals →
+  // reject. Pure Spanish sentences need ≥2 signals (typically accent + one
+  // function token, or two function tokens).
+  if (englishSignals >= 3 && englishSignals >= spanishSignals) return false;
+  return spanishSignals >= 2;
+}
+
+/**
+ * Reject segments that aren't prose: YAML mapping rows, bullet lists, table
+ * pipes, headings, all-caps banners, code fences. These leak through when an
+ * artifact body is structured rather than narrative (e.g. Español Vivo's
+ * `common_traps:` YAML block was surfaced verbatim as a cloze).
+ */
+export function looksStructured(sentence: string): boolean {
+  const trimmed = sentence.trim();
+  if (!trimmed) return true;
+  // YAML-ish: bare-key/value with no terminal punctuation, or a colon
+  // immediately followed by a newline/dash. Either is a non-prose signal.
+  if (/^[A-Za-z_][\w.-]*\s*:\s*$/.test(trimmed)) return true;
+  if (/^\s*[-*•]\s+/.test(trimmed)) return true;
+  if (/^#{1,6}\s+/.test(trimmed)) return true;
+  if (trimmed.startsWith("```")) return true;
+  if (/^\s*\|.*\|\s*$/.test(trimmed)) return true; // markdown table row
+  // Lots of colons + few sentence-enders → config-ish (covers nested YAML).
+  const colons = (trimmed.match(/:/g) ?? []).length;
+  const enders = (trimmed.match(/[.!?]/g) ?? []).length;
+  if (colons >= 3 && enders === 0) return true;
+  // Newline-heavy = multi-line list/code rather than a sentence.
+  const newlines = (trimmed.match(/\n/g) ?? []).length;
+  if (newlines >= 2) return true;
+  return false;
 }
 
 export function extractContaining(text: string, formLower: string): string | null {
@@ -69,10 +135,18 @@ export function extractContaining(text: string, formLower: string): string | nul
   return null;
 }
 
+interface RawHit {
+  source: ClozeHitSource;
+  sentence: string;
+  gloss: string | null;
+  cursor: string;
+}
+
 /**
- * Look up cloze candidates across vocab_reviews.examples, entries.text, and
- * knowledge_artifacts.body. Returns deduplicated, looksSpanish-filtered hits
- * rotated by `reps` so the same cell gets a fresh sentence across reviews.
+ * Look up cloze candidates across vocab_reviews.examples and
+ * knowledge_artifacts (kind='reference' only). Results are deduplicated,
+ * looksSpanish-filtered, structure-filtered, and rotated by `reps` so the
+ * same cell gets a fresh sentence across reviews.
  *
  * imperative_negative anchors on `no <form>` so "Quiero que hables" doesn't
  * surface as a negative-command frame.
@@ -93,24 +167,33 @@ export async function findClozeSentence(
     : escapedForm;
   const fullPattern = `(^|[^a-záéíóúüñ])${innerPattern}([^a-záéíóúüñ]|$)`;
 
-  // Entries (Day One journal) are deliberately excluded — they contain
-  // Mitch's own Spanish, complete with the grammatical slips a drill is
-  // supposed to correct. Sourcing cloze sentences from there would test the
-  // user against their own mistakes. Keep curated content only: Haiku-
-  // generated `vocab_reviews.examples` and vault `knowledge_artifacts`
-  // (Tomos, References — LLM-written or external).
-  const result = await pool.query<{ source: ClozeHitSource; sentence: string; cursor: string }>(
+  // vocab_reviews.examples: each row holds an `[{es,en}, …]` JSONB array of
+  // Haiku-produced sentence/translation pairs. We need both so the result
+  // render can show the English gloss on the reveal step (user feedback:
+  // "how would I know any of these without translations").
+  //
+  // knowledge_artifacts: restricted to kind='reference' (Tomos, external
+  // Spanish content). The other kinds carry the user's own writing or
+  // English LLM paraphrases — see file-level comment.
+  const result = await pool.query<RawHit>(
     `WITH form_pat AS (SELECT $1::text AS p)
-     SELECT 'examples' AS source, ex->>'es' AS sentence, vr.id::text AS cursor
+     SELECT 'examples'::text AS source,
+            ex->>'es'        AS sentence,
+            ex->>'en'        AS gloss,
+            vr.id::text      AS cursor
        FROM vocab_reviews vr,
             jsonb_array_elements(vr.examples) ex,
             form_pat
       WHERE LOWER(vr.stem) = $2 AND vr.lang=$3
         AND lower(ex->>'es') ~ form_pat.p
      UNION ALL
-     SELECT 'artifacts', ka.body, ka.id::text
+     SELECT 'artifacts'::text,
+            ka.body,
+            NULL::text,
+            ka.id::text
        FROM knowledge_artifacts ka, form_pat
-      WHERE ka.body ~* form_pat.p
+      WHERE ka.kind = 'reference'
+        AND ka.body ~* form_pat.p
         AND ka.deleted_at IS NULL
      LIMIT 50`,
     [fullPattern, lemma.toLowerCase(), lang]
@@ -142,11 +225,17 @@ export async function findClozeSentence(
       sentence = extractContaining(row.sentence, needle);
     }
     if (!sentence) continue;
+    if (looksStructured(sentence)) continue;
     if (row.source !== "examples" && !looksSpanish(sentence)) continue;
     const key = sentence.toLowerCase().replace(/\s+/g, " ").trim();
     if (seen.has(key)) continue;
     seen.add(key);
-    filtered.push({ source: row.source, sentence, cursor: row.cursor });
+    filtered.push({
+      source: row.source,
+      sentence,
+      gloss: row.source === "examples" ? row.gloss ?? null : null,
+      cursor: row.cursor,
+    });
   }
 
   if (filtered.length === 0) return null;
