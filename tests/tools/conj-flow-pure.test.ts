@@ -110,7 +110,7 @@ describe("maskForm", () => {
 });
 
 describe("renderCardFront", () => {
-  it("includes pattern announce on first card only", () => {
+  it("includes pattern announce + footer on first card only", () => {
     const front = renderCardFront(
       { lemma: "ser", tense: "imperfect", person: "yo", expected_form: "era" },
       "Cuando era joven, viajé.",
@@ -122,9 +122,10 @@ describe("renderCardFront", () => {
     expect(front.text).toContain("___");
     expect(front.text).toContain("ser");
     expect(front.text).toContain("imperfecto");
+    expect(front.text).toContain("Escribe la respuesta");
   });
 
-  it("omits pattern announce on subsequent cards", () => {
+  it("omits pattern announce AND the answer-format footer on subsequent cards", () => {
     const front = renderCardFront(
       { lemma: "ser", tense: "imperfect", person: "yo", expected_form: "era" },
       "Cuando era joven.",
@@ -133,6 +134,63 @@ describe("renderCardFront", () => {
       12
     );
     expect(front.text).not.toContain("cartas");
+    // Footer is noise past the first card — user already knows the contract.
+    expect(front.text).not.toContain("Escribe la respuesta");
+    expect(front.text).not.toContain("/hint");
+    expect(front.text).not.toContain("/done");
+  });
+
+  it("haber + present_indicative → labels the AUXILIARY use as pretérito perfecto", () => {
+    const front = renderCardFront(
+      {
+        lemma: "haber",
+        tense: "present_indicative",
+        person: "el",
+        expected_form: "ha",
+      },
+      "Ha llegado el autobús a la estación.",
+      "present_perfect",
+      0,
+      20
+    );
+    // Cloze sentence is a compound (Ha llegado), so labeling haber's own
+    // tense as "presente" misleads — relabel to the compound the auxiliary
+    // participates in.
+    expect(front.text).toContain("pretérito perfecto");
+    expect(front.text).not.toMatch(/·\s*presente/);
+  });
+
+  it("haber + imperfect → pluscuamperfecto", () => {
+    const front = renderCardFront(
+      {
+        lemma: "haber",
+        tense: "imperfect",
+        person: "yo",
+        expected_form: "había",
+      },
+      "Yo había llegado antes que nadie.",
+      "imperfect_regular",
+      0,
+      20
+    );
+    expect(front.text).toContain("pluscuamperfecto");
+  });
+
+  it("non-haber lemma keeps its native tense label", () => {
+    const front = renderCardFront(
+      {
+        lemma: "ser",
+        tense: "present_indicative",
+        person: "yo",
+        expected_form: "soy",
+      },
+      "Yo soy profesor de español.",
+      "present_irregular",
+      0,
+      20
+    );
+    expect(front.text).toContain("presente");
+    expect(front.text).not.toContain("pretérito perfecto");
   });
 });
 
