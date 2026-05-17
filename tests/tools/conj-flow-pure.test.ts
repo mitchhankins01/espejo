@@ -140,43 +140,7 @@ describe("renderCardFront", () => {
     expect(front.text).not.toContain("/done");
   });
 
-  it("haber + present_indicative → labels the AUXILIARY use as pretérito perfecto", () => {
-    const front = renderCardFront(
-      {
-        lemma: "haber",
-        tense: "present_indicative",
-        person: "el",
-        expected_form: "ha",
-      },
-      "Ha llegado el autobús a la estación.",
-      "present_perfect",
-      0,
-      20
-    );
-    // Cloze sentence is a compound (Ha llegado), so labeling haber's own
-    // tense as "presente" misleads — relabel to the compound the auxiliary
-    // participates in.
-    expect(front.text).toContain("pretérito perfecto");
-    expect(front.text).not.toMatch(/·\s*presente/);
-  });
-
-  it("haber + imperfect → pluscuamperfecto", () => {
-    const front = renderCardFront(
-      {
-        lemma: "haber",
-        tense: "imperfect",
-        person: "yo",
-        expected_form: "había",
-      },
-      "Yo había llegado antes que nadie.",
-      "imperfect_regular",
-      0,
-      20
-    );
-    expect(front.text).toContain("pluscuamperfecto");
-  });
-
-  it("non-haber lemma keeps its native tense label", () => {
+  it("non-haber present_indicative shows 'presente'", () => {
     const front = renderCardFront(
       {
         lemma: "ser",
@@ -190,7 +154,25 @@ describe("renderCardFront", () => {
       20
     );
     expect(front.text).toContain("presente");
-    expect(front.text).not.toContain("pretérito perfecto");
+  });
+
+  it("present_perfect cell labels as 'pretérito perfecto' naturally (compound tense, no remap needed)", () => {
+    // After suspending haber-aux cells, haber forms only appear inside
+    // compound tense buckets — those tenses' own labels are already
+    // honest: present_perfect → pretérito perfecto.
+    const front = renderCardFront(
+      {
+        lemma: "comer",
+        tense: "present_perfect",
+        person: "nosotros",
+        expected_form: "hemos comido",
+      },
+      "Hemos comido en casa esta tarde.",
+      "present_perfect",
+      0,
+      20
+    );
+    expect(front.text).toContain("pretérito perfecto");
   });
 });
 

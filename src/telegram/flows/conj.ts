@@ -143,30 +143,7 @@ function patternLabel(pattern: string): string {
   return PATTERN_LABEL_ES[pattern] ?? pattern;
 }
 
-/**
- * Haiber simple-tense cells are stored as `(haber, present_indicative)`,
- * `(haber, imperfect)`, etc. — the auxiliary's own tense. But the cloze
- * sentence is almost always a compound (`Ha llegado el autobús`,
- * `Hemos terminado el trabajo`), so labeling it as "presente" confuses
- * the user: they see a pretérito perfecto in context and a "presente"
- * tag underneath. Remap to the compound tense the auxiliary participates
- * in. (`hay` 3ps is a legitimate exception but it's not how /conj sources
- * its sentences.)
- */
-const HABER_AUX_TENSE_LABEL: Record<string, string> = {
-  present_indicative: "pretérito perfecto",
-  imperfect: "pluscuamperfecto",
-  future_indicative: "futuro perfecto",
-  conditional: "condicional perfecto",
-  present_subjunctive: "pretérito perfecto de subjuntivo",
-  imperfect_subjunctive: "pluscuamperfecto de subjuntivo",
-};
-
-function tenseLabel(tense: string, lemma?: string): string {
-  if (lemma === "haber") {
-    const auxLabel = HABER_AUX_TENSE_LABEL[tense];
-    if (auxLabel) return auxLabel;
-  }
+function tenseLabel(tense: string): string {
   return TENSE_LABEL_ES[tense] ?? tense;
 }
 
@@ -247,7 +224,7 @@ export function renderCardFront(
     : "";
   const text =
     `${head}${escapeHtml(masked)}\n` +
-    `<i>${escapeHtml(row.lemma)} · ${personTag(row.person)} · ${tenseLabel(row.tense, row.lemma)}</i>` +
+    `<i>${escapeHtml(row.lemma)} · ${personTag(row.person)} · ${tenseLabel(row.tense)}</i>` +
     footer;
   return { text };
 }

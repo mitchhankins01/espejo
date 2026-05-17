@@ -100,6 +100,35 @@ describe("pickPatternForSession", () => {
     expect(pattern).toBeNull();
   });
 
+  it("cold start: skips haber's simple-tense candidates", async () => {
+    // Only haber present_indicative candidates exist (with frequency_rank).
+    // The picker must NOT return `present_irregular` since the haber cells
+    // are functionally aux-only; the picker should fall through to the next
+    // pattern (or null if no other candidates).
+    await seedConjugationCells([
+      { lemma: "haber", tense: "present_indicative", person: "yo", form: "he", pattern: "present_irregular", rank: 1 },
+      { lemma: "haber", tense: "present_indicative", person: "tu", form: "has", pattern: "present_irregular", rank: 1 },
+      { lemma: "tener", tense: "present_indicative", person: "yo", form: "tengo", pattern: "present_yo_go", rank: 2 },
+    ]);
+    const pattern = await pickPatternForSession(pool);
+    expect(pattern).toBe("present_yo_go");
+  });
+
+  it("existing reviews: ignores haber's promoted-but-aux-only cells in due count", async () => {
+    // A bunch of haber present_indicative cells already promoted (status=active)
+    // shouldn't make the picker pick `present_irregular`.
+    await pool.query(
+      `INSERT INTO conjugation_reviews (lemma, tense, person, expected_form, pattern, state, due)
+       VALUES
+         ('haber','present_indicative','yo','he','present_irregular','review', NOW() - INTERVAL '1 day'),
+         ('haber','present_indicative','tu','has','present_irregular','review', NOW() - INTERVAL '1 day'),
+         ('haber','present_indicative','el','ha','present_irregular','review', NOW() - INTERVAL '1 day'),
+         ('hablar','preterite','yo','hablé','preterite_regular_ar','review', NOW() - INTERVAL '1 day')`
+    );
+    const pattern = await pickPatternForSession(pool);
+    expect(pattern).toBe("preterite_regular_ar");
+  });
+
   it("existing reviews: most-due-cells wins", async () => {
     await seedConjugationCells([
       { lemma: "tener", tense: "preterite", person: "yo", form: "tuve", pattern: "preterite_strong", rank: 2 },
@@ -172,6 +201,46 @@ describe("buildConjugationQueue", () => {
     // The suspended one is filtered from due/new queries; the promote step
     // will see the row already exists in cr, so it won't be promoted either.
     expect(ids.length).toBe(0);
+  });
+
+  it("excludes haber's simple-tense cells everywhere (due, new, and promote paths)", async () => {
+    // Promoted-but-active haber present_indicative row: must NOT appear in
+    // the queue. The fix is the structural one — haber as standalone
+    // auxiliary is meaningless; haber gets practiced via compound-tense
+    // patterns where it's paired with a participle.
+    await pool.query(
+      `INSERT INTO conjugation_reviews (lemma, tense, person, expected_form, pattern, state, due)
+       VALUES ('haber','present_indicative','yo','he','present_irregular','review', NOW() - INTERVAL '1 day')`
+    );
+    // And an unpromoted haber candidate in conjugations.
+    await seedConjugationCells([
+      { lemma: "haber", tense: "present_indicative", person: "tu", form: "has", pattern: "present_irregular", rank: 1 },
+      { lemma: "ser",   tense: "present_indicative", person: "yo", form: "soy", pattern: "present_irregular", rank: 2 },
+    ]);
+    const ids = await buildConjugationQueue(pool, "present_irregular", 10);
+    // ser/yo should be present; no haber rows should ever surface.
+    const rows = await pool.query<{ lemma: string; tense: string; person: string }>(
+      `SELECT lemma, tense, person FROM conjugation_reviews
+        WHERE id::text = ANY($1::text[])`,
+      [ids]
+    );
+    expect(rows.rows.some((r) => r.lemma === "ser")).toBe(true);
+    expect(rows.rows.some((r) => r.lemma === "haber")).toBe(false);
+  });
+
+  it("still drills haber inside compound tenses (cells like 'comer present_perfect → he comido')", async () => {
+    // After exclusion, haber's auxiliary forms remain testable inside the
+    // proper compound-tense buckets, which store `aux + participio`.
+    await seedConjugationCells([
+      { lemma: "comer", tense: "present_perfect", person: "nosotros", form: "hemos comido", pattern: "present_perfect", rank: 3 },
+    ]);
+    const ids = await buildConjugationQueue(pool, "present_perfect", 5);
+    expect(ids.length).toBe(1);
+    const row = await pool.query<{ form: string }>(
+      `SELECT expected_form AS form FROM conjugation_reviews WHERE id::text = $1`,
+      [ids[0]]
+    );
+    expect(row.rows[0].form).toBe("hemos comido");
   });
 });
 

@@ -1998,6 +1998,24 @@ const migrations: Migration[] = [
         ADD COLUMN IF NOT EXISTS generated_gloss TEXT;
     `,
   },
+  {
+    name: "057-suspend-haber-aux-cells",
+    getSql: () => `
+      -- Haber's simple-tense cells (he/has/ha/hemos/habéis/han, había, habré, …)
+      -- functionally only appear as auxiliaries inside compound tenses. Drilling
+      -- them standalone in /conj mislabels the card (pattern says "presente"
+      -- while the sentence is a pretérito perfecto). Suspend so /conj routes
+      -- them only through their proper compound patterns (present_perfect etc).
+      UPDATE conjugation_reviews
+         SET status = 'suspended', updated_at = NOW()
+       WHERE lemma = 'haber'
+         AND tense IN (
+           'present_indicative','imperfect','future_indicative','conditional',
+           'preterite','present_subjunctive','imperfect_subjunctive'
+         )
+         AND status = 'active';
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

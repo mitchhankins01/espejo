@@ -38,6 +38,33 @@ export interface ConjugationReviewRow {
   updated_at: Date;
 }
 
+/**
+ * Haber's simple-tense cells (he/has/ha/hemos/habéis/han, había, habré, …)
+ * are stored as e.g. `(haber, present_indicative)`. As conjugations they're
+ * irregular and would naturally fall into `present_irregular`, but
+ * functionally those forms ONLY appear as auxiliaries inside compound
+ * tenses ("ha llegado", "habíamos visto"). Drilling them standalone
+ * mislabels the card ("haber · nosotros · presente" while the sentence
+ * is `Hemos terminado el trabajo` — pretérito perfecto). The compound
+ * tense patterns (`present_perfect`, `pluperfect`, …) store the proper
+ * `aux + participio` form (`he comido`, `había llegado`, …), so haber
+ * already gets practiced honestly via those buckets. Suppress the
+ * standalone cells everywhere /conj routes through.
+ *
+ * Imperative isn't listed: haber doesn't have a meaningful imperative
+ * use and the import script doesn't ship those cells.
+ */
+function excludeHaberAuxClause(lemmaCol: string, tenseCol: string): string {
+  return `NOT (
+    ${lemmaCol} = 'haber' AND ${tenseCol} IN (
+      'present_indicative','imperfect','future_indicative','conditional',
+      'preterite','present_subjunctive','imperfect_subjunctive'
+    )
+  )`;
+}
+const EXCLUDE_HABER_AUX_CR = excludeHaberAuxClause("lemma", "tense");
+const EXCLUDE_HABER_AUX_C  = excludeHaberAuxClause("c.lemma", "c.tense");
+
 const ROW_SELECT = `
   SELECT cr.id::text, cr.lemma, cr.tense, cr.person, cr.expected_form, cr.pattern,
          cr.generated_sentence, cr.generated_form, cr.generated_gloss,
@@ -110,6 +137,7 @@ export async function pickPatternForSession(
               MAX(last_review) AS most_recent
          FROM conjugation_reviews
         WHERE status='active'
+          AND ${EXCLUDE_HABER_AUX_CR}
         GROUP BY pattern
      )
      SELECT pattern FROM per_pattern
@@ -130,6 +158,7 @@ export async function pickPatternForSession(
          ON cr.lemma = c.lemma AND cr.tense = c.tense AND cr.person = c.person
       WHERE cr.id IS NULL
         AND c.frequency_rank IS NOT NULL
+        AND ${EXCLUDE_HABER_AUX_C}
       GROUP BY c.pattern, pp.priority
       ORDER BY pp.priority ASC, MIN(c.frequency_rank) ASC, c.pattern ASC
       LIMIT 1`
@@ -152,6 +181,7 @@ export async function buildConjugationQueue(
   const due = await pool.query<{ id: string }>(
     `SELECT id::text FROM conjugation_reviews
       WHERE status='active' AND pattern=$1 AND state <> 'new' AND due <= NOW()
+        AND ${EXCLUDE_HABER_AUX_CR}
       ORDER BY due ASC
       LIMIT $2`,
     [pattern, cap]
@@ -165,6 +195,7 @@ export async function buildConjugationQueue(
   const news = await pool.query<{ id: string }>(
     `SELECT id::text FROM conjugation_reviews
       WHERE status='active' AND pattern=$1 AND state='new'
+        AND ${EXCLUDE_HABER_AUX_CR}
       ORDER BY id ASC
       LIMIT $2`,
     [pattern, remaining]
@@ -182,6 +213,7 @@ export async function buildConjugationQueue(
        LEFT JOIN conjugation_reviews cr
          ON cr.lemma=c.lemma AND cr.tense=c.tense AND cr.person=c.person
       WHERE c.pattern=$1 AND cr.id IS NULL
+        AND ${EXCLUDE_HABER_AUX_C}
       ORDER BY c.frequency_rank NULLS LAST, c.lemma, c.tense, c.person
       LIMIT $2
      ON CONFLICT (lemma, tense, person) DO NOTHING
