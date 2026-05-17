@@ -421,8 +421,24 @@ async function resolveClozeSentence(
   // null and we fall through to a cached/generated sentence instead of
   // showing a broken `requ___t`-style mask.
   if (hit && maskForm(hit.sentence, row.expected_form, row.tense) !== null) {
+    const sentence = truncateSentence(hit.sentence);
+    // Persist sentence + gloss to the row so the `Show` button can reveal
+    // the gloss even after the user has typed an answer and the flow has
+    // advanced past this card. Only cache when we actually have a gloss —
+    // otherwise we'd nuke a previously-cached Haiku gloss with null on a
+    // gloss-less corpus rotation, then leave a Show button with nothing
+    // behind it.
+    if (hit.gloss) {
+      await cacheGeneratedSentence(
+        deps.pool,
+        row.id,
+        sentence,
+        row.expected_form,
+        hit.gloss
+      );
+    }
     return {
-      sentence: truncateSentence(hit.sentence),
+      sentence,
       gloss: hit.gloss,
       source: "corpus",
     };
@@ -921,53 +937,46 @@ export async function endConjFlow(deps: ConjDeps): Promise<{ ended: boolean }> {
 }
 
 /**
- * Reveal the English gloss in-place on the card message. Stale taps
- * (callback for a card that's already been rated, or for a different
- * session, or after a bot restart that wiped flow state) silently
- * no-op so the user doesn't get a confusing error bubble.
+ * Reveal the English gloss in-place on the card message. Looks up the
+ * card by reviewId in the DB (not flow state) so the button keeps
+ * working after the user types an answer and the flow has advanced
+ * past this card — and even after a bot restart cleared the in-memory
+ * flow. The sentence + gloss were cached onto the row at serve time
+ * (resolveClozeSentence + cacheGeneratedSentence), so whatever the
+ * user is looking at in the chat message matches what we render.
+ *
+ * No-ops silently when the row is missing or has no gloss cached (the
+ * button shouldn't have been attached in that case, but be defensive).
  */
 export async function handleConjCallback(
   deps: ConjDeps & { messageId: number; callback: ConjCallback }
 ): Promise<void> {
   const { pool, chatId, messageId, callback } = deps;
-  const state = getFlow(chatId);
-  if (state?.flow !== "conj") {
+  const row = await getConjugationReviewById(pool, callback.reviewId);
+  if (!row || !row.generated_gloss || !row.generated_sentence) {
     logUsage(pool, {
       source: "telegram",
       surface: "flow",
       action: "conj.callback.stale",
       actor: chatId,
-      args: { kind: callback.kind, reviewId: callback.reviewId, reason: "no_flow" },
+      args: {
+        kind: callback.kind,
+        reviewId: callback.reviewId,
+        reason: !row ? "no_row" : "no_cached_gloss",
+      },
       ok: true,
     });
-    return;
-  }
-  // The Show button is only valid for the currently-displayed card.
-  // Taps on prior cards' buttons are stale (the user already moved on)
-  // and we shouldn't rewrite an old message in place.
-  if (state.currentCardId !== callback.reviewId) {
-    logUsage(pool, {
-      source: "telegram",
-      surface: "flow",
-      action: "conj.callback.stale",
-      actor: chatId,
-      args: { kind: callback.kind, reviewId: callback.reviewId, reason: "card_advanced" },
-      ok: true,
-    });
-    return;
-  }
-  if (!state.currentGloss || !state.currentSentence || !state.currentExpected || !state.currentTense || !state.currentLemma || !state.currentPerson) {
     return;
   }
   const revealed = renderCardRevealed(
     {
-      lemma: state.currentLemma,
-      tense: state.currentTense,
-      person: state.currentPerson,
-      expected_form: state.currentExpected,
+      lemma: row.lemma,
+      tense: row.tense,
+      person: row.person,
+      expected_form: row.expected_form,
     },
-    state.currentSentence,
-    state.currentGloss
+    row.generated_sentence,
+    row.generated_gloss
   );
   await editTelegramMessageText(chatId, messageId, revealed, "HTML");
   logUsage(pool, {
@@ -975,7 +984,7 @@ export async function handleConjCallback(
     surface: "flow",
     action: "conj.show",
     actor: chatId,
-    args: { reviewId: callback.reviewId, lemma: state.currentLemma },
+    args: { reviewId: callback.reviewId, lemma: row.lemma },
     ok: true,
   });
 }

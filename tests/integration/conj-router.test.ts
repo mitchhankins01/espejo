@@ -186,4 +186,56 @@ describe("router: /conj registration", () => {
     const replyMarkup = lastCall[2];
     expect(replyMarkup).toBeUndefined();
   });
+
+  it("Show callback still works AFTER user answers (regression: button broke once flow advanced)", async () => {
+    await seedCellsWithGloss();
+    // Add a second eligible cell so there's a "next card" after answering.
+    await pool.query(
+      `INSERT INTO conjugations (lemma, tense, person, form, pattern, frequency_rank)
+       VALUES ('ser','imperfect','tu','eras','imperfect_irregular',2)
+       ON CONFLICT (lemma,tense,person) DO UPDATE
+         SET form=EXCLUDED.form, pattern=EXCLUDED.pattern, frequency_rank=EXCLUDED.frequency_rank`
+    );
+    await routeMessage({ pool }, makeMsg("/conj 5"));
+    const state = getFlow(String(CHAT_ID));
+    if (state?.flow !== "conj") throw new Error("flow not active");
+    const firstCardId = state.currentCardId;
+    expect(firstCardId).toBeTruthy();
+
+    // User answers the first card → flow advances; state.currentCardId
+    // now points at card 2.
+    await routeMessage({ pool }, makeMsg("era", 2));
+    const stateAfter = getFlow(String(CHAT_ID));
+    if (stateAfter?.flow === "conj") {
+      expect(stateAfter.currentCardId).not.toBe(firstCardId);
+    }
+
+    // Tap Show on the FIRST card's button (which is what was breaking).
+    mockEdit.mockClear();
+    const callbackMsg: AssembledMessage = {
+      chatId: CHAT_ID,
+      messageId: 1001,
+      date: Math.floor(Date.now() / 1000),
+      text: "",
+      callbackData: `conj:show:${firstCardId}`,
+    };
+    await routeMessage({ pool }, callbackMsg);
+    expect(mockEdit).toHaveBeenCalledTimes(1);
+    const [, , editText] = mockEdit.mock.calls[0];
+    expect(editText).toContain("🇬🇧 When I was young, I traveled a lot.");
+  });
+
+  it("Show callback silently no-ops when the row has no cached gloss (defensive)", async () => {
+    // No seeding — callback for a non-existent row.
+    mockEdit.mockClear();
+    const callbackMsg: AssembledMessage = {
+      chatId: CHAT_ID,
+      messageId: 1001,
+      date: Math.floor(Date.now() / 1000),
+      text: "",
+      callbackData: "conj:show:99999999",
+    };
+    await routeMessage({ pool }, callbackMsg);
+    expect(mockEdit).toHaveBeenCalledTimes(0);
+  });
 });
