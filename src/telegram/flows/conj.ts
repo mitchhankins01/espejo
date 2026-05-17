@@ -27,6 +27,11 @@ import {
   setFlow,
   type ConjFlowState,
 } from "../flow-state.js";
+import {
+  buildConjShowPayload,
+  type ConjCallback,
+} from "../conj-callbacks.js";
+import { editTelegramMessageText } from "../client.js";
 
 const FLOW_NAME = "conj";
 const CONJ_DEFAULT_CAP = 20;
@@ -201,32 +206,81 @@ export function maskForm(
   return sentence.slice(0, start) + replacement + sentence.slice(end);
 }
 
+export interface CardFront {
+  text: string;
+  replyMarkup?: Record<string, unknown>;
+}
+
+/**
+ * Inline-keyboard for the unrevealed card. Single `Show` button that
+ * dispatches `conj:show:<reviewId>` and rewrites this same message
+ * in-place with the English gloss appended (see `renderCardRevealed`).
+ * Only attached when a gloss is actually available.
+ */
+function showKeyboard(reviewId: string): Record<string, unknown> {
+  return {
+    inline_keyboard: [
+      [{ text: "Show", callback_data: buildConjShowPayload(reviewId) }],
+    ],
+  };
+}
+
 export function renderCardFront(
-  row: { lemma: string; tense: string; person: string; expected_form: string },
+  row: {
+    id?: string;
+    lemma: string;
+    tense: string;
+    person: string;
+    expected_form: string;
+  },
   sentence: string,
   pattern: string,
   cardIndex: number,
-  totalCards: number
-): { text: string } {
+  totalCards: number,
+  hasGloss = false
+): CardFront {
   // Last-resort safety: if masking fails after the resolver already vetted
   // the sentence, fall back to a minimal context-free frame so the user can
   // still play. The resolver should normally have caught this and routed to
   // a generated sentence instead.
   const masked = maskForm(sentence, row.expected_form, row.tense) ?? "___";
   const isFirst = cardIndex === 0;
+  // First card opens with header + command bar at the TOP, then the cloze
+  // and identity tag below. Subsequent cards strip both — the user knows
+  // the contract by then and prefers the compact form.
   const head = isFirst
-    ? `🇪🇸 Hoy: ${patternLabel(pattern)}. ${totalCards} cartas.\n\n`
-    : "";
-  // Show the answer-format hint only on the opening card — past that the
-  // user knows the contract and the footer is just noise.
-  const footer = isFirst
-    ? `\n\nEscribe la respuesta · /hint · /easy · /done`
+    ? `🇪🇸 Hoy: ${patternLabel(pattern)}. ${totalCards} cartas.\n` +
+      `/hint · /easy · /done\n\n`
     : "";
   const text =
     `${head}${escapeHtml(masked)}\n` +
-    `<i>${escapeHtml(row.lemma)} · ${personTag(row.person)} · ${tenseLabel(row.tense)}</i>` +
-    footer;
+    `<i>${escapeHtml(row.lemma)} · ${personTag(row.person)} · ${tenseLabel(row.tense)}</i>`;
+  // Only attach the Show button when we have a gloss to reveal. The
+  // callback handler ignores stale taps (card already rated, different
+  // session, missing gloss).
+  if (hasGloss && row.id) {
+    return { text, replyMarkup: showKeyboard(row.id) };
+  }
   return { text };
+}
+
+/**
+ * In-place rewrite of the card message once the user taps `Show`. Keeps
+ * the cloze + identity line, appends the gloss, and drops the button
+ * (its `replyMarkup: undefined` strips the keyboard via Telegram's edit
+ * semantics — pass an empty object to the edit call if needed).
+ */
+export function renderCardRevealed(
+  row: { lemma: string; tense: string; person: string; expected_form: string },
+  sentence: string,
+  gloss: string
+): string {
+  const masked = maskForm(sentence, row.expected_form, row.tense) ?? "___";
+  return (
+    `${escapeHtml(masked)}\n` +
+    `<i>${escapeHtml(row.lemma)} · ${personTag(row.person)} · ${tenseLabel(row.tense)}</i>\n` +
+    `🇬🇧 ${escapeHtml(gloss)}`
+  );
 }
 
 /**
@@ -254,40 +308,40 @@ export function highlightAnswer(sentence: string, form: string): string {
   );
 }
 
-function glossLine(gloss: string | null): string {
-  if (!gloss) return "";
-  return `\n<i>${escapeHtml(gloss)}</i>`;
-}
-
+/**
+ * Rate-reveal renderer. The English gloss is NOT included here — it's
+ * accessed via the `Show` button on the card itself, which edits the
+ * card message in-place. Keeping the result message tight (one line for
+ * correct/easy, three for wrong) lets the next card pin to the top of
+ * the chat without scrolling past a per-card translation history.
+ */
 export function renderResult(
   gradeKind: GradeKind,
   expected: string,
   maskedFilled: string,
   due: Date,
-  now: Date = new Date(),
-  gloss: string | null = null
+  now: Date = new Date()
 ): string {
   const interval = formatInterval(due, now);
-  const g = glossLine(gloss);
   switch (gradeKind) {
     case "exact":
-      return `✓ ${escapeHtml(expected)} (good) → next in ${interval}${g}`;
+      return `✓ ${escapeHtml(expected)} (good) → next in ${interval}`;
     case "hint_correct":
-      return `✓ ${escapeHtml(expected)} (hint → hard) → next in ${interval}${g}`;
+      return `✓ ${escapeHtml(expected)} (hint → hard) → next in ${interval}`;
     case "easy":
-      return `⏭ ${escapeHtml(expected)} (easy → next in ${interval})${g}`;
+      return `⏭ ${escapeHtml(expected)} (easy → next in ${interval})`;
     case "hint_easy":
-      return `⏭ ${escapeHtml(expected)} (hint+easy → hard → next in ${interval})${g}`;
+      return `⏭ ${escapeHtml(expected)} (hint+easy → hard → next in ${interval})`;
     case "wrong":
       return (
         `✗ Expected: <b>${escapeHtml(expected)}</b>\n` +
-        `${highlightAnswer(maskedFilled, expected)}${g}\n` +
+        `${highlightAnswer(maskedFilled, expected)}\n` +
         `(again → next in ${interval})`
       );
     case "hint_wrong":
       return (
         `✗ Expected: <b>${escapeHtml(expected)}</b>\n` +
-        `${highlightAnswer(maskedFilled, expected)}${g}\n` +
+        `${highlightAnswer(maskedFilled, expected)}\n` +
         `(hint → again → next in ${interval})`
       );
   }
@@ -468,13 +522,14 @@ async function serveNextCard(
   setFlow(deps.chatId, state);
 
   const front = renderCardFront(
-    row,
+    { ...row, id: row.id },
     sentence,
     state.pattern,
     state.queueIndex,
-    state.queue.length
+    state.queue.length,
+    Boolean(gloss)
   );
-  await sendTelegramMessage(deps.chatId, front.text);
+  await sendTelegramMessage(deps.chatId, front.text, front.replyMarkup);
   await persistAssistant(deps.pool, deps.chatId, front.text);
 
   logUsage(deps.pool, {
@@ -814,7 +869,6 @@ export async function continueConjFlow(
     state.currentExpected
   );
 
-  const revealGloss = state.currentGloss;
   state.hintUsed = false;
   state.currentCardId = null;
   state.currentExpected = null;
@@ -832,9 +886,7 @@ export async function continueConjFlow(
     gradeKind,
     row.expected_form,
     filled,
-    next.due,
-    new Date(),
-    revealGloss
+    next.due
   );
   await sendTelegramMessage(chatId, resultText);
   await persistAssistant(pool, chatId, resultText);
@@ -866,4 +918,64 @@ export async function endConjFlow(deps: ConjDeps): Promise<{ ended: boolean }> {
   await persistUser(deps.pool, deps.chatId, deps.externalMessageId, "/done");
   await endSessionWithSummary(deps, state, "Stopped");
   return { ended: true };
+}
+
+/**
+ * Reveal the English gloss in-place on the card message. Stale taps
+ * (callback for a card that's already been rated, or for a different
+ * session, or after a bot restart that wiped flow state) silently
+ * no-op so the user doesn't get a confusing error bubble.
+ */
+export async function handleConjCallback(
+  deps: ConjDeps & { messageId: number; callback: ConjCallback }
+): Promise<void> {
+  const { pool, chatId, messageId, callback } = deps;
+  const state = getFlow(chatId);
+  if (state?.flow !== "conj") {
+    logUsage(pool, {
+      source: "telegram",
+      surface: "flow",
+      action: "conj.callback.stale",
+      actor: chatId,
+      args: { kind: callback.kind, reviewId: callback.reviewId, reason: "no_flow" },
+      ok: true,
+    });
+    return;
+  }
+  // The Show button is only valid for the currently-displayed card.
+  // Taps on prior cards' buttons are stale (the user already moved on)
+  // and we shouldn't rewrite an old message in place.
+  if (state.currentCardId !== callback.reviewId) {
+    logUsage(pool, {
+      source: "telegram",
+      surface: "flow",
+      action: "conj.callback.stale",
+      actor: chatId,
+      args: { kind: callback.kind, reviewId: callback.reviewId, reason: "card_advanced" },
+      ok: true,
+    });
+    return;
+  }
+  if (!state.currentGloss || !state.currentSentence || !state.currentExpected || !state.currentTense || !state.currentLemma || !state.currentPerson) {
+    return;
+  }
+  const revealed = renderCardRevealed(
+    {
+      lemma: state.currentLemma,
+      tense: state.currentTense,
+      person: state.currentPerson,
+      expected_form: state.currentExpected,
+    },
+    state.currentSentence,
+    state.currentGloss
+  );
+  await editTelegramMessageText(chatId, messageId, revealed, "HTML");
+  logUsage(pool, {
+    source: "telegram",
+    surface: "flow",
+    action: "conj.show",
+    actor: chatId,
+    args: { reviewId: callback.reviewId, lemma: state.currentLemma },
+    ok: true,
+  });
 }

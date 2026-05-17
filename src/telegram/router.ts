@@ -43,8 +43,10 @@ import {
   startConjFlow,
   continueConjFlow,
   endConjFlow,
+  handleConjCallback,
 } from "./flows/conj.js";
 import { parseSrsCallback } from "./srs-callbacks.js";
+import { parseConjCallback } from "./conj-callbacks.js";
 import { runChatFlow } from "./flows/chat.js";
 
 const END_FLOW_ALIASES = new Set([
@@ -119,6 +121,17 @@ export async function routeMessage(
         externalMessageId,
         messageId: msg.messageId,
         callback: srsCb,
+      });
+      return;
+    }
+    const conjCb = parseConjCallback(msg.callbackData);
+    if (conjCb) {
+      await handleConjCallback({
+        pool: ctx.pool,
+        chatId,
+        externalMessageId,
+        messageId: msg.messageId,
+        callback: conjCb,
       });
       return;
     }

@@ -17,6 +17,7 @@ import {
   formatInterval,
   maskForm,
   renderCardFront,
+  renderCardRevealed,
   renderResult,
   renderSessionSummary,
   highlightAnswer,
@@ -110,9 +111,9 @@ describe("maskForm", () => {
 });
 
 describe("renderCardFront", () => {
-  it("includes pattern announce + footer on first card only", () => {
+  it("first card: header + command bar BEFORE cloze; no 'Escribe la respuesta' prefix", () => {
     const front = renderCardFront(
-      { lemma: "ser", tense: "imperfect", person: "yo", expected_form: "era" },
+      { id: "42", lemma: "ser", tense: "imperfect", person: "yo", expected_form: "era" },
       "Cuando era joven, viajé.",
       "imperfect_irregular",
       0,
@@ -122,27 +123,74 @@ describe("renderCardFront", () => {
     expect(front.text).toContain("___");
     expect(front.text).toContain("ser");
     expect(front.text).toContain("imperfecto");
-    expect(front.text).toContain("Escribe la respuesta");
+    // New layout: command bar at top, no "Escribe la respuesta" stub.
+    expect(front.text).toContain("/hint · /easy · /done");
+    expect(front.text).not.toContain("Escribe la respuesta");
+    // Order: header line, command bar, blank line, cloze, identity tag.
+    const headerIdx = front.text.indexOf("Hoy:");
+    const commandsIdx = front.text.indexOf("/hint");
+    const clozeIdx = front.text.indexOf("___");
+    expect(headerIdx).toBeLessThan(commandsIdx);
+    expect(commandsIdx).toBeLessThan(clozeIdx);
   });
 
-  it("omits pattern announce AND the answer-format footer on subsequent cards", () => {
+  it("subsequent cards: strip header AND command bar", () => {
     const front = renderCardFront(
-      { lemma: "ser", tense: "imperfect", person: "yo", expected_form: "era" },
+      { id: "42", lemma: "ser", tense: "imperfect", person: "yo", expected_form: "era" },
       "Cuando era joven.",
       "imperfect_irregular",
       1,
       12
     );
     expect(front.text).not.toContain("cartas");
-    // Footer is noise past the first card — user already knows the contract.
-    expect(front.text).not.toContain("Escribe la respuesta");
     expect(front.text).not.toContain("/hint");
     expect(front.text).not.toContain("/done");
+    expect(front.text).not.toContain("Escribe la respuesta");
+  });
+
+  it("attaches a Show inline-keyboard button when a gloss is available", () => {
+    const front = renderCardFront(
+      { id: "42", lemma: "ser", tense: "present_indicative", person: "nosotros", expected_form: "somos" },
+      "Somos amigos desde hace muchos años.",
+      "present_irregular",
+      0,
+      20,
+      true
+    );
+    expect(front.replyMarkup).toBeDefined();
+    const kb = front.replyMarkup as { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> };
+    expect(kb.inline_keyboard[0][0].text).toBe("Show");
+    expect(kb.inline_keyboard[0][0].callback_data).toBe("conj:show:42");
+  });
+
+  it("does NOT attach the Show button when no gloss exists", () => {
+    const front = renderCardFront(
+      { id: "42", lemma: "ser", tense: "present_indicative", person: "nosotros", expected_form: "somos" },
+      "Somos amigos.",
+      "present_irregular",
+      0,
+      20,
+      false
+    );
+    expect(front.replyMarkup).toBeUndefined();
+  });
+
+  it("does NOT attach the Show button when row.id is missing (defensive)", () => {
+    const front = renderCardFront(
+      { lemma: "ser", tense: "present_indicative", person: "nosotros", expected_form: "somos" },
+      "Somos amigos.",
+      "present_irregular",
+      0,
+      20,
+      true
+    );
+    expect(front.replyMarkup).toBeUndefined();
   });
 
   it("non-haber present_indicative shows 'presente'", () => {
     const front = renderCardFront(
       {
+        id: "1",
         lemma: "ser",
         tense: "present_indicative",
         person: "yo",
@@ -162,6 +210,7 @@ describe("renderCardFront", () => {
     // honest: present_perfect → pretérito perfecto.
     const front = renderCardFront(
       {
+        id: "1",
         lemma: "comer",
         tense: "present_perfect",
         person: "nosotros",
@@ -173,6 +222,28 @@ describe("renderCardFront", () => {
       20
     );
     expect(front.text).toContain("pretérito perfecto");
+  });
+});
+
+describe("renderCardRevealed (Show button result)", () => {
+  it("appends the gloss with a 🇬🇧 flag below the cloze + identity", () => {
+    const out = renderCardRevealed(
+      { lemma: "ser", tense: "present_indicative", person: "nosotros", expected_form: "somos" },
+      "Somos amigos desde hace muchos años.",
+      "We've been friends for many years."
+    );
+    expect(out).toContain("___");
+    expect(out).toContain("ser · nosotros · presente");
+    expect(out).toContain("🇬🇧 We've been friends for many years.");
+  });
+
+  it("HTML-escapes the gloss to keep user-supplied translation safe", () => {
+    const out = renderCardRevealed(
+      { lemma: "ser", tense: "present_indicative", person: "yo", expected_form: "soy" },
+      "Soy <script>.",
+      "I am <script>."
+    );
+    expect(out).toContain("I am &lt;script&gt;.");
   });
 });
 
@@ -224,34 +295,18 @@ describe("renderResult", () => {
     expect(out).toContain("Cuando <b>tuve</b> el perro");
   });
 
-  it("includes the English gloss when supplied (reveal step)", () => {
+  it("result render is gloss-free — gloss now lives on the card via the Show button", () => {
+    // Regression: previously renderResult prepended `<i>{gloss}</i>` to every
+    // reveal, which pushed the next card down by a line every time.
     const out = renderResult(
       "exact",
       "somos",
-      "",
-      DUE_4D,
-      NOW,
-      "We've been friends for many years."
-    );
-    expect(out).toContain("<i>We've been friends for many years.</i>");
-  });
-
-  it("omits the gloss line when no gloss is supplied", () => {
-    const out = renderResult("exact", "somos", "", DUE_4D, NOW, null);
-    expect(out).not.toContain("<i>");
-  });
-
-  it("wrong-render includes gloss below the bolded answer", () => {
-    const out = renderResult(
-      "wrong",
-      "somos",
       "Somos amigos desde hace muchos años.",
       DUE_4D,
-      NOW,
-      "We've been friends for many years."
+      NOW
     );
-    expect(out).toContain("<b>Somos</b>");
-    expect(out).toContain("<i>We've been friends for many years.</i>");
+    expect(out).not.toContain("<i>");
+    expect(out).toBe("✓ somos (good) → next in 4d");
   });
 });
 
