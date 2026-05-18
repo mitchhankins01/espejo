@@ -253,16 +253,19 @@ export function renderCardFront(
   // a generated sentence instead.
   const masked = maskForm(sentence, row.expected_form, row.tense) ?? "___";
   const isFirst = cardIndex === 0;
-  // First card opens with header + command bar at the TOP, then the cloze
-  // and identity tag below. Subsequent cards strip both — the user knows
-  // the contract by then and prefers the compact form.
+  // First card opens with header + command bar at the TOP, then the
+  // identity tag and cloze below. Tense-first ordering primes the
+  // grammar slot before the sentence renders so the user reads the
+  // cloze already knowing which form to produce. Subsequent cards
+  // strip the header/command bar — the user knows the contract by
+  // then and prefers the compact form.
   const head = isFirst
     ? `🇪🇸 Hoy: ${formatPatternsHeader(patterns)}. ${totalCards} cartas.\n` +
       `/hint · /easy · /done\n\n`
     : "";
   const text =
-    `${head}${escapeHtml(masked)}\n` +
-    `<i>${escapeHtml(row.lemma)} · ${personTag(row.person)} · ${tenseLabel(row.tense)}</i>`;
+    `${head}<i>${tenseLabel(row.tense)} · ${personTag(row.person)} · ${escapeHtml(row.lemma)}</i>\n` +
+    `${escapeHtml(masked)}`;
   // Only attach the Show button when we have a gloss to reveal. The
   // callback handler ignores stale taps (card already rated, different
   // session, missing gloss).
@@ -285,8 +288,8 @@ export function renderCardRevealed(
 ): string {
   const masked = maskForm(sentence, row.expected_form, row.tense) ?? "___";
   return (
+    `<i>${tenseLabel(row.tense)} · ${personTag(row.person)} · ${escapeHtml(row.lemma)}</i>\n` +
     `${escapeHtml(masked)}\n` +
-    `<i>${escapeHtml(row.lemma)} · ${personTag(row.person)} · ${tenseLabel(row.tense)}</i>\n` +
     `🇬🇧 ${escapeHtml(gloss)}`
   );
 }

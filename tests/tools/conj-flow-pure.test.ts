@@ -126,12 +126,16 @@ describe("renderCardFront", () => {
     // New layout: command bar at top, no "Escribe la respuesta" stub.
     expect(front.text).toContain("/hint · /easy · /done");
     expect(front.text).not.toContain("Escribe la respuesta");
-    // Order: header line, command bar, blank line, cloze, identity tag.
+    // Order: header line, command bar, blank line, identity tag, cloze.
+    // Use the full identity string so "imperfecto" inside the pattern
+    // header (Hoy: imperfecto · irregular) doesn't match first.
     const headerIdx = front.text.indexOf("Hoy:");
     const commandsIdx = front.text.indexOf("/hint");
+    const identityIdx = front.text.indexOf("imperfecto · yo · ser");
     const clozeIdx = front.text.indexOf("___");
     expect(headerIdx).toBeLessThan(commandsIdx);
-    expect(commandsIdx).toBeLessThan(clozeIdx);
+    expect(commandsIdx).toBeLessThan(identityIdx);
+    expect(identityIdx).toBeLessThan(clozeIdx);
   });
 
   it("subsequent cards: strip header AND command bar", () => {
@@ -233,7 +237,9 @@ describe("renderCardRevealed (Show button result)", () => {
       "We've been friends for many years."
     );
     expect(out).toContain("___");
-    expect(out).toContain("ser · nosotros · presente");
+    expect(out).toContain("presente · nosotros · ser");
+    // Identity tag sits ABOVE the cloze in the revealed state.
+    expect(out.indexOf("presente · nosotros · ser")).toBeLessThan(out.indexOf("___"));
     expect(out).toContain("🇬🇧 We've been friends for many years.");
   });
 
