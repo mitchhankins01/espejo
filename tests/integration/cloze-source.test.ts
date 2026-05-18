@@ -222,6 +222,37 @@ describe("findClozeSentence", () => {
     expect(hit).toBeNull();
   });
 
+  it("rejects attributed-journal blockquote panels even inside kind='reference' (regression: Thyroid History leaked 'Pero tiene sentido…\"* — 2026-04-04')", async () => {
+    // This mirrors the actual artifact body that triggered the 2026-05-18
+    // incident: a `kind='reference'` artifact (Thyroid History) that quotes
+    // three dated Day One entries inside a blockquote panel. The cloze
+    // candidate spans paragraph boundaries and carries the citation tail.
+    await pool.query(
+      `INSERT INTO knowledge_artifacts (kind, title, body)
+       VALUES ('reference', 'thyroid-panel',
+               $$Sample April 2026 quotes:
+
+> *"sentía dopamine drained y brainsoup, no podía pensar bien"* — 2026-04-22
+> *"aún estoy dopamine drained y my cerebro está lento. Pero tiene sentido porque tuve nicotina y hierba varias veces esta semana"* — 2026-04-04
+> *"Wired and tired simultaneously — the dopamine trough after a genuinely big week"* — 2026-03-09
+
+These have a clear competing explanation.$$)`
+    );
+    const hit = await findClozeSentence(pool, {
+      lemma: "tener",
+      lang: "es",
+      form: "tiene",
+    });
+    // We may surface a fallback from elsewhere if the corpus has one — but the
+    // panel-derived candidate must NOT come back with citation/blockquote
+    // residue.
+    if (hit) {
+      expect(hit.sentence).not.toMatch(/—\s*\d{4}-\d{2}-\d{2}/);
+      expect(hit.sentence).not.toMatch(/(^|\n)\s*>\s/);
+      expect(hit.sentence).not.toMatch(/["'][\s]*\*[\s]*—/);
+    }
+  });
+
   it("examples carry the English gloss when available", async () => {
     await pool.query(
       `INSERT INTO vocab_reviews
@@ -291,6 +322,21 @@ describe("looksStructured", () => {
 
   it("flags multi-line non-prose blocks", () => {
     expect(looksStructured("line one\nline two\nline three")).toBe(true);
+  });
+
+  it("flags markdown blockquote markers", () => {
+    expect(looksStructured("> *\"esto sí lo entiendo\"* — 2026-04-04")).toBe(true);
+    expect(looksStructured("Pero tiene sentido aquí.\n> y luego algo más")).toBe(true);
+  });
+
+  it("flags citation-date suffixes", () => {
+    expect(
+      looksStructured("Pero tiene sentido porque tuve hambre — 2026-04-04")
+    ).toBe(true);
+  });
+
+  it("flags attribution suffixes", () => {
+    expect(looksStructured('aún estoy aquí"* — 2026-04-04')).toBe(true);
   });
 
   it("does not flag a normal sentence", () => {

@@ -78,4 +78,38 @@ describe("fsrs scheduler", () => {
     expect(next.due.getTime()).toBeGreaterThan(before - 1000);
     expect(next.due.getTime()).toBeGreaterThan(after - 1000);
   });
+
+  it("learning_steps round-trips so cards graduate out of learning (regression: 2026-05-18 stuck-in-learning bug)", () => {
+    // With default ts-fsrs config (learning_steps=['1m','10m'], short_term=true),
+    // a Good rating on a new card advances learning_steps 0→1 and stays in
+    // learning. The second Good (with learning_steps=1 persisted) should
+    // graduate to 'review'. The bug was that scheduler.ts hard-coded
+    // learning_steps=0 in toFsrsCard, so every reload reset the counter,
+    // trapping cards in `learning` forever with +10m intervals.
+    const card = emptyCard(NOW);
+    expect(card.learning_steps).toBe(0);
+
+    const step1 = nextState(card, 3, NOW);
+    expect(step1.state).toBe("learning");
+    expect(step1.learning_steps).toBeGreaterThan(0);
+
+    const t2 = new Date(step1.due.getTime() + 1000);
+    const step2 = nextState(
+      {
+        due: step1.due,
+        stability: step1.stability,
+        difficulty: step1.difficulty,
+        elapsed_days: step1.elapsed_days,
+        scheduled_days: step1.scheduled_days,
+        reps: step1.reps,
+        lapses: step1.lapses,
+        state: step1.state,
+        last_review: step1.last_review,
+        learning_steps: step1.learning_steps,
+      },
+      3,
+      t2
+    );
+    expect(step2.state).toBe("review");
+  });
 });

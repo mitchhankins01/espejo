@@ -2016,6 +2016,48 @@ const migrations: Migration[] = [
          AND status = 'active';
     `,
   },
+  {
+    name: "058-fsrs-learning-steps-and-graduate-stuck",
+    getSql: () => `
+      -- ts-fsrs uses card.learning_steps (index into ['1m','10m']) to track which
+      -- short-term step a learning-state card is on. Our scheduler adapter hard-
+      -- coded \`learning_steps: 0\` on every toFsrsCard, so the field was never
+      -- persisted — cards ping-ponged between step 0 (Good → 10m, advances to
+      -- step 1 in-memory) and step 0 again on reload. Result: every card stuck
+      -- in 'learning' forever, scheduled +10m no matter how many times correct.
+      -- Add the column so the adapter can round-trip it.
+      ALTER TABLE vocab_reviews
+        ADD COLUMN IF NOT EXISTS learning_steps INT NOT NULL DEFAULT 0;
+      ALTER TABLE conjugation_reviews
+        ADD COLUMN IF NOT EXISTS learning_steps INT NOT NULL DEFAULT 0;
+
+      -- Graduate stuck cards: anything in 'learning' with healthy stability and
+      -- no lapses has earned its way to 'review' state — its stability already
+      -- reflects multiple correct reps. Without this backfill each stuck card
+      -- needs one more correct rep before the bug-fix releases it (48 conj
+      -- cards + 62 vocab as of 2026-05-18). Due is set to last_review +
+      -- stability days; cards with last_review well in the past land
+      -- immediately due, which is correct.
+      UPDATE conjugation_reviews
+         SET state       = 'review',
+             due         = last_review + (stability * INTERVAL '1 day'),
+             updated_at  = NOW()
+       WHERE state       = 'learning'
+         AND lapses      = 0
+         AND reps        >= 2
+         AND stability   >= 1
+         AND last_review IS NOT NULL;
+      UPDATE vocab_reviews
+         SET state       = 'review',
+             due         = last_review + (stability * INTERVAL '1 day'),
+             updated_at  = NOW()
+       WHERE state       = 'learning'
+         AND lapses      = 0
+         AND reps        >= 2
+         AND stability   >= 1
+         AND last_review IS NOT NULL;
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

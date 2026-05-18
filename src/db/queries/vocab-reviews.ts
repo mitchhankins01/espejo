@@ -29,6 +29,7 @@ export interface VocabReviewRow {
   reps: number;
   lapses: number;
   state: CardStateName;
+  learning_steps: number;
   last_review: Date | null;
   current_session_id: string | null;
   current_session_served_at: Date | null;
@@ -213,12 +214,13 @@ export async function rateCard(
               reps           = reps + 1,
               lapses         = $5,
               state          = $6,
-              due            = $7,
+              learning_steps = $7,
+              due            = $8,
               last_review    = NOW(),
               current_session_rated_at = NOW(),
               updated_at     = NOW()
-        WHERE id = $8
-          AND current_session_id = $9
+        WHERE id = $9
+          AND current_session_id = $10
           AND current_session_rated_at IS NULL
         RETURNING id`,
       [
@@ -228,6 +230,7 @@ export async function rateCard(
         params.next.scheduled_days,
         params.next.lapses,
         params.next.state,
+        params.next.learning_steps,
         params.next.due,
         params.id,
         params.sessionId,

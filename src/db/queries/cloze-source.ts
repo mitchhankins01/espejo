@@ -96,9 +96,11 @@ export function looksSpanish(sentence: string): boolean {
 
 /**
  * Reject segments that aren't prose: YAML mapping rows, bullet lists, table
- * pipes, headings, all-caps banners, code fences. These leak through when an
- * artifact body is structured rather than narrative (e.g. Español Vivo's
- * `common_traps:` YAML block was surfaced verbatim as a cloze).
+ * pipes, headings, all-caps banners, code fences, blockquote panels with
+ * attributed journal quotes. These leak through when an artifact body is
+ * structured rather than narrative (e.g. Español Vivo's `common_traps:` YAML
+ * block, or the `Thyroid History` reference's three-blockquote panel of dated
+ * Day One quotes — see 2026-05-18 incident).
  */
 export function looksStructured(sentence: string): boolean {
   const trimmed = sentence.trim();
@@ -110,6 +112,15 @@ export function looksStructured(sentence: string): boolean {
   if (/^#{1,6}\s+/.test(trimmed)) return true;
   if (trimmed.startsWith("```")) return true;
   if (/^\s*\|.*\|\s*$/.test(trimmed)) return true; // markdown table row
+  // Markdown blockquote markers — `>` at start of line means a quoted
+  // passage. Tomos and references nest Day One excerpts this way, which
+  // bypasses the "no journal-as-cloze" rule.
+  if (/(^|\n)\s*>\s/.test(trimmed)) return true;
+  // Citation date suffix attached to a journal-quote attribution
+  // (`…esta semana"* — 2026-04-04`). These never belong inside a cloze.
+  if (/—\s*\d{4}-\d{2}-\d{2}/.test(trimmed)) return true;
+  // Attribution suffix `"* —` / `* —` / `'* —` that follows a quoted span.
+  if (/["'][\s]*\*[\s]*—/.test(trimmed)) return true;
   // Lots of colons + few sentence-enders → config-ish (covers nested YAML).
   const colons = (trimmed.match(/:/g) ?? []).length;
   const enders = (trimmed.match(/[.!?]/g) ?? []).length;
@@ -123,14 +134,19 @@ export function looksStructured(sentence: string): boolean {
 export function extractContaining(text: string, formLower: string): string | null {
   const segments = text.split(SPLIT_RE);
   for (const seg of segments) {
-    const trimmed = seg.trim();
-    if (!trimmed) continue;
-    if (trimmed.toLowerCase().includes(formLower)) {
-      const out = trimmed.length > SENTENCE_MAX_LEN
-        ? trimmed.slice(0, SENTENCE_MAX_LEN - 1).trimEnd() + "…"
-        : trimmed;
-      return out;
-    }
+    // Don't cross paragraph boundaries. The sentence splitter doesn't honor
+    // line breaks, so a segment can span an entire blockquote panel
+    // (e.g. three dated Day One excerpts) when there's no `.` between them.
+    // Take only the first line that actually contains the form.
+    const formLine = seg
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .find((line) => line.length > 0 && line.toLowerCase().includes(formLower));
+    if (!formLine) continue;
+    const out = formLine.length > SENTENCE_MAX_LEN
+      ? formLine.slice(0, SENTENCE_MAX_LEN - 1).trimEnd() + "…"
+      : formLine;
+    return out;
   }
   return null;
 }

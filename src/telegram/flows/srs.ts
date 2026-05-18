@@ -380,6 +380,7 @@ export async function handleSrsCallback(
     lapses: row.lapses,
     state: row.state,
     last_review: row.last_review,
+    learning_steps: row.learning_steps,
   };
   const next = nextState(cardBefore, callback.rating);
 

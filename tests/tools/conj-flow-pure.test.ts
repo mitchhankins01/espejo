@@ -115,7 +115,7 @@ describe("renderCardFront", () => {
     const front = renderCardFront(
       { id: "42", lemma: "ser", tense: "imperfect", person: "yo", expected_form: "era" },
       "Cuando era joven, viajé.",
-      "imperfect_irregular",
+      ["imperfect_irregular"],
       0,
       12
     );
@@ -138,7 +138,7 @@ describe("renderCardFront", () => {
     const front = renderCardFront(
       { id: "42", lemma: "ser", tense: "imperfect", person: "yo", expected_form: "era" },
       "Cuando era joven.",
-      "imperfect_irregular",
+      ["imperfect_irregular"],
       1,
       12
     );
@@ -152,7 +152,7 @@ describe("renderCardFront", () => {
     const front = renderCardFront(
       { id: "42", lemma: "ser", tense: "present_indicative", person: "nosotros", expected_form: "somos" },
       "Somos amigos desde hace muchos años.",
-      "present_irregular",
+      ["present_irregular"],
       0,
       20,
       true
@@ -167,7 +167,7 @@ describe("renderCardFront", () => {
     const front = renderCardFront(
       { id: "42", lemma: "ser", tense: "present_indicative", person: "nosotros", expected_form: "somos" },
       "Somos amigos.",
-      "present_irregular",
+      ["present_irregular"],
       0,
       20,
       false
@@ -179,7 +179,7 @@ describe("renderCardFront", () => {
     const front = renderCardFront(
       { lemma: "ser", tense: "present_indicative", person: "nosotros", expected_form: "somos" },
       "Somos amigos.",
-      "present_irregular",
+      ["present_irregular"],
       0,
       20,
       true
@@ -197,7 +197,7 @@ describe("renderCardFront", () => {
         expected_form: "soy",
       },
       "Yo soy profesor de español.",
-      "present_irregular",
+      ["present_irregular"],
       0,
       20
     );
@@ -346,7 +346,7 @@ describe("renderSessionSummary", () => {
       flow: "conj",
       sessionId: "s",
       startedAt: 0,
-      pattern: "preterite_strong",
+      patterns: ["preterite_strong"],
       queue: [],
       queueIndex: 12,
       reviewedCount: 12,
@@ -372,7 +372,7 @@ describe("renderSessionSummary", () => {
     };
     const summary = renderSessionSummary(
       "Listo",
-      "preterite_strong",
+      ["preterite_strong"],
       state,
       { due: 10, stalling: 3, unpromoted: 100 }
     );

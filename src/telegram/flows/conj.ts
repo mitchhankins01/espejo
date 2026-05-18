@@ -4,8 +4,7 @@ import { sendTelegramMessage } from "../client.js";
 import { insertChatMessage } from "../../db/queries/chat.js";
 import { logUsage } from "../../db/queries/usage.js";
 import {
-  pickPatternForSession,
-  buildConjugationQueue,
+  buildMultiPatternQueue,
   serveConjugationCard,
   rateConjugationCard,
   getConjugationReviewById,
@@ -225,6 +224,15 @@ function showKeyboard(reviewId: string): Record<string, unknown> {
   };
 }
 
+function formatPatternsHeader(patterns: string[]): string {
+  // One pattern → `presente · cambio e→ie`.
+  // Two or three → list joined with ` · `.
+  // More → first pattern + `+N más` (keeps the line short on phones).
+  if (patterns.length <= 1) return patternLabel(patterns[0] ?? "");
+  if (patterns.length <= 3) return patterns.map(patternLabel).join(" · ");
+  return `${patternLabel(patterns[0])} +${patterns.length - 1} más`;
+}
+
 export function renderCardFront(
   row: {
     id?: string;
@@ -234,7 +242,7 @@ export function renderCardFront(
     expected_form: string;
   },
   sentence: string,
-  pattern: string,
+  patterns: string[],
   cardIndex: number,
   totalCards: number,
   hasGloss = false
@@ -249,7 +257,7 @@ export function renderCardFront(
   // and identity tag below. Subsequent cards strip both — the user knows
   // the contract by then and prefers the compact form.
   const head = isFirst
-    ? `🇪🇸 Hoy: ${patternLabel(pattern)}. ${totalCards} cartas.\n` +
+    ? `🇪🇸 Hoy: ${formatPatternsHeader(patterns)}. ${totalCards} cartas.\n` +
       `/hint · /easy · /done\n\n`
     : "";
   const text =
@@ -349,7 +357,7 @@ export function renderResult(
 
 export function renderSessionSummary(
   prefix: "Listo" | "Stopped",
-  pattern: string,
+  patterns: string[],
   state: ConjFlowState,
   counts: { due: number; stalling: number; unpromoted: number }
 ): string {
@@ -358,8 +366,9 @@ export function renderSessionSummary(
   const skip = c.easy + c.hint_easy;
   const wrong = c.wrong + c.hint_wrong;
   const withHint = c.hint_correct + c.hint_wrong + c.hint_easy;
+  const label = patterns.length === 1 ? "Patrón" : "Patrones";
   return (
-    `${prefix}. Patrón: ${patternLabel(pattern)}.\n` +
+    `${prefix}. ${label}: ${formatPatternsHeader(patterns)}.\n` +
     `${state.reviewedCount} revisadas — ${correct} ✓ · ${skip} ⏭ · ${wrong} ✗ · ${withHint} con pista.\n` +
     `${counts.due} pendientes (otros patrones), ${counts.stalling} atascadas, ${counts.unpromoted} celdas sin promover.`
   );
@@ -540,7 +549,7 @@ async function serveNextCard(
   const front = renderCardFront(
     { ...row, id: row.id },
     sentence,
-    state.pattern,
+    state.patterns,
     state.queueIndex,
     state.queue.length,
     Boolean(gloss)
@@ -572,7 +581,7 @@ async function endSessionWithSummary(
   prefix: "Listo" | "Stopped"
 ): Promise<void> {
   const counts = await getConjugationSessionCounts(deps.pool);
-  const summary = renderSessionSummary(prefix, state.pattern, state, counts);
+  const summary = renderSessionSummary(prefix, state.patterns, state, counts);
   await sendTelegramMessage(deps.chatId, summary);
   await persistAssistant(deps.pool, deps.chatId, summary);
   logUsage(deps.pool, {
@@ -582,7 +591,7 @@ async function endSessionWithSummary(
     actor: deps.chatId,
     args: {
       reviewedCount: state.reviewedCount,
-      pattern: state.pattern,
+      patterns: state.patterns,
       hintCount: state.hintCount,
     },
     ok: true,
@@ -623,23 +632,7 @@ export async function startConjFlow(
   }
   const cap = parsed.newCap ?? CONJ_DEFAULT_CAP;
 
-  const pattern = await pickPatternForSession(pool);
-  if (!pattern) {
-    const reply = "Cola vacía. Corre `pnpm import:conjugations` y reintenta.";
-    await sendTelegramMessage(chatId, reply);
-    await persistAssistant(pool, chatId, reply);
-    logUsage(pool, {
-      source: "telegram",
-      surface: "flow",
-      action: "conj.start",
-      actor: chatId,
-      args: { reason: "no_candidates", cap },
-      ok: true,
-    });
-    return;
-  }
-
-  const queue = await buildConjugationQueue(pool, pattern, cap);
+  const { ids: queue, patterns } = await buildMultiPatternQueue(pool, cap);
   if (queue.length === 0) {
     const reply = "Cola vacía. Corre `pnpm import:conjugations` y reintenta.";
     await sendTelegramMessage(chatId, reply);
@@ -649,7 +642,7 @@ export async function startConjFlow(
       surface: "flow",
       action: "conj.start",
       actor: chatId,
-      args: { reason: "empty_queue", cap, pattern },
+      args: { reason: "empty_queue", cap },
       ok: true,
     });
     return;
@@ -659,7 +652,7 @@ export async function startConjFlow(
     flow: "conj",
     sessionId: randomUUID(),
     startedAt: Date.now(),
-    pattern,
+    patterns,
     queue,
     queueIndex: 0,
     reviewedCount: 0,
@@ -690,7 +683,7 @@ export async function startConjFlow(
     surface: "flow",
     action: "conj.start",
     actor: chatId,
-    args: { pattern, cap, queueSize: queue.length },
+    args: { patterns, cap, queueSize: queue.length },
     ok: true,
   });
 
@@ -723,7 +716,7 @@ export async function continueConjFlow(
       await persistAssistant(pool, chatId, reply);
       return;
     }
-    const currentPattern = state.currentPattern ?? state.pattern;
+    const currentPattern = state.currentPattern ?? state.patterns[0] ?? "";
     const needsParadigm =
       currentPattern === "present_irregular" ||
       currentPattern === "imperfect_irregular" ||
@@ -841,6 +834,7 @@ export async function continueConjFlow(
     lapses: row.lapses,
     state: row.state,
     last_review: row.last_review,
+    learning_steps: row.learning_steps,
   };
   const next = nextState(cardBefore, rating);
 

@@ -84,7 +84,7 @@ describe("conj flow lifecycle", () => {
     const state = getFlow(CHAT_ID);
     expect(state?.flow).toBe("conj");
     if (state?.flow === "conj") {
-      expect(state.pattern).toBe("imperfect_irregular");
+      expect(state.patterns).toContain("imperfect_irregular");
       expect(state.currentCardId).toBeTruthy();
       expect(state.currentExpected).toBeTruthy();
     }
@@ -247,7 +247,7 @@ describe("conj flow lifecycle", () => {
       flow: "conj",
       sessionId: randomUUID(),
       startedAt: Date.now(),
-      pattern: "imperfect_irregular",
+      patterns: ["imperfect_irregular"],
       queue: ["1"],
       queueIndex: 0,
       reviewedCount: 0,

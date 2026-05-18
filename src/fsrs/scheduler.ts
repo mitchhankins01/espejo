@@ -25,6 +25,12 @@ export interface CardState {
   lapses: number;
   state: CardStateName;
   last_review: Date | null;
+  // ts-fsrs short-term step index. 0/1 while the card walks through the
+  // configured learning_steps (default ['1m','10m']); reset to 0 when the card
+  // graduates to 'review'. Must persist or the card never graduates — Good at
+  // step 0 advances to step 1 in memory; if we drop it on save and reload as 0,
+  // the card is forever stuck in the +10m short-term loop.
+  learning_steps: number;
 }
 
 export interface NextCardState extends CardState {
@@ -56,7 +62,7 @@ function toFsrsCard(input: CardState): FsrsCard {
     difficulty: input.difficulty,
     elapsed_days: input.elapsed_days,
     scheduled_days: input.scheduled_days,
-    learning_steps: 0,
+    learning_steps: input.learning_steps,
     reps: input.reps,
     lapses: input.lapses,
     state: NAME_TO_STATE[input.state],
@@ -75,6 +81,7 @@ function fromFsrsCard(card: FsrsCard): CardState {
     lapses: card.lapses,
     state: STATE_TO_NAME[card.state],
     last_review: card.last_review ?? null,
+    learning_steps: card.learning_steps,
   };
 }
 

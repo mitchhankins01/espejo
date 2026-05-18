@@ -649,6 +649,9 @@ CREATE TABLE IF NOT EXISTS vocab_reviews (
     reps            INT NOT NULL DEFAULT 0,
     lapses          INT NOT NULL DEFAULT 0,
     state           TEXT NOT NULL DEFAULT 'new',
+    -- ts-fsrs short-term step index. Must round-trip through DB or the card
+    -- never graduates out of learning. See migration 058.
+    learning_steps  INT NOT NULL DEFAULT 0,
     last_review     TIMESTAMPTZ,
     current_session_id        UUID,
     current_session_served_at TIMESTAMPTZ,
@@ -736,6 +739,9 @@ CREATE TABLE IF NOT EXISTS conjugation_reviews (
     reps            INT NOT NULL DEFAULT 0,
     lapses          INT NOT NULL DEFAULT 0,
     state           TEXT NOT NULL DEFAULT 'new',
+    -- ts-fsrs short-term step index. Must round-trip through DB or the card
+    -- never graduates out of learning. See migration 058.
+    learning_steps  INT NOT NULL DEFAULT 0,
     last_review     TIMESTAMPTZ,
     current_session_id        UUID,
     current_session_served_at TIMESTAMPTZ,

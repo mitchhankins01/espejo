@@ -27,6 +27,7 @@ export interface ConjugationReviewRow {
   reps: number;
   lapses: number;
   state: CardStateName;
+  learning_steps: number;
   last_review: Date | null;
   current_session_id: string | null;
   current_session_served_at: Date | null;
@@ -62,14 +63,15 @@ function excludeHaberAuxClause(lemmaCol: string, tenseCol: string): string {
     )
   )`;
 }
-const EXCLUDE_HABER_AUX_CR = excludeHaberAuxClause("lemma", "tense");
-const EXCLUDE_HABER_AUX_C  = excludeHaberAuxClause("c.lemma", "c.tense");
+const EXCLUDE_HABER_AUX_CR        = excludeHaberAuxClause("lemma", "tense");
+const EXCLUDE_HABER_AUX_C         = excludeHaberAuxClause("c.lemma", "c.tense");
+const EXCLUDE_HABER_AUX_CR_JOINED = excludeHaberAuxClause("cr.lemma", "cr.tense");
 
 const ROW_SELECT = `
   SELECT cr.id::text, cr.lemma, cr.tense, cr.person, cr.expected_form, cr.pattern,
          cr.generated_sentence, cr.generated_form, cr.generated_gloss,
          cr.due, cr.stability, cr.difficulty, cr.elapsed_days, cr.scheduled_days,
-         cr.reps, cr.lapses, cr.state, cr.last_review,
+         cr.reps, cr.lapses, cr.state, cr.learning_steps, cr.last_review,
          cr.current_session_id::text, cr.current_session_served_at, cr.current_session_rated_at,
          cr.chat_id, cr.status,
          c.frequency_rank,
@@ -225,6 +227,95 @@ export async function buildConjugationQueue(
   return ids;
 }
 
+/**
+ * Build a cross-pattern session queue up to `cap` cards. Serves the user's
+ * intent for `/conj 50` (deliver 50 cards) when no single pattern has 50
+ * due — previously the flow capped at the first picked pattern's queue
+ * (often 3–6) and forced the user to re-issue `/conj` to grind through
+ * other due patterns.
+ *
+ * Order, all filtered by `EXCLUDE_HABER_AUX_*`:
+ * 1. Due existing cells across patterns, oldest due first.
+ * 2. New existing cells across patterns, frequency_rank ASC.
+ * 3. Lazy promotion from `conjugations`, in bootstrap-priority order
+ *    then by frequency_rank — same priority the single-pattern picker
+ *    used, just unrolled.
+ *
+ * Returns `{ ids, patterns }`: `ids` is the serve order; `patterns` is the
+ * ordered unique set of patterns these ids cover.
+ */
+export async function buildMultiPatternQueue(
+  pool: pg.Pool,
+  cap: number
+): Promise<{ ids: string[]; patterns: string[] }> {
+  const ids: string[] = [];
+  const patternsSeen = new Set<string>();
+  const patternsOrdered: string[] = [];
+
+  const addRow = (id: string, pattern: string): void => {
+    ids.push(id);
+    if (!patternsSeen.has(pattern)) {
+      patternsSeen.add(pattern);
+      patternsOrdered.push(pattern);
+    }
+  };
+
+  // (1) due across all active patterns
+  const due = await pool.query<{ id: string; pattern: string }>(
+    `SELECT id::text, pattern FROM conjugation_reviews
+      WHERE status='active' AND state <> 'new' AND due <= NOW()
+        AND ${EXCLUDE_HABER_AUX_CR}
+      ORDER BY due ASC
+      LIMIT $1`,
+    [cap]
+  );
+  for (const r of due.rows) addRow(r.id, r.pattern);
+
+  let remaining = cap - ids.length;
+  if (remaining <= 0) return { ids, patterns: patternsOrdered };
+
+  // (2) new existing rows, by frequency_rank
+  const news = await pool.query<{ id: string; pattern: string }>(
+    `SELECT cr.id::text, cr.pattern
+       FROM conjugation_reviews cr
+       LEFT JOIN conjugations c
+         ON c.lemma=cr.lemma AND c.tense=cr.tense AND c.person=cr.person
+      WHERE cr.status='active' AND cr.state = 'new'
+        AND ${EXCLUDE_HABER_AUX_CR_JOINED}
+      ORDER BY c.frequency_rank NULLS LAST, cr.id ASC
+      LIMIT $1`,
+    [remaining]
+  );
+  for (const r of news.rows) addRow(r.id, r.pattern);
+
+  remaining = cap - ids.length;
+  if (remaining <= 0) return { ids, patterns: patternsOrdered };
+
+  // (3) lazy promote across patterns, bootstrap priority + frequency_rank
+  const promote = await pool.query<{ id: string; pattern: string }>(
+    `WITH pattern_priority(pattern, priority) AS (
+       VALUES ${PATTERN_BOOTSTRAP_VALUES}
+     )
+     INSERT INTO conjugation_reviews (lemma, tense, person, expected_form, pattern)
+     SELECT c.lemma, c.tense, c.person, c.form, c.pattern
+       FROM conjugations c
+       JOIN pattern_priority pp ON pp.pattern = c.pattern
+       LEFT JOIN conjugation_reviews cr
+         ON cr.lemma=c.lemma AND cr.tense=c.tense AND cr.person=c.person
+      WHERE cr.id IS NULL
+        AND c.frequency_rank IS NOT NULL
+        AND ${EXCLUDE_HABER_AUX_C}
+      ORDER BY pp.priority ASC, c.frequency_rank NULLS LAST, c.lemma, c.tense, c.person
+      LIMIT $1
+     ON CONFLICT (lemma, tense, person) DO NOTHING
+     RETURNING id::text, pattern`,
+    [remaining]
+  );
+  for (const r of promote.rows) addRow(r.id, r.pattern);
+
+  return { ids, patterns: patternsOrdered };
+}
+
 export async function getConjugationReviewById(
   pool: pg.Pool,
   id: string
@@ -310,11 +401,11 @@ export async function rateConjugationCard(
     const updateResult = await client.query<{ id: string }>(
       `UPDATE conjugation_reviews
           SET stability=$1, difficulty=$2, elapsed_days=$3, scheduled_days=$4,
-              reps=reps+1, lapses=$5, state=$6, due=$7,
+              reps=reps+1, lapses=$5, state=$6, learning_steps=$7, due=$8,
               last_review=NOW(),
               current_session_rated_at=NOW(),
               updated_at=NOW()
-        WHERE id=$8 AND current_session_id=$9 AND current_session_rated_at IS NULL
+        WHERE id=$9 AND current_session_id=$10 AND current_session_rated_at IS NULL
         RETURNING id`,
       [
         params.next.stability,
@@ -323,6 +414,7 @@ export async function rateConjugationCard(
         params.next.scheduled_days,
         params.next.lapses,
         params.next.state,
+        params.next.learning_steps,
         params.next.due,
         params.id,
         params.sessionId,

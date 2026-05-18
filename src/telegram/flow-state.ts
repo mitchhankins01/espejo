@@ -62,7 +62,13 @@ export interface ConjFlowState {
   flow: "conj";
   sessionId: string;
   startedAt: number;
-  pattern: string;
+  /**
+   * Ordered unique list of conjugation patterns the queue draws from. A
+   * single-pattern session is `[pattern]`; a `/conj 50` session that crosses
+   * `present_yo_go → present_irregular → present_stem_eie` lists all three.
+   * `patterns[0]` is the lead pattern (drives the kickoff banner).
+   */
+  patterns: string[];
   queue: string[];
   queueIndex: number;
   reviewedCount: number;

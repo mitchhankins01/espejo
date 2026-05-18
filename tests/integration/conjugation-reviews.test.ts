@@ -4,6 +4,7 @@ import { pool } from "../../src/db/client.js";
 import {
   pickPatternForSession,
   buildConjugationQueue,
+  buildMultiPatternQueue,
   serveConjugationCard,
   rateConjugationCard,
   getConjugationReviewById,
@@ -346,6 +347,75 @@ describe("serveConjugationCard / rateConjugationCard", () => {
       chatId: "1",
     });
     expect(ok).toBe(false);
+  });
+});
+
+describe("buildMultiPatternQueue", () => {
+  it("fills `cap` cards across patterns when one pattern's due queue is small (regression: `/conj 50` returned 6 cards)", async () => {
+    await seedConjugationCells([
+      { lemma: "tener", tense: "present_indicative", person: "yo", form: "tengo", pattern: "present_yo_go", rank: 1 },
+      { lemma: "hacer", tense: "present_indicative", person: "yo", form: "hago", pattern: "present_yo_go", rank: 4 },
+      { lemma: "ser",   tense: "present_indicative", person: "yo", form: "soy", pattern: "present_irregular", rank: 2 },
+      { lemma: "ir",    tense: "present_indicative", person: "yo", form: "voy", pattern: "present_irregular", rank: 3 },
+    ]);
+    // Promote 2 yo-go rows (due) and 2 irregular rows (due) — together they
+    // satisfy a cap=4 request that no single pattern would.
+    await pool.query(
+      `INSERT INTO conjugation_reviews (lemma, tense, person, expected_form, pattern, state, due)
+       VALUES
+         ('tener','present_indicative','yo','tengo','present_yo_go','review', NOW() - INTERVAL '1 day'),
+         ('hacer','present_indicative','yo','hago','present_yo_go','review', NOW() - INTERVAL '2 day'),
+         ('ser','present_indicative','yo','soy','present_irregular','review', NOW() - INTERVAL '3 day'),
+         ('ir','present_indicative','yo','voy','present_irregular','review', NOW() - INTERVAL '4 day')`
+    );
+    const { ids, patterns } = await buildMultiPatternQueue(pool, 4);
+    expect(ids.length).toBe(4);
+    expect(new Set(patterns)).toEqual(
+      new Set(["present_yo_go", "present_irregular"])
+    );
+  });
+
+  it("oldest-due first across patterns", async () => {
+    await seedConjugationCells([
+      { lemma: "tener", tense: "present_indicative", person: "yo", form: "tengo", pattern: "present_yo_go", rank: 1 },
+      { lemma: "ser",   tense: "present_indicative", person: "yo", form: "soy", pattern: "present_irregular", rank: 2 },
+    ]);
+    await pool.query(
+      `INSERT INTO conjugation_reviews (lemma, tense, person, expected_form, pattern, state, due)
+       VALUES
+         ('tener','present_indicative','yo','tengo','present_yo_go','review', NOW() - INTERVAL '1 day'),
+         ('ser','present_indicative','yo','soy','present_irregular','review', NOW() - INTERVAL '5 day')`
+    );
+    const { ids } = await buildMultiPatternQueue(pool, 10);
+    // ser (5 days due) should come before tener (1 day due).
+    const rows = await pool.query<{ lemma: string }>(
+      `SELECT lemma FROM conjugation_reviews WHERE id::text = $1`,
+      [ids[0]]
+    );
+    expect(rows.rows[0].lemma).toBe("ser");
+  });
+
+  it("excludes haber's aux cells from cross-pattern queue", async () => {
+    await pool.query(
+      `INSERT INTO conjugation_reviews (lemma, tense, person, expected_form, pattern, state, due)
+       VALUES ('haber','present_indicative','yo','he','present_irregular','review', NOW() - INTERVAL '1 day')`
+    );
+    await seedConjugationCells([
+      { lemma: "ser", tense: "present_indicative", person: "yo", form: "soy", pattern: "present_irregular", rank: 2 },
+    ]);
+    const { ids } = await buildMultiPatternQueue(pool, 10);
+    const rows = await pool.query<{ lemma: string }>(
+      `SELECT lemma FROM conjugation_reviews WHERE id::text = ANY($1::text[])`,
+      [ids]
+    );
+    expect(rows.rows.some((r) => r.lemma === "haber")).toBe(false);
+    expect(rows.rows.some((r) => r.lemma === "ser")).toBe(true);
+  });
+
+  it("returns empty when no candidates exist anywhere", async () => {
+    const { ids, patterns } = await buildMultiPatternQueue(pool, 10);
+    expect(ids.length).toBe(0);
+    expect(patterns.length).toBe(0);
   });
 });
 
