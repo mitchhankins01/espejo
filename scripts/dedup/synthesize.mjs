@@ -24,8 +24,50 @@
  * filename), there's nothing to synthesize — the action is just overwrite. The
  * preview collapses these so they don't waste review attention.
  */
-import { readFileSync, writeFileSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
+import { tmpdir } from "os";
+import { spawnSync } from "child_process";
+
+// Split prose paragraphs into one sentence per line so the line-based unified
+// diff can show sentence-level changes (otherwise a single quote-style change
+// re-flags the whole paragraph). Markdown-heading / list / wikilink-only
+// paragraphs are left untouched.
+function sentenceSplit(text) {
+  if (!text) return "";
+  return text.split(/\n{2,}/).map(p => {
+    if (/^(#+\s|[-*]\s|>\s|\[\[)/.test(p.trim())) return p;
+    return p.replace(/([.!?](?:["'’”])?)\s+(?=["“„¡¿]?[A-ZÁÉÍÓÚÑ])/g, "$1\n");
+  }).join("\n\n");
+}
+
+// Unified diff between two body strings (git-diff style, sentence-granular).
+// Returns "" if identical; otherwise the hunk lines (drops the --- / +++ header).
+function unifiedDiff(before, after) {
+  if (before === after) return "";
+  const dir = mkdtempSync(join(tmpdir(), "ddiff-"));
+  try {
+    const a = join(dir, "before"); const b = join(dir, "after");
+    // Trailing \n suppresses "No newline at end of file" markers from `diff`.
+    writeFileSync(a, sentenceSplit(before) + "\n");
+    writeFileSync(b, sentenceSplit(after) + "\n");
+    const r = spawnSync("diff", ["-u", "--label", "BEFORE", "--label", "AFTER", a, b], { encoding: "utf8" });
+    if (r.status === 0) return "";
+    if (r.status === 1) {
+      // Strip the two header lines (--- BEFORE / +++ AFTER) — labels are redundant with our section header.
+      return r.stdout.split("\n").slice(2).join("\n");
+    }
+    return `[diff error: ${r.stderr || "unknown"}]`;
+  } finally {
+    try { rmSync(dir, { recursive: true, force: true }); } catch {}
+  }
+}
+
+// Drop YAML frontmatter only (keep body + trailing ## Sources so wikilink changes show in diffs).
+function stripFrontmatter(md) {
+  if (!md) return "";
+  return md.startsWith("---\n") ? md.slice(4).replace(/^[\s\S]*?\n---\n?/, "") : md;
+}
 
 const outDir = process.argv[2];
 if (!outDir) { console.error("usage: synthesize.mjs <outDir>"); process.exit(1); }
@@ -40,13 +82,16 @@ const modeIsB = planFull.mode === "existing";
 const VAULT = "/Users/mitch/Projects/espejo/Artifacts";
 const readMd = (rel) => existsSync(join(VAULT, rel)) ? readFileSync(join(VAULT, rel), "utf8") : `[FILE NOT FOUND: ${rel}]`;
 
-// Strip frontmatter + Sources block so signal metrics only see body prose.
-function stripFrontmatter(md) {
+// Two primitives + a composition. `stripFrontmatter` and `stripSourcesSection`
+// each do one thing; `bodyCore` is the prose-only form used for similarity /
+// signal-recall calculations. Preview rendering uses `stripFrontmatter` alone
+// so the displayed body still shows its Sources block.
+function stripSourcesSection(md) {
   if (!md) return "";
-  let s = md.startsWith("---\n") ? md.slice(4).replace(/^[\s\S]*?\n---\n?/, "") : md;
-  // Drop trailing "## Sources" block — wikilinks counted separately.
-  s = s.replace(/\n## Sources[\s\S]*$/i, "");
-  return s.trim();
+  return md.replace(/\n## Sources[\s\S]*$/i, "");
+}
+function bodyCore(md) {
+  return stripSourcesSection(stripFrontmatter(md)).trim();
 }
 
 function bigrams(text) {
@@ -129,11 +174,15 @@ const synth = allPaths.map(p => {
     ? (Object.keys(targetTally).length === 1 ? "agree" : "disagree")
     : null;
 
-  // Consensus bucket
+  // Consensus bucket. auto_safe requires a full unanimous panel (n≥3); 2/2-agree
+  // and single-vote rows are downgraded to likely_safe so the missing-leg case
+  // doesn't masquerade as full confidence.
   let consensus;
   if (n === 0) consensus = "no_votes";
-  else if (topCount === n) consensus = "auto_safe";
+  else if (n >= 3 && topCount === n) consensus = "auto_safe";
   else if (n >= 3 && topCount === n - 1) consensus = "likely_safe";
+  else if (n === 2 && topCount === 2) consensus = "likely_safe";
+  else if (n === 1) consensus = "likely_safe";
   else consensus = "needs_review";
   if (votes.every(v => v.confidence === "low")) consensus = "low_confidence";
 
@@ -156,8 +205,8 @@ const synth = allPaths.map(p => {
     const planEntry = planFull.plan.find(e => e.source?.source_path === p);
     const sourceBodyRaw = planEntry?.source?.body || "";
     const targetBodyRaw = finalTarget ? readMd(finalTarget) : "";
-    const srcCore = stripFrontmatter(sourceBodyRaw);
-    const tgtCore = stripFrontmatter(targetBodyRaw);
+    const srcCore = bodyCore(sourceBodyRaw);
+    const tgtCore = bodyCore(targetBodyRaw);
 
     const srcBg = bigrams(srcCore);
     const tgtBg = bigrams(tgtCore);
@@ -175,7 +224,7 @@ const synth = allPaths.map(p => {
     let scored = null;
     if (candidates.length > 0) {
       scored = candidates.map(({ leg, body }) => {
-        const bg = bigrams(stripFrontmatter(body));
+        const bg = bigrams(bodyCore(body));
         const bgRecall = recall(unionBg, bg) ?? 0;
         const spanRecall = recallByInclusion(unionSpans, body) ?? 1; // neutral if no spans
         const linkRecall = recall(unionLinks, wikilinks(body)) ?? 1; // neutral if no links
@@ -200,7 +249,7 @@ const synth = allPaths.map(p => {
     // Means LLM(s) decided there was nothing to synthesize — the source supersedes
     // the target wholesale. Skip the alternates view and write source verbatim.
     if (recommendedPick !== "DEFER" && scored && scored[0]) {
-      const winnerBg = bigrams(stripFrontmatter(scored[0].body));
+      const winnerBg = bigrams(bodyCore(scored[0].body));
       const matchToSrc = recall(srcBg, winnerBg) ?? 0;     // |w∩s|/|s| — is source covered?
       const winnerFromSrc = recall(winnerBg, srcBg) ?? 0;   // |w∩s|/|w| — is winner mostly source?
       // Supersede iff winner ≈ source (both directions). If winner adds bigrams not in source
@@ -241,10 +290,40 @@ const synth = allPaths.map(p => {
   };
 });
 
+// Post-pass: detect multi-source-same-target merge groups. When N>1 sources
+// merge into the same destination, apply writes each merge_body sequentially —
+// each based on the ORIGINAL target — so later writes silently overwrite
+// earlier writes' content. To prevent data loss, keep the highest-signal source
+// as the primary Merge and demote the others to Distinct (they promote to
+// Insight/ as separate files; the next dedup pass / mode-B sweep will catch
+// the remaining overlap with the merged target).
+const mergeGroups = {};
+for (const s of synth) {
+  if (s.final_action === "Merge" && s.final_target) {
+    (mergeGroups[s.final_target] ||= []).push(s);
+  }
+}
+for (const [target, group] of Object.entries(mergeGroups)) {
+  if (group.length <= 1) continue;
+  const compositeOf = (s) => s.score_breakdown?.[0]?.composite ?? 0;
+  const primary = group.reduce((best, s) => compositeOf(s) > compositeOf(best) ? s : best);
+  for (const s of group) {
+    if (s === primary) continue;
+    s.coalesce_demoted_from = { final_action: "Merge", final_target: s.final_target };
+    s.coalesce_primary = primary.source_path;
+    s.final_action = "Distinct";
+    s.final_target = null;
+    s.recommended_pick = null;
+    s.recommendation_rationale = `co-targeted ${target.replace(/^(Pending|Insight)\//, "")} with primary ${primary.source_path.replace(/^Pending\//, "")} — demoted to Distinct to avoid sequential-write data loss; rerun dedup to merge separately`;
+  }
+  console.error(`[synth] multi-source group at ${target.replace(/^(Pending|Insight)\//, "")}: primary=${primary.source_path.replace(/^Pending\//, "")}, demoted ${group.length - 1} secondary source(s)`);
+}
+
 const summary = {
   total: synth.length,
   buckets: synth.reduce((acc, s) => { acc[s.consensus] = (acc[s.consensus] || 0) + 1; return acc; }, {}),
   by_final_action: synth.reduce((acc, s) => { acc[s.final_action] = (acc[s.final_action] || 0) + 1; return acc; }, {}),
+  coalesce_demotions: synth.filter(s => s.coalesce_demoted_from).length,
   active_legs: activeLegs,
 };
 
@@ -308,20 +387,30 @@ if (modeIsB) {
   md += `## Distinct (${distActions.length}) — NO ACTION\n\n`;
   md += `Mode B sweep within \`Insight/\`. These pairs were judged covering different points despite overlap. Both files stay as-is.\n\n`;
   md += `| # | Source (kept) | Consensus |\n|---:|---|---|\n`;
+  i = 0;
+  for (const s of distActions) {
+    i++;
+    md += `| ${i} | \`${shortSrc(s.source_path)}\` | ${s.consensus} |\n`;
+  }
+  md += `\n---\n\n`;
 } else {
   md += `## Promotions (${distActions.length}) — Distinct\n\n`;
-  md += `Each is \`mv Pending/<x>.md → Insight/<x>.md\` (collision-checked).\n\n`;
-  md += `| # | Source | Consensus |\n|---:|---|---|\n`;
+  md += `Each is \`mv Pending/<x>.md → Insight/<x>.md\` (collision-checked). Full body shown for review.\n\n`;
+  const demotions = distActions.filter(s => s.coalesce_demoted_from);
+  if (demotions.length) {
+    md += `⚠️ **${demotions.length} coalesce-demotion${demotions.length === 1 ? "" : "s"}**: row(s) below were originally classified Merge but co-targeted the same destination as another source. To prevent sequential-write data loss, the highest-signal source kept the Merge classification and the rest were demoted here. Rerun \`pnpm dedup:full\` (or another retrieve→council→synth cycle) afterwards to merge them properly against the now-updated target.\n\n`;
+  }
+  i = 0;
+  for (const s of distActions) {
+    i++;
+    const tag = s.coalesce_demoted_from
+      ? ` — **coalesce-demoted** (was Merge → \`${shortSrc(s.coalesce_demoted_from.final_target)}\`, primary: \`${shortSrc(s.coalesce_primary)}\`)`
+      : "";
+    md += `### ${i}. \`${shortSrc(s.source_path)}\` — ${s.consensus}${tag}\n\n`;
+    md += `\`\`\`md\n${stripFrontmatter(readMd(s.source_path))}\n\`\`\`\n\n`;
+  }
+  md += `---\n\n`;
 }
-i = 0;
-for (const s of distActions) {
-  i++;
-  // In Mode B, final_target is null for Distinct (no merge target chosen); the
-  // pair member is implicit in the retrieval plan but not preserved per-case.
-  // Leave as a single-column listing.
-  md += `| ${i} | \`${shortSrc(s.source_path)}\` | ${s.consensus} |\n`;
-}
-md += `\n---\n\n`;
 
 const supersedeActions = mergeActions.filter(s => s.is_supersede);
 const trueMergeActions = mergeActions.filter(s => !s.is_supersede);
@@ -339,7 +428,7 @@ if (supersedeActions.length) {
 }
 
 md += `## Merges (${trueMergeActions.length}) — REQUIRES YOUR ATTENTION\n\n`;
-md += `Each section: source body, target body BEFORE, ⭐ recommended new body (highest signal recall). Alternates collapsed.\n\n`;
+md += `Each section: source body (will be deleted) + unified diff of the target body (BEFORE → ⭐ recommended AFTER). Red = removed, green = added. Alternates collapsed.\n\n`;
 i = 0;
 for (const s of trueMergeActions) {
   i++;
@@ -348,19 +437,39 @@ for (const s of trueMergeActions) {
   const disagreeMark = s.target_agreement === "disagree" ? " ⚠️ TARGET DISAGREEMENT" : "";
   md += `### ${i}. \`${shortSrc(s.source_path)}\` → \`${shortSrc(s.final_target)}\`${disagreeMark}\n\n`;
   md += `**⭐ Recommended:** \`${pick}\` — _${s.recommendation_rationale || "(no rationale)"}_\n\n`;
-  md += `<details><summary>Source body (deleted after merge)</summary>\n\n\`\`\`md\n${readMd(s.source_path)}\n\`\`\`\n</details>\n\n`;
-  md += `<details><summary>Target body — BEFORE</summary>\n\n\`\`\`md\n${readMd(s.final_target)}\n\`\`\`\n</details>\n\n`;
+
+  md += `**Source body (deleted after merge):**\n\n\`\`\`md\n${stripFrontmatter(readMd(s.source_path))}\n\`\`\`\n\n`;
+
   if (!isDefer && s.merge_bodies?.[pick]) {
-    md += `**Target body — AFTER (⭐ ${pick}):**\n\n\`\`\`md\n${s.merge_bodies[pick]}\n\`\`\`\n\n`;
+    const beforeBody = stripFrontmatter(readMd(s.final_target));
+    const afterBody = s.merge_bodies[pick];
+    const diff = unifiedDiff(beforeBody, afterBody);
+    md += `**Target diff (BEFORE → AFTER ⭐ ${pick}):**\n\n`;
+    if (diff) {
+      md += `\`\`\`diff\n${diff}\`\`\`\n\n`;
+    } else {
+      md += `_(no changes — picked body is identical to current target)_\n\n`;
+    }
   } else if (isDefer) {
+    md += `**Current target body:**\n\n\`\`\`md\n${stripFrontmatter(readMd(s.final_target))}\n\`\`\`\n\n`;
     md += `_⚠️ Models picked different targets. Decide manually._\n\n`;
   }
+
   const alts = activeLegs.filter(l => l !== pick && s.merge_bodies?.[l]);
   if (alts.length) {
     md += `<details><summary>Alternative merged bodies (${alts.join(", ")})</summary>\n\n`;
     for (const l of alts) {
-      const altTarget = s.classifications[l]?.target ? ` → \`${shortSrc(s.classifications[l].target)}\`` : "";
-      md += `**${l}${altTarget}:**\n\n\`\`\`md\n${s.merge_bodies[l]}\n\`\`\`\n\n`;
+      const altTargetPath = s.classifications[l]?.target;
+      const altTargetLabel = altTargetPath ? ` → \`${shortSrc(altTargetPath)}\`` : "";
+      md += `**${l}${altTargetLabel}:**\n\n`;
+      // If the alt picked the same target, show as a diff against current target;
+      // otherwise show plain body (since the diff baseline differs).
+      if (altTargetPath && altTargetPath === s.final_target) {
+        const altDiff = unifiedDiff(stripFrontmatter(readMd(altTargetPath)), s.merge_bodies[l]);
+        md += altDiff ? `\`\`\`diff\n${altDiff}\`\`\`\n\n` : `_(no changes)_\n\n`;
+      } else {
+        md += `\`\`\`md\n${s.merge_bodies[l]}\n\`\`\`\n\n`;
+      }
     }
     md += `</details>\n\n`;
   }

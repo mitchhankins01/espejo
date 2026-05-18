@@ -135,38 +135,56 @@ function buildInput(planSubset) {
 
 // ─── leg runners ────────────────────────────────────────────────────────────
 
-function runProc(cmd, argv, stdinText, envOverride = {}) {
+const LEG_TIMEOUT_MS = Number(env.DEDUP_COUNCIL_TIMEOUT_MS || 10 * 60 * 1000);
+
+function runProc(cmd, argv, stdinText, envOverride = {}, timeoutMs = LEG_TIMEOUT_MS) {
   return new Promise((resolve) => {
     const proc = spawn(cmd, argv, { env: { ...env, ...envOverride } });
-    let stdout = "", stderr = "";
+    let stdout = "", stderr = "", timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      proc.kill("SIGTERM");
+      setTimeout(() => { try { proc.kill("SIGKILL"); } catch {} }, 5000);
+    }, timeoutMs);
     proc.stdout.on("data", (b) => (stdout += b.toString()));
     proc.stderr.on("data", (b) => (stderr += b.toString()));
-    proc.on("close", (code) => resolve({ code, stdout, stderr }));
-    proc.on("error", (err) => resolve({ code: -1, stdout, stderr: String(err) }));
+    proc.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({
+        code: timedOut ? -2 : code,
+        stdout,
+        stderr: timedOut ? `${stderr}\n[killed: timeout after ${Math.round(timeoutMs/1000)}s]` : stderr,
+      });
+    });
+    proc.on("error", (err) => { clearTimeout(timer); resolve({ code: -1, stdout, stderr: String(err) }); });
     if (stdinText) { proc.stdin.write(stdinText); proc.stdin.end(); }
     else { proc.stdin.end(); }  // codex blocks forever on open-but-empty stdin
   });
 }
 
-async function legClaude() {
-  const input = buildInput(plan.plan);
-  console.error("[council] claude: launching (full batch)");
+// Each leg accepts an optional planSubset so the orchestration loop can retry
+// just the dropped items. Returns the parsed array (or {ok:false, error}); the
+// caller is responsible for writing the final per-leg parsed.json (after
+// merging initial + retry results).
+
+async function legClaude(items = plan.plan, rawSuffix = "") {
+  const input = buildInput(items);
+  console.error(`[council] claude: launching (${items.length} items${rawSuffix ? ` ${rawSuffix}` : ""})`);
   const r = await runProc("claude", [
     "-p", "--model", CLAUDE_MODEL, "--dangerously-skip-permissions", input,
   ], null);
-  writeFileSync(`${outDir}/claude.raw.txt`, r.stdout);
+  writeFileSync(`${outDir}/claude${rawSuffix}.raw.txt`, r.stdout);
   if (r.code !== 0) return { ok: false, error: r.stderr || `exit ${r.code}` };
   const arr = extractJsonArray(r.stdout);
   if (!arr) return { ok: false, error: "JSON parse failed", raw: r.stdout.slice(0, 200) };
-  console.error(`[council] claude: ${arr.length} items`);
-  writeFileSync(`${outDir}/claude.parsed.json`, JSON.stringify(arr, null, 2));
-  return { ok: true, count: arr.length };
+  console.error(`[council] claude${rawSuffix}: ${arr.length} items`);
+  return { ok: true, parsed: arr };
 }
 
-async function legGemini() {
+async function legGemini(items = plan.plan, rawSuffix = "") {
   if (!env.GEMINI_API_KEY) return { ok: false, error: "GEMINI_API_KEY not set" };
-  const input = buildInput(plan.plan);
-  console.error("[council] gemini: launching (full batch)");
+  const input = buildInput(items);
+  console.error(`[council] gemini: launching (${items.length} items${rawSuffix ? ` ${rawSuffix}` : ""})`);
   const body = JSON.stringify({
     contents: [{ parts: [{ text: input }] }],
     generationConfig: { maxOutputTokens: 65536 },
@@ -177,7 +195,7 @@ async function legGemini() {
     "-H", "Content-Type: application/json",
     "-d", "@-",
   ], body);
-  writeFileSync(`${outDir}/gemini.raw.json`, r.stdout);
+  writeFileSync(`${outDir}/gemini${rawSuffix}.raw.json`, r.stdout);
   let json;
   try { json = JSON.parse(r.stdout); } catch { return { ok: false, error: "Invalid JSON from API" }; }
   if (json.error) return { ok: false, error: json.error.message };
@@ -185,18 +203,17 @@ async function legGemini() {
   if (!text) return { ok: false, error: "No content in Gemini response" };
   const arr = extractJsonArray(text);
   if (!arr) return { ok: false, error: "JSON parse failed" };
-  console.error(`[council] gemini: ${arr.length} items`);
-  writeFileSync(`${outDir}/gemini.parsed.json`, JSON.stringify(arr, null, 2));
-  return { ok: true, count: arr.length };
+  console.error(`[council] gemini${rawSuffix}: ${arr.length} items`);
+  return { ok: true, parsed: arr };
 }
 
-async function legGpt() {
+async function legGpt(items = plan.plan, rawSuffix = "") {
   // Chunk to avoid GPT-5.5 output truncation
   const chunks = [];
-  for (let i = 0; i < plan.plan.length; i += GPT_CHUNK_SIZE) {
-    chunks.push(plan.plan.slice(i, i + GPT_CHUNK_SIZE));
+  for (let i = 0; i < items.length; i += GPT_CHUNK_SIZE) {
+    chunks.push(items.slice(i, i + GPT_CHUNK_SIZE));
   }
-  console.error(`[council] gpt: launching (${chunks.length} chunks of ≤${GPT_CHUNK_SIZE})`);
+  console.error(`[council] gpt: launching (${chunks.length} chunks of ≤${GPT_CHUNK_SIZE}${rawSuffix ? `, ${rawSuffix}` : ""})`);
   const all = [];
   for (let i = 0; i < chunks.length; i++) {
     const input = buildInput(chunks[i]);
@@ -208,38 +225,38 @@ async function legGpt() {
       "-c", "model_reasoning_effort=\"medium\"",
       input,
     ], null);
-    writeFileSync(`${outDir}/gpt-chunk-${i}.raw.txt`, r.stdout);
+    writeFileSync(`${outDir}/gpt${rawSuffix}-chunk-${i}.raw.txt`, r.stdout);
     if (r.code !== 0) {
-      console.error(`[council] gpt chunk ${i}: exit ${r.code} — ${r.stderr.slice(-200)}`);
+      console.error(`[council] gpt${rawSuffix} chunk ${i}: exit ${r.code} — ${r.stderr.slice(-200)}`);
       continue;
     }
     const arr = extractJsonArray(r.stdout);
     if (!arr) {
-      console.error(`[council] gpt chunk ${i}: JSON parse failed`);
+      console.error(`[council] gpt${rawSuffix} chunk ${i}: JSON parse failed`);
       continue;
     }
-    console.error(`[council] gpt chunk ${i}: ${arr.length} items`);
+    console.error(`[council] gpt${rawSuffix} chunk ${i}: ${arr.length} items`);
     all.push(...arr);
   }
   if (all.length === 0) return { ok: false, error: "all chunks failed" };
-  writeFileSync(`${outDir}/gpt.parsed.json`, JSON.stringify(all, null, 2));
-  return { ok: true, count: all.length };
+  return { ok: true, parsed: all };
 }
 
-async function legOllama() {
-  const input = buildInput(plan.plan);
-  console.error("[council] ollama: launching (qwen2.5:32b, expect 5-15min)");
+async function legOllama(items = plan.plan, rawSuffix = "") {
+  const input = buildInput(items);
+  console.error(`[council] ollama: launching (qwen2.5:32b, ${items.length} items${rawSuffix ? ` ${rawSuffix}` : ""}, expect 5-15min)`);
   const r = await runProc("ollama", ["run", "qwen2.5:32b-instruct-q4_K_M"], input);
-  writeFileSync(`${outDir}/ollama.raw.txt`, r.stdout);
+  writeFileSync(`${outDir}/ollama${rawSuffix}.raw.txt`, r.stdout);
   if (r.code !== 0) return { ok: false, error: r.stderr.slice(-200) };
   // Strip ANSI escapes
   const cleaned = r.stdout.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
   const arr = extractJsonArray(cleaned);
   if (!arr) return { ok: false, error: "JSON parse failed" };
-  console.error(`[council] ollama: ${arr.length} items`);
-  writeFileSync(`${outDir}/ollama.parsed.json`, JSON.stringify(arr, null, 2));
-  return { ok: true, count: arr.length };
+  console.error(`[council] ollama${rawSuffix}: ${arr.length} items`);
+  return { ok: true, parsed: arr };
 }
+
+const legFns = { claude: legClaude, gemini: legGemini, gpt: legGpt, ollama: legOllama };
 
 // ─── run all in parallel ────────────────────────────────────────────────────
 
@@ -254,6 +271,40 @@ const results = await Promise.all(legs.map(async ([name, fn]) => {
   try { return [name, await fn()]; }
   catch (err) { return [name, { ok: false, error: String(err) }]; }
 }));
+
+// Retry pass: each leg may have dropped items (timeouts, parse failures, GPT
+// chunk skips). For any leg that returned fewer source_paths than expected,
+// retry just the missing items in a small follow-up batch. One retry per leg —
+// dropping after that is a real fail, not a transient glitch.
+const expectedPaths = new Set(plan.plan.map(p => p.source.source_path));
+for (const [name, r] of results) {
+  if (!r.ok || !r.parsed) continue;
+  const got = new Set(r.parsed.map(o => o.source_path).filter(Boolean));
+  const missing = [...expectedPaths].filter(p => !got.has(p));
+  if (missing.length === 0) continue;
+  console.error(`[council] ${name}: dropped ${missing.length}/${itemCount} items; retrying`);
+  const missingItems = plan.plan.filter(p => missing.includes(p.source.source_path));
+  const retryFn = legFns[name];
+  if (!retryFn) continue;
+  let retry;
+  try { retry = await retryFn(missingItems, "-retry"); }
+  catch (err) { retry = { ok: false, error: String(err) }; }
+  if (retry.ok && retry.parsed) {
+    r.parsed = [...r.parsed, ...retry.parsed];
+    console.error(`[council] ${name}: ${r.parsed.length}/${itemCount} after retry (+${retry.parsed.length})`);
+  } else {
+    console.error(`[council] ${name}: retry failed — ${retry.error}`);
+  }
+}
+
+// Final write: per-leg parsed.json + manifest.
+for (const [name, r] of results) {
+  if (r.ok && r.parsed) {
+    writeFileSync(`${outDir}/${name}.parsed.json`, JSON.stringify(r.parsed, null, 2));
+    r.count = r.parsed.length;
+    delete r.parsed; // keep manifest small
+  }
+}
 
 const manifest = {
   stamp,

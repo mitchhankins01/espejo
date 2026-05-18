@@ -107,7 +107,10 @@ function rewriteInbound(deletedRel, replacementRel) {
 // ─── frontmatter dates ──────────────────────────────────────────────────────
 
 function recomputeDates(body) {
-  const dates = [...body.matchAll(/(\d{4}-\d{2}-\d{2})/g)].map(m => m[1]).sort();
+  // Restrict to dates inside wikilinks — those are the dated artifacts the
+  // merge actually references. A free-floating YYYY-MM-DD in prose ("started
+  // in 2024-01-01") shouldn't move the canonical frontmatter date.
+  const dates = [...body.matchAll(/\[\[(\d{4}-\d{2}-\d{2})[^\]]*\]\]/g)].map(m => m[1]).sort();
   if (dates.length === 0) return null;
   return { created_at: dates[0], updated_at: dates[dates.length - 1] };
 }
@@ -163,8 +166,15 @@ function mv(srcRel, dstRel) {
 
 // ─── execute ────────────────────────────────────────────────────────────────
 
-const plan = synth.plan.filter(s => skipLikely ? s.consensus === "auto_safe" : s.consensus !== "needs_review");
+// Only skip rows that genuinely need a human call: split-vote MERGES (which need
+// a body picked) and DEFER cases (which need a target picked). A split-vote
+// row whose final_action is already Distinct has no risky decision — promote it.
+const needsManualCall = (s) =>
+  s.consensus === "needs_review" && (s.final_action !== "Distinct" || s.recommended_pick === "DEFER");
+const plan = synth.plan.filter(s => skipLikely ? s.consensus === "auto_safe" : !needsManualCall(s));
+const skipped = synth.plan.filter(s => !plan.includes(s));
 console.log(`Plan: ${plan.length}/${synth.plan.length} actions (${dryRun ? "DRY RUN" : "APPLY"}${skipLikely ? ", auto-safe only" : ""})`);
+if (skipped.length) console.log(`Skipped (need manual call): ${skipped.map(s => s.source_path.replace(/^Pending\//, "")).join(", ")}`);
 takeSnapshot(plan);
 
 const distincts = plan.filter(s => s.final_action === "Distinct");
@@ -195,24 +205,33 @@ for (const s of distincts) {
 
 console.log();
 console.log(`=== Duplicate deletes (${dups.length}) ===`);
-let mergeNum = 0;
-for (let i = 0; i < dups.length; i++) {
-  const s = dups[i];
+for (const s of dups) {
   log(`Delete ${s.source_path} (dup of ${s.final_target})`);
   rewriteInbound(s.source_path, s.final_target);
   rm(s.source_path);
 }
 
+// Preview-aligned merge numbering: position in the full synth.plan among
+// non-supersede Merges (matches the ### N. numbering in preview.md). Apply's
+// filter can drop merges, which used to shift sequential counters and break
+// `--override N=leg`. Map by source_path instead so overrides stay stable.
+const previewMergeNum = new Map();
+{ let pmn = 0;
+  for (const s of synth.plan) {
+    if (s.final_action === "Merge" && !s.is_supersede) { pmn++; previewMergeNum.set(s.source_path, pmn); }
+  } }
+
 console.log();
 console.log(`=== Merges (${merges.length}) ===`);
-for (let i = 0; i < merges.length; i++) {
-  mergeNum++;
-  const s = merges[i];
+const deferFallbacks = [];
+for (const s of merges) {
+  const mergeNum = previewMergeNum.get(s.source_path);
   let pick = overrides[mergeNum] || s.recommended_pick;
   if (pick === "DEFER") {
-    // Default to gemini if user didn't override
+    const overrideUsed = !!overrides[mergeNum];
     pick = overrides[mergeNum] || "gemini";
-    log(`  ⚠️ Was DEFER — falling back to ${pick}`);
+    log(`  ⚠️ Was DEFER — falling back to ${pick}${overrideUsed ? " (override)" : ""}`);
+    if (!overrideUsed) deferFallbacks.push({ num: mergeNum, source: s.source_path, target: s.final_target, pick });
   }
   let target = s.final_target;
   // If picked leg routed to a different target, use that
@@ -236,6 +255,16 @@ for (let i = 0; i < merges.length; i++) {
 }
 
 console.log();
+if (deferFallbacks.length) {
+  console.log(`=== ⚠️ DEFER fallbacks (${deferFallbacks.length}) — review and override if needed ===`);
+  for (const d of deferFallbacks) {
+    const shortS = d.source.replace(/^Pending\//, "").replace(/\.md$/, "");
+    const shortT = d.target?.replace(/^(Pending|Insight)\//, "").replace(/\.md$/, "") || "—";
+    console.log(`  #${d.num} ${shortS} → ${shortT} (silently picked: ${d.pick})`);
+  }
+  console.log(`  To override: rerun with --override ${deferFallbacks.map(d => `${d.num}=<leg>`).join(" --override ")}`);
+  console.log();
+}
 console.log("=== Done ===");
 if (dryRun) {
   console.log();
