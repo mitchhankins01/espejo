@@ -9,7 +9,6 @@ import { sendTelegramMessage } from "../telegram/client.js";
 import { registerOAuthRoutes, isValidOAuthToken } from "./oauth.js";
 import { startOuraSyncTimer } from "../oura/sync.js";
 import { startObsidianSyncTimer } from "../obsidian/sync.js";
-import { startOnThisDayTimer } from "../notifications/on-this-day.js";
 import { embedPending } from "../db/embed-pending.js";
 import { registerHealthRoutes } from "./routes/health.js";
 
@@ -43,7 +42,6 @@ export async function startHttpServer(createServer: ServerFactory): Promise<void
   /* v8 ignore stop */
   startOuraSyncTimer(pool, runEmbedPending);
   startObsidianSyncTimer(pool, runEmbedPending);
-  startOnThisDayTimer(pool);
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
 

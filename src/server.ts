@@ -6,7 +6,6 @@ import { logUsage } from "./db/queries/usage.js";
 import { handleSearchEntries } from "./tools/search.js";
 import { handleGetEntry } from "./tools/get-entry.js";
 import { handleGetEntriesByDate } from "./tools/get-entries-by-date.js";
-import { handleOnThisDay } from "./tools/on-this-day.js";
 import { handleFindSimilar } from "./tools/find-similar.js";
 import { handleEntryStats } from "./tools/entry-stats.js";
 import { handleGetOuraSummary } from "./tools/get-oura-summary.js";
@@ -44,7 +43,6 @@ export const toolHandlers: Record<string, ToolHandler> = {
   search_entries: handleSearchEntries,
   get_entry: handleGetEntry,
   get_entries_by_date: handleGetEntriesByDate,
-  on_this_day: handleOnThisDay,
   find_similar: handleFindSimilar,
   entry_stats: handleEntryStats,
   get_oura_summary: handleGetOuraSummary,

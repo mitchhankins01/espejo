@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS usage_logs (
     id BIGSERIAL PRIMARY KEY,
     ts TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     source TEXT NOT NULL,         -- 'mcp' | 'telegram' | 'http' | 'cron' | 'script'
-    surface TEXT,                 -- 'mcp-stdio' | 'mcp-http' | 'webhook' | 'rest' | 'oura-sync' | 'obsidian-sync' | 'on-this-day' | etc.
+    surface TEXT,                 -- 'mcp-stdio' | 'mcp-http' | 'webhook' | 'rest' | 'oura-sync' | 'obsidian-sync' | etc.
     actor TEXT,                   -- chat_id, ip, hostname, script name
     action TEXT NOT NULL,         -- tool name, METHOD+path, job name
     args JSONB,

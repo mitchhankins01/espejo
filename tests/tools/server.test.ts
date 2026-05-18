@@ -6,7 +6,6 @@ const { mockRegisterTool, mockHandlers } = vi.hoisted(() => ({
     handleSearchEntries: vi.fn(),
     handleGetEntry: vi.fn(),
     handleGetEntriesByDate: vi.fn(),
-    handleOnThisDay: vi.fn(),
     handleFindSimilar: vi.fn(),
     handleEntryStats: vi.fn(),
     handleGetArtifact: vi.fn(),
@@ -35,9 +34,6 @@ vi.mock("../../src/tools/get-entry.js", () => ({
 }));
 vi.mock("../../src/tools/get-entries-by-date.js", () => ({
   handleGetEntriesByDate: mockHandlers.handleGetEntriesByDate,
-}));
-vi.mock("../../src/tools/on-this-day.js", () => ({
-  handleOnThisDay: mockHandlers.handleOnThisDay,
 }));
 vi.mock("../../src/tools/find-similar.js", () => ({
   handleFindSimilar: mockHandlers.handleFindSimilar,

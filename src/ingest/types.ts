@@ -35,7 +35,6 @@ const ESPEJO_USE_TOOLS = new Set([
   "log_weights",
   "find_similar",
   "get_entries_by_date",
-  "on_this_day",
   "entry_stats",
   "get_oura_summary",
   "get_oura_weekly",

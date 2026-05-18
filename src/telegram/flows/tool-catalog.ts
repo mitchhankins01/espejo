@@ -11,7 +11,6 @@ export const FLOW_TOOL_NAMES: ToolName[] = [
   "get_entries_by_date",
   "find_similar",
   "list_artifacts",
-  "on_this_day",
   "entry_stats",
   "get_artifact",
   "get_oura_summary",

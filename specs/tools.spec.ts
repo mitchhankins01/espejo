@@ -229,32 +229,6 @@ export const toolSpecs = {
     ],
   },
 
-  on_this_day: {
-    name: "on_this_day" as const,
-    annotations: READ_ONLY,
-    description:
-      "Find entries written on a specific calendar day (MM-DD) across all years. " +
-      "Great for year-over-year reflection and seeing how your thinking has evolved. " +
-      "Returns full entry data including weather and health reflections.",
-    params: z.object({
-      month_day: monthDayString.describe(
-        "Month and day to search across all years, e.g. '03-15' for March 15th"
-      ),
-    }),
-    examples: [
-      {
-        input: { month_day: "01-01" },
-        behavior:
-          "Returns all New Year's Day entries across every year in the journal",
-      },
-      {
-        input: { month_day: "09-22" },
-        behavior:
-          "Returns entries from September 22nd of each year, ordered chronologically",
-      },
-    ],
-  },
-
   find_similar: {
     name: "find_similar" as const,
     annotations: READ_ONLY_OPEN,

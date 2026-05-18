@@ -284,33 +284,6 @@ export async function getEntriesByDateRange(
 }
 
 /**
- * Find entries written on a specific MM-DD across all years.
- */
-export async function getEntriesOnThisDay(
-  pool: pg.Pool,
-  month: number,
-  day: number,
-  timezone: string
-): Promise<EntryRow[]> {
-  const result = await pool.query(
-    `SELECT
-      e.*,
-      (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'photo') AS photo_count,
-      (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'video') AS video_count,
-      (SELECT COUNT(*)::int FROM media m WHERE m.entry_id = e.id AND m.type = 'audio') AS audio_count,
-      dm.weight_kg
-    FROM entries e
-    LEFT JOIN daily_metrics dm ON dm.date = e.created_at::date
-    WHERE EXTRACT(MONTH FROM e.created_at AT TIME ZONE $3) = $1
-      AND EXTRACT(DAY FROM e.created_at AT TIME ZONE $3) = $2
-    ORDER BY e.created_at ASC`,
-    [month, day, timezone]
-  );
-
-  return result.rows.map(mapEntryRow);
-}
-
-/**
  * Find entries semantically similar to a given entry using cosine similarity.
  */
 export async function findSimilarEntries(

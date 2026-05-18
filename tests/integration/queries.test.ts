@@ -11,7 +11,6 @@ import {
   searchEntries,
   getEntryByUuid,
   getEntriesByDateRange,
-  getEntriesOnThisDay,
   findSimilarEntries,
   getEntryStats,
   upsertDailyMetric,
@@ -227,33 +226,6 @@ describe("getEntriesByDateRange", () => {
   });
 });
 
-describe("getEntriesOnThisDay", () => {
-  it("finds entries across years for June 15", async () => {
-    // ENTRY-003 is 2024-06-15, ENTRY-004 is 2023-06-15
-    const entries = await getEntriesOnThisDay(pool, 6, 15, "UTC");
-
-    expect(entries.length).toBe(2);
-    const years = entries.map((e) => new Date(e.created_at).getFullYear());
-    expect(years).toContain(2023);
-    expect(years).toContain(2024);
-  });
-
-  it("returns entries in chronological order", async () => {
-    const entries = await getEntriesOnThisDay(pool, 6, 15, "UTC");
-
-    for (let i = 1; i < entries.length; i++) {
-      expect(new Date(entries[i].created_at).getTime()).toBeGreaterThanOrEqual(
-        new Date(entries[i - 1].created_at).getTime()
-      );
-    }
-  });
-
-  it("returns empty for dates with no entries", async () => {
-    const entries = await getEntriesOnThisDay(pool, 2, 29, "UTC");
-    expect(entries).toEqual([]);
-  });
-});
-
 describe("findSimilarEntries", () => {
   it("returns similar entries excluding the source", async () => {
     const results = await findSimilarEntries(
@@ -376,21 +348,6 @@ describe("daily_metrics enrichment", () => {
     }
   });
 
-  it("includes weight_kg in on_this_day results", async () => {
-    // June 15 has entries and weight fixture data
-    const entries = await getEntriesOnThisDay(pool, 6, 15, "UTC");
-
-    expect(entries.length).toBe(2);
-    // 2024-06-15 has weight data, 2023-06-15 does not
-    const entry2024 = entries.find(
-      (e) => new Date(e.created_at).getFullYear() === 2024
-    );
-    const entry2023 = entries.find(
-      (e) => new Date(e.created_at).getFullYear() === 2023
-    );
-    expect(entry2024?.weight_kg).toBe(81.5);
-    expect(entry2023?.weight_kg).toBeNull();
-  });
 
   it("includes weight_kg in find_similar results", async () => {
     const results = await findSimilarEntries(

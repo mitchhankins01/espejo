@@ -140,10 +140,6 @@ export const config = {
     syncIntervalMinutes: ouraSyncIntervalMinutes,
     syncLookbackDays: ouraSyncLookbackDays,
   },
-  onThisDay: {
-    enabled: !!process.env.TELEGRAM_BOT_TOKEN,
-    targetHour: parseIntegerEnv("ON_THIS_DAY_HOUR", 16, 0),
-  },
   timezone: process.env.TIMEZONE || "Europe/Madrid",
   github: {
     owner: process.env.GITHUB_OWNER || "mitchhankins01",

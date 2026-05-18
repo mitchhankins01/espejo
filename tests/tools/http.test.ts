@@ -29,7 +29,6 @@ vi.mock("../../src/config.js", () => ({
     server: { port: 3000, mcpSecret: "", oauthClientId: "", oauthClientSecret: "" },
     telegram: { botToken: "", secretToken: "", allowedChatId: "" },
     oura: { accessToken: "" },
-    onThisDay: { enabled: false, targetHour: 8 },
     r2: { accountId: "", accessKeyId: "", secretAccessKey: "", bucketName: "", publicUrl: "" },
   },
 }));
@@ -45,10 +44,6 @@ vi.mock("../../src/oura/sync.js", () => ({
 
 vi.mock("../../src/obsidian/sync.js", () => ({
   startObsidianSyncTimer: vi.fn(),
-}));
-
-vi.mock("../../src/notifications/on-this-day.js", () => ({
-  startOnThisDayTimer: vi.fn(),
 }));
 
 vi.mock("../../src/db/embed-pending.js", () => ({

@@ -10,7 +10,6 @@ const mockQueries = vi.hoisted(() => ({
   searchEntries: vi.fn(),
   getEntryByUuid: vi.fn(),
   getEntriesByDateRange: vi.fn(),
-  getEntriesOnThisDay: vi.fn(),
   findSimilarEntries: vi.fn(),
   getEntryStats: vi.fn(),
 }));
@@ -30,7 +29,6 @@ vi.mock("../../src/config.js", () => mockConfig);
 import { handleSearchEntries } from "../../src/tools/search.js";
 import { handleGetEntry } from "../../src/tools/get-entry.js";
 import { handleGetEntriesByDate } from "../../src/tools/get-entries-by-date.js";
-import { handleOnThisDay } from "../../src/tools/on-this-day.js";
 import { handleFindSimilar } from "../../src/tools/find-similar.js";
 import { handleEntryStats } from "../../src/tools/entry-stats.js";
 
@@ -187,36 +185,6 @@ describe("handleGetEntriesByDate", () => {
   });
 });
 
-describe("handleOnThisDay", () => {
-  it("returns JSON array of entries", async () => {
-    mockQueries.getEntriesOnThisDay.mockResolvedValue([makeEntry()]);
-
-    const result = await handleOnThisDay(mockPool, { month_day: "03-15" });
-    const parsed = JSON.parse(result);
-
-    expect(parsed).toHaveLength(1);
-    expect(parsed[0]).toMatchObject({ uuid: "TEST-UUID" });
-  });
-
-  it("returns not found for no entries", async () => {
-    mockQueries.getEntriesOnThisDay.mockResolvedValue([]);
-
-    const result = await handleOnThisDay(mockPool, { month_day: "02-29" });
-    expect(result).toContain("No entries found");
-  });
-
-  it("handles multiple entries across years", async () => {
-    mockQueries.getEntriesOnThisDay.mockResolvedValue([
-      makeEntry({ created_at: new Date("2023-06-15") }),
-      makeEntry({ created_at: new Date("2024-06-15") }),
-    ]);
-
-    const result = await handleOnThisDay(mockPool, { month_day: "06-15" });
-    const parsed = JSON.parse(result);
-
-    expect(parsed).toHaveLength(2);
-  });
-});
 
 describe("handleFindSimilar", () => {
   it("finds similar and returns JSON", async () => {
