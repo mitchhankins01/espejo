@@ -19,7 +19,12 @@ async function main() {
       "usage: rebuild-tomo.ts <tomo_number> [--bilingual] [--share-julia|--no-share-julia]"
     );
   const padded = String(n).padStart(4, "0");
-  const md = await readFile(`books/tomos/${padded}.md`, "utf-8");
+  const rawMd = await readFile(`books/tomos/${padded}.md`, "utf-8");
+  // Strip legacy Reader notes section from the build (the feature was removed,
+  // but it's preserved on disk in older tomos). All downstream output is built
+  // from `md`, so the EPUB and the bilingual interleave both drop it cleanly.
+  const { nota } = splitTomo(rawMd);
+  const md = nota ? rawMd.slice(0, rawMd.indexOf(nota)).trimEnd() + "\n" : rawMd;
   const title = md.match(/^#\s+(.+)/)![1];
 
   let epubMarkdown = md;
@@ -27,11 +32,7 @@ async function main() {
   let subject = `Espejo — Tomo ${padded} — ${title}`;
   if (bilingual) {
     console.log("[bilingual] interleaving ES + EN");
-    // Reader notes stay English — split off before interleave, reattach after.
-    const { nota } = splitTomo(md);
-    const mdForInterleave = nota ? md.slice(0, md.indexOf(nota)).trimEnd() : md;
-    const interleaved = await interleave(mdForInterleave);
-    epubMarkdown = nota ? `${interleaved.trimEnd()}\n\n${nota}\n` : interleaved;
+    epubMarkdown = await interleave(md);
     await writeFile(`books/tomos/${padded}-bilingual.md`, epubMarkdown, "utf-8");
     filename = filename.replace(/\.epub$/, " (bilingual).epub");
     subject = `${subject} (bilingual)`;

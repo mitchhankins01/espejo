@@ -3,7 +3,13 @@ import { config } from "../../src/config.js";
 import type { Candidate } from "./planner.js";
 import type { ContextItem } from "./context.js";
 
-const OPEN_QUESTIONS_RULE = `Open Spanish questions — if the user message includes an "Open Spanish questions" block, those are structures the reader is actively trying to lock in. Every time the tomo exercises one of those structures, briefly gloss the rule in Spanish inline — one short clarifying clause in parentheses or em-dashes (e.g. "(indicativo aquí porque 'creo que' afirma)" or "— hubo, un acontecimiento puntual —"). Gloss EVERY occurrence, not just the first; the repetition is what makes the pattern recognizable. Keep each gloss short and varied in phrasing so it doesn't read as boilerplate, but don't skip one. Don't footnote, don't lecture, don't add a parenthetical translation. If no Open Spanish questions block is present, ignore this rule.`;
+const OPEN_QUESTIONS_RULE = `Open Spanish questions — if the user message includes an "Open Spanish questions" block, those are structures the reader is actively trying to lock in. Two requirements, both mandatory:
+
+1. **Spread.** Weave EVERY listed item into the tomo at least once or twice — not just one of them. Don't deep-dive on a single structure and skip the rest. Pick sentences where each structure fits the meaning, then deliver it. Don't anchor a broad category on a single sub-pattern (e.g. if the open question is "subjuntivo vs indicativo", don't fulfill it solely with "creo que / no creo que" — reach for other triggers like querer que, para que, antes de que, sin que, relative clauses with hypothetical antecedents, negative commands).
+
+2. **Gloss every occurrence.** ANY time one of these structures appears in the tomo — whether you planned it or it landed naturally — drop an inline gloss right next to it. Format the gloss as italicized **English** text inside parentheses, immediately following the structure being explained. Example: \`hubo (*"hubo" = a single completed event, vs. "había" = ongoing state*) muchos encuentros donde…\` or \`Quiero que vengas (*subjunctive after "querer que" — the wanting is real but the coming isn't yet*) cuando puedas\` or \`Le di el libro (*"le" = indirect object pronoun, "to him"*).\` Keep each gloss short (3–12 English words), varied in phrasing — but never skip one. No footnotes, no em-dashes for this purpose. The body remains Spanish; only the parenthetical gloss is in English.
+
+If no Open Spanish questions block is present, ignore this rule.`;
 
 const GRAMMAR_GUARDRAILS = `Spanish grammar guardrails — recurring writer-model errors to avoid:
 

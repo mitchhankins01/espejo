@@ -15,15 +15,12 @@ const SERIES_NAME = "Espejo";
 export async function buildEpub(opts: EpubOptions): Promise<void> {
   const { tomoNum, title, markdown, outPath } = opts;
 
-  const { body, takeaways, nota } = splitTomo(markdown);
+  const { body, takeaways } = splitTomo(markdown);
   const bodyHtml = await marked.parse(body);
 
   // Strip the section heading line — the chapter title supplies it.
   const takeawaysBody = takeaways.replace(/^##\s+Para llevarte\s*\n?/m, "").trim();
   const takeawaysHtml = takeawaysBody ? await marked.parse(takeawaysBody) : "";
-
-  const notaBody = nota.replace(/^##\s+Reader notes\s*\n?/m, "").trim();
-  const notaHtml = notaBody ? await marked.parse(notaBody) : "";
 
   const padded = String(tomoNum).padStart(4, "0");
   const bookTitle = `${SERIES_NAME} — Tomo ${padded} — ${title}`;
@@ -38,12 +35,6 @@ export async function buildEpub(opts: EpubOptions): Promise<void> {
     chapters.push({
       title: "Para llevarte",
       content: takeawaysHtml,
-    });
-  }
-  if (notaHtml) {
-    chapters.push({
-      title: "Reader notes",
-      content: notaHtml,
     });
   }
   // Trailing colophon chapter — gives Kindle a definite "next page" target so

@@ -43,6 +43,10 @@ import {
 } from "./book/context.js";
 import { plan, type Candidate, type PlannerOutput } from "./book/planner.js";
 import { write, countWords, splitTomo } from "./book/writer.js";
+import {
+  checkOpenQuestionsCoverage,
+  checkTildes,
+} from "./book/coverage-checks.js";
 import { interleave } from "./book/bilingual.js";
 import {
   formatLookupsForWriter,
@@ -63,15 +67,17 @@ import {
   formatOpenQuestionsForWriter,
   readOpenQuestions,
 } from "./book/open-questions.js";
+import {
+  formatSeriesQueueForPlanner,
+  readSeriesQueue,
+} from "./book/series-queue.js";
 import { buildEpub, tomoFilename } from "./book/epub.js";
 import { sendToKindle } from "./book/send.js";
 import { offerJuliaShare, type ShareJuliaMode } from "./book/share.js";
 import {
-  appendReaderNotesToMarkdown,
   fetchRecentSpanishEntries,
   generateReaderLevelParagraph,
-  generateReaderNotes,
-} from "./book/reader-notes.js";
+} from "./book/reader-level.js";
 import { config } from "../src/config.js";
 
 const TOMOS_DIR = "books/tomos";
@@ -265,10 +271,21 @@ async function main(): Promise<void> {
       const preview = args.steer.slice(0, 120);
       console.log(`      steering planner with: ${preview}${args.steer.length > 120 ? "..." : ""}`);
     }
-    const output = await plan(recent, longArc, context, args.steer);
-    console.log("      computing reader-level snapshot (Claude pass 1b)");
-    const recentEntries = await fetchRecentSpanishEntries(90, 5);
-    const readerLevel = await generateReaderLevelParagraph(recentEntries);
+    const seriesQueueRaw = await readSeriesQueue();
+    const seriesQueueBlock = formatSeriesQueueForPlanner(seriesQueueRaw);
+    if (seriesQueueRaw.length > 0) {
+      const veinCount = seriesQueueRaw
+        .split("\n")
+        .filter((l) => /^\s*-\s+/.test(l)).length;
+      console.log(
+        `      injecting series queue (${veinCount} active vein${veinCount === 1 ? "" : "s"})`
+      );
+    }
+    console.log("      planner (1) + reader-level snapshot (1b) in parallel");
+    const [output, readerLevel] = await Promise.all([
+      plan(recent, longArc, context, args.steer, seriesQueueBlock),
+      fetchRecentSpanishEntries(90, 5).then(generateReaderLevelParagraph),
+    ]);
     await savePlannerOutput(n, output, readerLevel);
     console.log(`      saved 6 candidates to ${PLAN_PATH}`);
     console.log("\n--- candidates ---");
@@ -295,7 +312,7 @@ async function main(): Promise<void> {
     await pool.end();
     process.exit(2);
   }
-  const { candidates, readerLevel: savedReaderLevel } = loaded;
+  const { candidates } = loaded;
   const picked = candidates.find((c) => c.id === args.pick);
   if (!picked) {
     console.error(
@@ -377,21 +394,36 @@ async function main(): Promise<void> {
     console.warn(`      WARN: word count ${counts.total} is outside 1800-2400 target`);
   }
 
-  console.log("      generating Reader notes (Claude pass 3)");
-  const readerLevel =
-    savedReaderLevel ??
-    (await generateReaderLevelParagraph(await fetchRecentSpanishEntries(90, 5)));
-  if (!savedReaderLevel) {
-    console.log("      (no cached reader_level on plan — regenerated)");
+  const tomoParts = splitTomo(writtenMarkdown);
+
+  if (openQuestions.length > 0) {
+    const coverage = checkOpenQuestionsCoverage(tomoParts.body);
+    console.log(
+      `      [open-questions check] ${coverage.totalGlosses} inline gloss(es)`
+    );
+    for (const q of coverage.perQuestion) {
+      const mark = q.matches.length > 0 ? "✓" : "✗";
+      console.log(`        ${mark} ${q.question}: ${q.matches.length}`);
+    }
+    if (coverage.missingQuestions.length > 0) {
+      console.warn(
+        `      WARN: no inline gloss detected for: ${coverage.missingQuestions.join(", ")}`
+      );
+    }
   }
-  const readerNotes = await generateReaderNotes({
-    picked,
-    tomoMarkdown: writtenMarkdown,
-    readerLevel,
-    recentLookups: recentLookups(lookups, 30),
-    recentHighlights: recentHighlights(highlights, 12),
-  });
-  const markdown = appendReaderNotesToMarkdown(writtenMarkdown, readerNotes);
+
+  const tildes = checkTildes(writtenMarkdown);
+  if (tildes.hits.length === 0) {
+    console.log("      [tilde check] none");
+  } else {
+    for (const h of tildes.hits) {
+      console.warn(
+        `      WARN: tilde slip "${h.word}" → "${h.correction}" (${h.count}x)`
+      );
+    }
+  }
+
+  const markdown = writtenMarkdown;
 
   if (args.dry) {
     console.log("\n--- dry run (tomo not saved) ---\n");
@@ -414,14 +446,7 @@ async function main(): Promise<void> {
   let filename = tomoFilename(n, picked.title);
   if (wantsBilingual) {
     console.log("[bilingual] interleaving ES + EN");
-    const { nota } = splitTomo(markdown);
-    const mdForInterleave = nota
-      ? markdown.slice(0, markdown.indexOf(nota)).trimEnd()
-      : markdown;
-    const interleaved = await interleave(mdForInterleave);
-    epubMarkdown = nota
-      ? `${interleaved.trimEnd()}\n\n${nota}\n`
-      : interleaved;
+    epubMarkdown = await interleave(markdown);
     const biPath = join(TOMOS_DIR, `${padded}-bilingual.md`);
     await writeFile(biPath, epubMarkdown, "utf-8");
     filename = filename.replace(/\.epub$/, " (bilingual).epub");

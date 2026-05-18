@@ -40,6 +40,7 @@ Hard rules:
 - For flow: domain MAY be one of the listed domains OR "none". The flow latitude is in the form, not the subject — pick a domain when there is one, "none" only when the piece is purely interior with no domain anchor.
 - Each candidate's "take" is one paragraph (3-5 sentences) explaining: why this angle is worth reading right now given what Mitch has been journaling about, and what the tomo will dramatize or teach.
 - Honor any editorial direction in the user message ("Editorial direction" block) when present — it overrides your default judgement on topic/domain/format mix.
+- If a "Series queue" block is present in the user message, it lists active veins the reader wants multiple tomos to draw from. For each active vein, produce at least one candidate that engages it directly, and name the vein explicitly in that candidate's "take". The remaining candidate slots are free.
 
 Output STRICT JSON only — no prose, no markdown, no code fences:
 {
@@ -85,7 +86,8 @@ export async function plan(
   recentTomos: TomoSummary[],
   longArc: ContextItem[],
   recent: ContextItem[],
-  steer?: string
+  steer?: string,
+  seriesQueueBlock?: string
 ): Promise<PlannerOutput> {
   if (!config.anthropic.apiKey) {
     throw new Error("ANTHROPIC_API_KEY is required for the planner");
@@ -127,11 +129,17 @@ export async function plan(
       ]
     : [];
 
+  const queueBlock =
+    seriesQueueBlock && seriesQueueBlock.length > 0
+      ? [seriesQueueBlock, ""]
+      : [];
+
   const user = [
     "# Recent tomos — do not retread these topics/domains",
     recentTomosBlock,
     "",
     ...steerBlock,
+    ...queueBlock,
     "# Standing themes — anchor on these",
     "(Older approved insights, distilled over months. Candidates should anchor on patterns from this block.)",
     "",
