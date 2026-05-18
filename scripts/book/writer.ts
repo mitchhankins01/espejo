@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../../src/config.js";
 import type { Candidate } from "./planner.js";
 import type { ContextItem } from "./context.js";
+import { streamCreate } from "./stream-progress.js";
 
 const OPEN_QUESTIONS_RULE = `Open Spanish questions — if the user message includes an "Open Spanish questions" block, those are structures the reader is actively trying to lock in. Two requirements, both mandatory:
 
@@ -149,12 +150,16 @@ export async function write(
     { role: "user", content: user },
   ];
 
-  const response = await client.messages.create({
-    model: config.anthropic.model,
-    max_tokens: 8192,
-    system,
-    messages,
-  });
+  const response = await streamCreate(
+    client,
+    {
+      model: config.anthropic.model,
+      max_tokens: 8192,
+      system,
+      messages,
+    },
+    "writer"
+  );
 
   const textBlock = response.content.find((b) => b.type === "text");
   if (!textBlock || textBlock.type !== "text") {
@@ -179,12 +184,16 @@ ${stripped}`;
     messages.push({ role: "assistant", content: markdown });
     messages.push({ role: "user", content: extendPrompt });
 
-    const retry = await client.messages.create({
-      model: config.anthropic.model,
-      max_tokens: 8192,
-      system,
-      messages,
-    });
+    const retry = await streamCreate(
+      client,
+      {
+        model: config.anthropic.model,
+        max_tokens: 8192,
+        system,
+        messages,
+      },
+      "writer/extend"
+    );
     const retryBlock = retry.content.find((b) => b.type === "text");
     if (retryBlock && retryBlock.type === "text") {
       const retryMd = retryBlock.text.trim() + "\n";

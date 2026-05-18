@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../../src/config.js";
+import { streamCreate } from "./stream-progress.js";
 
 const SYSTEM = `You are creating a side-by-side bilingual study version of a Spanish essay for an English-speaking learner. The reader wants to scan ES then EN inline to learn translations quickly.
 
@@ -31,12 +32,16 @@ export async function interleave(markdown: string): Promise<string> {
     throw new Error("ANTHROPIC_API_KEY is required for the bilingual pass");
   }
   const client = new Anthropic({ apiKey: config.anthropic.apiKey });
-  const response = await client.messages.create({
-    model: config.anthropic.model,
-    max_tokens: 16000,
-    system: SYSTEM,
-    messages: [{ role: "user", content: markdown }],
-  });
+  const response = await streamCreate(
+    client,
+    {
+      model: config.anthropic.model,
+      max_tokens: 16000,
+      system: SYSTEM,
+      messages: [{ role: "user", content: markdown }],
+    },
+    "bilingual"
+  );
   const text = response.content.find((b) => b.type === "text");
   if (!text || text.type !== "text") {
     throw new Error("Bilingual pass returned no text block");

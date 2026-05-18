@@ -238,6 +238,12 @@ function printCandidates(candidates: Candidate[]): void {
 async function main(): Promise<void> {
   const args = parseArgs();
 
+  const batchIdx = process.env.BATCH_INDEX;
+  const batchTotal = process.env.BATCH_TOTAL;
+  if (batchIdx && batchTotal) {
+    console.log(`\n==== batch tomo ${batchIdx}/${batchTotal} ====`);
+  }
+
   if (args.freshPlan) {
     await clearSavedPlan();
     console.log("[fresh-plan] cleared books/next-plan.json");
