@@ -180,6 +180,15 @@ takeSnapshot(plan);
 const distincts = plan.filter(s => s.final_action === "Distinct");
 const dups      = plan.filter(s => s.final_action === "Duplicate");
 const merges    = plan.filter(s => s.final_action === "Merge");
+const skips     = plan.filter(s => s.final_action === "Skip");
+
+if (skips.length) {
+  console.log();
+  console.log(`=== Skipped (${skips.length}) — reciprocal-merge cycle reverse ===`);
+  for (const s of skips) {
+    log(`  ⏭️ ${s.source_path} (cycle-paired with ${s.coalesce_cycle_paired_with}; primary removes this file)`);
+  }
+}
 
 // Track which Pending paths get promoted to Insight by Distinct phase, so the
 // Merge phase can redirect targets that pointed to a now-empty Pending path.
@@ -250,6 +259,16 @@ for (const s of merges) {
   if (!body) { console.error(`  MISSING BODY (${pick}) for merge #${mergeNum}: ${s.source_path}`); continue; }
   log(`Merge #${mergeNum} ${s.source_path} → ${target} (using ${pick})`);
   writeMerged(target, body);
+  // Pending→Pending merges (typical when both files in a cycle-coalesced pair
+  // were still pending) leave the merged content in Pending/, which then re-
+  // enters the next dedup pool. Promote to Insight/ so the merge is complete.
+  if (target.startsWith("Pending/")) {
+    const desiredDst = target.replace(/^Pending\//, "Insight/");
+    const actualDst = existsSync(fp(desiredDst)) ? desiredDst.replace(/\.md$/, "-1.md") : desiredDst;
+    log(`  ↪️ post-merge promote: ${target} → ${actualDst}`);
+    mv(target, desiredDst);
+    target = actualDst;
+  }
   rewriteInbound(s.source_path, target);
   rm(s.source_path);
 }

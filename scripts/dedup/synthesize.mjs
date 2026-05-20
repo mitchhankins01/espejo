@@ -141,6 +141,26 @@ for (const leg of LEGS) {
 const activeLegs = Object.keys(legArrays);
 console.error(`[synth] Active legs: ${activeLegs.join(", ")}`);
 
+// Ghost filter: drop any leg-returned source_path that isn't in the canonical
+// retrieval plan. Legs occasionally hallucinate extra rows (e.g. Gemini keyed a
+// source by its DB UUID instead of file path) which then survive as phantom
+// cases in the preview and break apply's mv against a non-existent file. The
+// retrieval plan is authoritative — anything outside it is a ghost.
+const validSourcePaths = new Set(
+  planFull.plan.map(e => e.source?.source_path).filter(Boolean)
+);
+for (const leg of activeLegs) {
+  const before = legArrays[leg].length;
+  const ghosts = [];
+  legArrays[leg] = legArrays[leg].filter(o => {
+    if (!validSourcePaths.has(o.source_path)) { ghosts.push(o.source_path); return false; }
+    return true;
+  });
+  if (ghosts.length) {
+    console.error(`[synth] ${leg}: dropped ${ghosts.length}/${before} ghost source(s) not in plan: ${ghosts.join(", ")}`);
+  }
+}
+
 // Index each leg by source_path
 const idx = {};
 for (const leg of activeLegs) {
@@ -319,11 +339,40 @@ for (const [target, group] of Object.entries(mergeGroups)) {
   console.error(`[synth] multi-source group at ${target.replace(/^(Pending|Insight)\//, "")}: primary=${primary.source_path.replace(/^Pending\//, "")}, demoted ${group.length - 1} secondary source(s)`);
 }
 
+// Cycle coalesce: reciprocal merges A→B and B→A. Apply would run both
+// sequentially — second clobbers first's body and reads from a target that the
+// first just rewrote. The target-group coalescer above only catches sources
+// that share a destination; it can't see cycles because the targets differ.
+// Keep the higher-composite direction as primary Merge; drop the reverse with
+// final_action="Skip" so apply ignores it (the primary's source-delete already
+// removes the cycle's other end).
+const mergeBySource = {};
+for (const s of synth) {
+  if (s.final_action === "Merge" && s.final_target) mergeBySource[s.source_path] = s;
+}
+const cycleHandled = new Set();
+for (const [src, s] of Object.entries(mergeBySource)) {
+  if (cycleHandled.has(src)) continue;
+  const reverse = mergeBySource[s.final_target];
+  if (!reverse || reverse.final_target !== src) continue;
+  const compositeOf = (x) => x.score_breakdown?.[0]?.composite ?? 0;
+  const primary = compositeOf(s) >= compositeOf(reverse) ? s : reverse;
+  const secondary = primary === s ? reverse : s;
+  secondary.coalesce_cycle_paired_with = primary.source_path;
+  secondary.final_action = "Skip";
+  secondary.recommended_pick = null;
+  secondary.recommendation_rationale = `reciprocal merge cycle with ${primary.source_path.replace(/^Pending\//, "")} — primary direction kept; this reverse direction skipped (primary's source-delete already removes this file)`;
+  cycleHandled.add(primary.source_path);
+  cycleHandled.add(secondary.source_path);
+  console.error(`[synth] cycle coalesced: primary=${primary.source_path.replace(/^Pending\//, "")} ⇄ skipped=${secondary.source_path.replace(/^Pending\//, "")}`);
+}
+
 const summary = {
   total: synth.length,
   buckets: synth.reduce((acc, s) => { acc[s.consensus] = (acc[s.consensus] || 0) + 1; return acc; }, {}),
   by_final_action: synth.reduce((acc, s) => { acc[s.final_action] = (acc[s.final_action] || 0) + 1; return acc; }, {}),
   coalesce_demotions: synth.filter(s => s.coalesce_demoted_from).length,
+  cycle_skips: synth.filter(s => s.coalesce_cycle_paired_with).length,
   active_legs: activeLegs,
 };
 
@@ -356,7 +405,7 @@ for (const s of synth) {
   i++;
   const distinctLabel = modeIsB ? "📋 keep both" : "📤 promote";
   const mergeLabel = s.is_supersede ? "♻️ supersede" : "🔀 merge";
-  const emoji = { Duplicate: "🗑️ delete", Merge: mergeLabel, Distinct: distinctLabel }[s.final_action];
+  const emoji = { Duplicate: "🗑️ delete", Merge: mergeLabel, Distinct: distinctLabel, Skip: "⏭️ skip-cycle" }[s.final_action] || s.final_action;
   const tally = activeLegs.map(l => (s.classifications[l]?.class || "–")[0]).join("/");
   const star = s.final_action === "Merge" ? (s.recommended_pick === "DEFER" ? "⚠️ defer" : (s.recommended_pick || "?")) : "";
   md += `| ${i} | ${emoji} | \`${shortSrc(s.source_path)}\` | \`${shortSrc(s.final_target)}\` | ${s.consensus} | ${tally} | ${star} |\n`;
@@ -373,6 +422,19 @@ md += `**Legend:** 🗑️ = delete source, ${distinctLegend}, 🔀 = rewrite ta
 const dupActions = synth.filter(s => s.final_action === "Duplicate");
 const distActions = synth.filter(s => s.final_action === "Distinct");
 const mergeActions = synth.filter(s => s.final_action === "Merge");
+const skipActions = synth.filter(s => s.final_action === "Skip");
+
+if (skipActions.length) {
+  md += `## Skipped (${skipActions.length}) — reciprocal merge cycle\n\n`;
+  md += `These rows were the reverse direction of an A↔B merge cycle. Apply ignores them — the primary direction's source-delete already removes this file from the vault. No action needed.\n\n`;
+  md += `| # | This row (skipped) | Paired with (primary) |\n|---:|---|---|\n`;
+  let j = 0;
+  for (const s of skipActions) {
+    j++;
+    md += `| ${j} | \`${shortSrc(s.source_path)}\` | \`${shortSrc(s.coalesce_cycle_paired_with)}\` |\n`;
+  }
+  md += `\n---\n\n`;
+}
 
 md += `## Deletes (${dupActions.length}) — Duplicate\n\n`;
 md += `| # | Source | Target it duplicates | Consensus |\n|---:|---|---|---|\n`;
