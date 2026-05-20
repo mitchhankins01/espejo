@@ -145,7 +145,7 @@ export async function searchEntries(
 
   const sql = `
     WITH params AS (
-      SELECT $1::vector AS query_embedding, plainto_tsquery('english', $2) AS ts_query
+      SELECT $1::vector AS query_embedding, (plainto_tsquery('english', $2) || plainto_tsquery('spanish', $2)) AS ts_query
     ),
     semantic AS (
       SELECT e.id,

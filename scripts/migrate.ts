@@ -2058,6 +2058,30 @@ const migrations: Migration[] = [
          AND last_review IS NOT NULL;
     `,
   },
+  {
+    name: "059-multilingual-tsvector",
+    getSql: () => `
+      -- entries.text_search: english + spanish union
+      -- Dropping/re-adding the GENERATED column triggers a table rewrite
+      -- so every row recomputes; no backfill script needed.
+      ALTER TABLE entries DROP COLUMN IF EXISTS text_search;
+      ALTER TABLE entries ADD COLUMN text_search tsvector GENERATED ALWAYS AS (
+        to_tsvector('english', COALESCE(text, '')) ||
+        to_tsvector('spanish', COALESCE(text, ''))
+      ) STORED;
+      CREATE INDEX IF NOT EXISTS idx_entries_text_search
+        ON entries USING GIN (text_search);
+
+      -- knowledge_artifacts.tsv: same treatment (vault has Spanish too)
+      ALTER TABLE knowledge_artifacts DROP COLUMN IF EXISTS tsv;
+      ALTER TABLE knowledge_artifacts ADD COLUMN tsv tsvector GENERATED ALWAYS AS (
+        to_tsvector('english', coalesce(title,'') || ' ' || coalesce(body,'')) ||
+        to_tsvector('spanish', coalesce(title,'') || ' ' || coalesce(body,''))
+      ) STORED;
+      CREATE INDEX IF NOT EXISTS idx_knowledge_artifacts_tsv
+        ON knowledge_artifacts USING GIN (tsv);
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

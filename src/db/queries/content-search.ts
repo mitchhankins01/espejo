@@ -65,7 +65,7 @@ export async function searchContent(
 
     const entrySql = `
       WITH params AS (
-        SELECT $1::vector AS query_embedding, plainto_tsquery('english', $2) AS ts_query
+        SELECT $1::vector AS query_embedding, (plainto_tsquery('english', $2) || plainto_tsquery('spanish', $2)) AS ts_query
       ),
       semantic AS (
         SELECT e.id,
@@ -136,7 +136,7 @@ export async function searchContent(
 
     const artSql = `
       WITH params AS (
-        SELECT $1::vector AS query_embedding, plainto_tsquery('english', $2) AS ts_query
+        SELECT $1::vector AS query_embedding, (plainto_tsquery('english', $2) || plainto_tsquery('spanish', $2)) AS ts_query
       ),
       semantic AS (
         SELECT a.id,

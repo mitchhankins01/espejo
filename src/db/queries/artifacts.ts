@@ -651,7 +651,7 @@ export async function searchArtifacts(
     WITH params AS (
       SELECT
         $1::vector AS query_embedding,
-        plainto_tsquery('english', $2) AS ts_query,
+        (plainto_tsquery('english', $2) || plainto_tsquery('spanish', $2)) AS ts_query,
         (
           SELECT CASE
             WHEN COUNT(*) = 0 THEN NULL::tsquery
@@ -754,7 +754,7 @@ export async function searchArtifactsKeyword(
     WITH params AS (
       SELECT
         lower($1) AS q_lower,
-        plainto_tsquery('english', $1) AS ts_query,
+        (plainto_tsquery('english', $1) || plainto_tsquery('spanish', $1)) AS ts_query,
         (
           SELECT CASE
             WHEN COUNT(*) = 0 THEN NULL::tsquery

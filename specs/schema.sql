@@ -37,9 +37,10 @@ CREATE TABLE IF NOT EXISTS entries (
     -- Vector embedding (1536 dims for text-embedding-3-small)
     embedding vector(1536),
 
-    -- Full-text search (auto-generated)
+    -- Full-text search (auto-generated, english + spanish union)
     text_search tsvector GENERATED ALWAYS AS (
-        to_tsvector('english', COALESCE(text, ''))
+        to_tsvector('english', COALESCE(text, '')) ||
+        to_tsvector('spanish', COALESCE(text, ''))
     ) STORED
 );
 
@@ -454,7 +455,8 @@ CREATE TABLE IF NOT EXISTS knowledge_artifacts (
     embedding vector(1536),
     embedding_model TEXT NOT NULL DEFAULT 'text-embedding-3-small',
     tsv tsvector GENERATED ALWAYS AS (
-        to_tsvector('english', coalesce(title, '') || ' ' || coalesce(body, ''))
+        to_tsvector('english', coalesce(title, '') || ' ' || coalesce(body, '')) ||
+        to_tsvector('spanish', coalesce(title, '') || ' ' || coalesce(body, ''))
     ) STORED,
     source_path TEXT,
     content_hash TEXT,
