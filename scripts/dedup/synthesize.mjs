@@ -490,7 +490,7 @@ if (supersedeActions.length) {
 }
 
 md += `## Merges (${trueMergeActions.length}) — REQUIRES YOUR ATTENTION\n\n`;
-md += `Each section: source body (will be deleted) + full target BEFORE and ⭐ recommended AFTER bodies, with the unified diff in a collapsible. Alternates collapsed.\n\n`;
+md += `Each section: source body (will be deleted) + full target BEFORE + red/green diff + full target ⭐ recommended AFTER. Alternates collapsed.\n\n`;
 i = 0;
 for (const s of trueMergeActions) {
   i++;
@@ -507,10 +507,10 @@ for (const s of trueMergeActions) {
     const afterBody = s.merge_bodies[pick];
     const diff = unifiedDiff(beforeBody, afterBody);
     md += `**Target BEFORE (\`${shortSrc(s.final_target)}\`):**\n\n\`\`\`md\n${beforeBody}\n\`\`\`\n\n`;
-    md += `**Target AFTER ⭐ ${pick}:**\n\n`;
+    md += `**Target diff (BEFORE → AFTER ⭐ ${pick}):**\n\n`;
     if (diff) {
-      md += `\`\`\`md\n${afterBody}\n\`\`\`\n\n`;
-      md += `<details><summary>Diff (BEFORE → AFTER)</summary>\n\n\`\`\`diff\n${diff}\`\`\`\n\n</details>\n\n`;
+      md += `\`\`\`diff\n${diff}\`\`\`\n\n`;
+      md += `**Target AFTER ⭐ ${pick} (full body):**\n\n\`\`\`md\n${afterBody}\n\`\`\`\n\n`;
     } else {
       md += `_(no changes — picked body is identical to current target)_\n\n`;
     }
