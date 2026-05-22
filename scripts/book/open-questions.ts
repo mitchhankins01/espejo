@@ -29,7 +29,7 @@ export function formatOpenQuestionsForWriter(questions: string[]): string {
   const bullets = questions.map((q) => `- ${q}`).join("\n");
   return [
     "# Open Spanish questions",
-    "These are grammar structures the reader is actively trying to lock in — areas of ambiguity he flagged himself. Every time the tomo exercises any of them, gloss the rule briefly in Spanish inline (one short clarifying clause in parentheses or em-dashes). Gloss every occurrence, not just the first — the repetition is what makes the pattern recognizable. Keep each gloss short and vary the phrasing so it doesn't read as boilerplate, but don't skip one.",
+    'These are grammar/conjugation structures the reader is actively trying to lock in — areas of ambiguity he flagged himself. Every time the tomo exercises any of them, drop an inline italic-English gloss in parens right after the structure, and the gloss must CONTRAST against the form the reader might have wrongly reached for. Gloss every occurrence, not just the first. Glosses are reserved for these structures only — never for vocabulary, never as callbacks to prior tomos. See the system prompt for full format + examples.',
     "",
     bullets,
   ].join("\n");

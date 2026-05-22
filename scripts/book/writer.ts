@@ -4,13 +4,35 @@ import type { Candidate } from "./planner.js";
 import type { ContextItem } from "./context.js";
 import { streamCreate } from "./stream-progress.js";
 
-const OPEN_QUESTIONS_RULE = `Open Spanish questions — if the user message includes an "Open Spanish questions" block, those are structures the reader is actively trying to lock in. Two requirements, both mandatory:
+const OPEN_QUESTIONS_RULE = `Open Spanish questions — if the user message includes an "Open Spanish questions" block, those are grammar/conjugation structures the reader is actively trying to lock in. Two requirements, both mandatory:
 
 1. **Spread.** Weave EVERY listed item into the tomo at least once or twice — not just one of them. Don't deep-dive on a single structure and skip the rest. Pick sentences where each structure fits the meaning, then deliver it. Don't anchor a broad category on a single sub-pattern (e.g. if the open question is "subjuntivo vs indicativo", don't fulfill it solely with "creo que / no creo que" — reach for other triggers like querer que, para que, antes de que, sin que, relative clauses with hypothetical antecedents, negative commands).
 
-2. **Gloss every occurrence.** ANY time one of these structures appears in the tomo — whether you planned it or it landed naturally — drop an inline gloss right next to it. Format the gloss as italicized **English** text inside parentheses, immediately following the structure being explained. Example: \`hubo (*"hubo" = a single completed event, vs. "había" = ongoing state*) muchos encuentros donde…\` or \`Quiero que vengas (*subjunctive after "querer que" — the wanting is real but the coming isn't yet*) cuando puedas\` or \`Le di el libro (*"le" = indirect object pronoun, "to him"*).\` Keep each gloss short (3–12 English words), varied in phrasing — but never skip one. No footnotes, no em-dashes for this purpose. The body remains Spanish; only the parenthetical gloss is in English.
+2. **Gloss every occurrence, with contrast.**
 
-If no Open Spanish questions block is present, ignore this rule.`;
+   Scope (strict): inline glosses exist ONLY to explain the grammar/conjugation structures listed in OPEN SPANISH QUESTIONS. Never gloss vocabulary. Never annotate reused words. Never write "tomo NN", "word seen before", "from vocab", or any callback to prior tomos. If a vocab item needs help, leave it bare — the reader has a Kindle dictionary. The lookups/highlights blocks in the user message are your context for reuse decisions, not material to echo back in the body.
+
+   Coverage: EVERY occurrence of a listed structure gets a gloss — first, second, tenth. The repetition is the lock-in. No "I already glossed this one earlier."
+
+   Form: italicized **English** inside parentheses, placed immediately after the structure being explained. 3–12 English words. Vary the phrasing across occurrences so it doesn't read as boilerplate. The body remains Spanish; only the parenthetical gloss is in English. No footnotes, no em-dashes for this purpose.
+
+   **Contrast is required.** Every gloss names the alternative the reader might have reached for and why this form is the right one instead. Flat labels are forbidden.
+
+   GOOD:
+   - \`hubo (*"hubo" = single completed event, not "había" = ongoing state*) un momento donde…\`
+   - \`iba (*"iba" = imperfect, the trajectory unfolding; "era" would freeze it as a fixed trait*) hacia el norte\`
+   - \`Camina despacio (*"despacio" = manner of motion; "lento" would describe him as inherently slow*).\`
+   - \`Quiero que vengas (*subjunctive after "querer que" — the wanting is real, the arriving isn't yet*).\`
+   - \`Le di el libro (*"le" = indirect object, "to him"; direct object "lo" would mean handing him over, not giving to him*).\`
+
+   BAD:
+   - \`(*"le" = indirect object pronoun*)\`      ← no contrast, just a label
+   - \`(*tomo 30*)\`                              ← callback, not grammar
+   - \`(*word seen before: "rincón"*)\`           ← vocab annotation
+   - \`(*"máscara" — mask*)\`                     ← vocab translation
+   - \`(*"hervir" — to boil*)\`                   ← vocab translation
+
+If no Open Spanish questions block is present, ignore this rule — and emit no inline parenthetical glosses at all.`;
 
 const GRAMMAR_GUARDRAILS = `Spanish grammar guardrails — recurring writer-model errors to avoid:
 

@@ -45,7 +45,7 @@ export function formatHighlightsForWriter(recent: Highlight[]): string {
     .join("\n");
   return [
     "# Reader grammar / conjugation uncertainties",
-    "Sentences the reader highlighted on Kindle while reading prior tomos — by convention, highlights mark conjugations or verb forms he wasn't sure about (the verb was familiar, the form wasn't). Don't quote these back. Use the same structures again in clean natural prose so the pattern locks in through repetition. Don't gloss them, don't draw attention to them.",
+    'Sentences the reader highlighted on Kindle while reading prior tomos — by convention, highlights mark conjugations or verb forms he wasn\'t sure about (the verb was familiar, the form wasn\'t). Don\'t quote these back. Reuse the same structures again in clean natural prose so the pattern locks in through repetition. Inline glosses are reserved for OPEN SPANISH QUESTIONS (see system prompt); these highlighted forms are NOT auto-glossable — only gloss them if they overlap with an open question. Never echo "tomo NN" or "word seen before" annotations into the body.',
     "",
     bullets,
   ].join("\n");

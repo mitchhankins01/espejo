@@ -77,7 +77,7 @@ export function formatLookupsForWriter(
     .join("\n");
   return [
     "# Recent reader lookups",
-    "Words he looked up on Kindle while reading prior tomos. Reuse naturally where they fit — reinforcement through reuse, not repetition. Avoid stacking equivalently hard new vocabulary in a single paragraph.",
+    'Words he looked up on Kindle while reading prior tomos. Reuse naturally where they fit — reinforcement through reuse, not repetition. Avoid stacking equivalently hard new vocabulary in a single paragraph. This list is context for YOUR reuse decisions; do NOT echo "tomo NN" markers or "word seen before" annotations into the body, and do NOT gloss vocabulary inline (glosses are reserved for OPEN SPANISH QUESTIONS grammar only — see system prompt).',
     "",
     bullets,
   ].join("\n");
