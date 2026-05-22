@@ -388,6 +388,36 @@ describe("processUpdate", () => {
     );
   });
 
+  it("routes audio messages through the voice transcription path", async () => {
+    const update = makeUpdate({
+      message: {
+        message_id: 9,
+        chat: { id: 100 },
+        from: { id: 42 },
+        audio: {
+          file_id: "audio-789",
+          duration: 34,
+          mime_type: "audio/mp4",
+          file_name: "AUDIO-2026-05-19-13-20-40.m4a",
+        },
+        caption: "Please transcribe",
+        date: 1000,
+      },
+    });
+
+    processUpdate(update);
+    await getQueuePromise("100");
+
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: 100,
+        text: "Please transcribe",
+        messageId: 9,
+        voice: { fileId: "audio-789", durationSeconds: 34 },
+      })
+    );
+  });
+
   it("handles voice message without caption", async () => {
     const update = makeUpdate({
       message: {

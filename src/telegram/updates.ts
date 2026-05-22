@@ -23,6 +23,12 @@ export interface TelegramMessage {
     file_size?: number;
   };
   voice?: { file_id: string; duration: number };
+  audio?: {
+    file_id: string;
+    duration: number;
+    mime_type?: string;
+    file_name?: string;
+  };
   media_group_id?: string;
   date: number;
 }
@@ -441,6 +447,24 @@ export function processUpdate(update: TelegramUpdate): void {
         voice: {
           fileId: msg.voice!.file_id,
           durationSeconds: msg.voice!.duration,
+        },
+      })
+    );
+    return;
+  }
+
+  // Audio file (e.g. WhatsApp .m4a forwarded to Telegram arrives as `audio`,
+  // not `voice`). Reuse the voice transcription path — Whisper handles .m4a.
+  if (msg.audio) {
+    enqueue(String(msg.chat.id), () =>
+      handler({
+        chatId: msg.chat.id,
+        text: msg.caption ?? "",
+        messageId: msg.message_id,
+        date: msg.date,
+        voice: {
+          fileId: msg.audio!.file_id,
+          durationSeconds: msg.audio!.duration,
         },
       })
     );

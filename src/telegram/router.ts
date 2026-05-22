@@ -189,10 +189,21 @@ export async function routeMessage(
         return;
       }
     } else if (msg.voice) {
-      text = await transcribeVoiceMessage(
-        msg.voice.fileId,
-        msg.voice.durationSeconds
-      );
+      const caption = (msg.text ?? "").trim();
+      const transcription = (
+        await transcribeVoiceMessage(
+          msg.voice.fileId,
+          msg.voice.durationSeconds
+        )
+      ).trim();
+      if (!transcription && !caption) {
+        await sendTelegramMessage(
+          chatId,
+          "I couldn't transcribe that audio — try again or type it."
+        );
+        return;
+      }
+      text = [caption, transcription].filter(Boolean).join("\n\n");
     }
   } catch (err) {
     await handleRouterError(ctx, chatId, err);
