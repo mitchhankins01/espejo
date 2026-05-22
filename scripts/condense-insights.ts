@@ -38,7 +38,12 @@ const SYSTEM_PROMPT = `You are condensing personal journal "insight" notes to ti
 
 The downstream goal is high signal-per-token: another LLM pipeline (dedup council) reads these condensed insights and decides whether near-duplicates should be merged or kept separate. Less noise → cleaner merge decisions. Your job is to remove framing/restatement/meta while preserving every specific the dedup pipeline might key on.
 
-Preserve the author's voice, exact phrasings, and specific evidence. Do not moralize, hedge, soften, or paraphrase when the original wording is fine.
+VOICE PROVENANCE
+These insights are extracted by an LLM from reviews that are themselves LLM-conducted interviews with Mitch. Treat the body as a mix of two voices:
+- MITCH'S LITERAL VOICE (preserve verbatim): quoted dialogue, Spanish phrases, named concepts from his vocabulary (the Puppy, escalera, Estoy subiendo, frazzled, fawn cascade, Car Theory, etc.), concrete somatic descriptions, metrics, dates, proper nouns.
+- LLM EXTRACTOR FRAMING (editable when it matches a STRIP rule): the connective prose, paragraph openers/closers, metaphor extensions, cadence. Most "literary" phrasing falls here, not in Mitch's voice.
+
+Do not moralize, hedge, soften, or paraphrase Mitch's literal voice. Do strip extractor flourish wherever it appears — opener, middle, or closer — when a STRIP rule applies.
 
 INPUT FORMAT
 Each file has: YAML frontmatter, a body (markdown paragraphs), and optionally a "## Sources" section with wikilinks. There may also be a "## Related" section.
@@ -91,6 +96,25 @@ STRIP — WORD-LEVEL FLAB (surgical drops)
 - Emphasis adverbs at sentence-open (drop the adverb; keep the sentence): "Notably,", "Crucially,", "Importantly,", "Interestingly,".
 - Forward-looking framing that adds no operational detail: "going forward", "moving forward", "the recommendation is to…" when followed by content already implied by the title.
 
+STRIP — POETIC FLOURISH (rhythm, cadence, sermonic register)
+Voice is clinical/observational, not lyrical. These zettels feed a dedup pipeline, not a reader. Strip cadence-for-effect; keep mechanism. Mitch wants a healthy mix of clinical/scientific and psychological/somatic framing — not aphoristic, not poetic, not sermonic.
+- Imperative/negation chains of 3+ short sentences for cadence ("Don't fix. Don't leave. Don't act.", "He sat. He breathed. He stayed.") → collapse to one mechanism sentence or drop. Two parallel clauses fine; three is flourish.
+- Em-dash chains of 3+ in a single paragraph used as beats ("X — Y — Z — W") → rewrite as plain prose, at most one em-dash per sentence. Keep dashes that introduce a named concept or attach a parenthetical metric; drop dashes used as cadence.
+- Chiastic / "is not X — it was/is Y" closers that restate the title ("The collapse was not the damage — it was the first honest response to the damage.") → drop entirely. Title-restate dressed as wisdom is still title-restate.
+- Mirror-parallel sentence pairs for rhythm ("Love maps to being, peace, acceptance. Live maps to doing, movement, creating.") → keep the distinction once; drop the mirrored framing.
+- Sentence-fragment closers ("Same recognition move, three domains.", "Same brace, muted register, accumulating tab.") → drop unless the fragment carries a metric or named concept the dedup pipeline keys on.
+- Italicized aphorisms at sentence end (*the inside got noticed and the room didn't punish it.*) → drop unless propositionally new (italicized Spanish phrases and quoted dialogue are NOT this — preserve those).
+- Adjective/gerund triplets for cadence ("being, peace, acceptance, stillness", "approaching, pulling back, exiting") → reduce to 1–2 most specific terms.
+- Standalone-paragraph aphorisms (a single short sentence isolated as its own paragraph for weight, e.g. "The morning story didn't survive the day.") → drop unless it states a mechanism or specific not present elsewhere.
+
+STRIP — METAPHOR INFLATION (preserve named concepts; cut decorative extensions)
+Mitch's own labeled metaphors are PRESERVE VERBATIM (escalera, brace, Puppy, Watchtower, Blocker, Judge, Fawn, tab, Car Theory, Ocean Floor, fawn cascade, frazzled, amarillo/verde, Dark Cloud). What gets stripped is decorative extension past the named concept.
+- After a named metaphor is introduced (e.g. "running a physiological tab"), do NOT keep cascading synonyms in the same paragraph ("the body keeps the receipt", "a real ledger and the kinetic child a real bill", "paid for in carbon, not just hours") → keep ONE metaphor; replace the others with the literal mechanism ("HRV reads zero", "stress hours accumulate", "subjective calm ≠ autonomic state").
+- Personification cascades on abstractions ("the doubt travels and the bar moves, the exit door opens, the question reasserts") → reduce to one personified verb; rewrite the rest as plain claim.
+- Invented poetic metaphors with no prior labeling in Mitch's vocabulary ("ground beneath the storm", "quiet harbor", "where the river meets the sea", "the channel where words come through") → drop the metaphor and state the mechanism literally.
+- Capitalized abstractions that are NOT Mitch-coined named concepts ("the Quiet", "the Unknown", "the Threshold", "the Pull" when not a documented part) → lowercase or rewrite literally. PRESERVE actual coinages: Puppy, Blocker, Judge, Watchtower, Escalera, Fawn, Dark Cloud, Car Theory, Ocean Floor.
+- Lyrical noun choices when a clinical/somatic word exists: "threshold" → "point/edge", "harness/compass/architecture" → keep only if Mitch coined it for that mechanism; otherwise plain noun.
+
 PRESERVE VERBATIM (do NOT paraphrase or drop)
 - Concrete sequences and stacks: "builder's high → vape → late food → 6am bedtime", "fawn → pressure → dopamine-seeking → explosion → judgment"
 - Parenthetical evidence: "(sleep 52, HRV 45)", "(ketamine, weed, nicotine, two hookups)", "(gym validation, sauna cruising, vape)"
@@ -111,7 +135,7 @@ DO NOT ADD / FABRICATE
 - Do NOT rewrite opening sentences "for clarity" — keep the author's phrasing.
 
 LEAVE ALONE
-If a file has no "## Related", no duplicate "# h1", no "status: approved", no more than 5 tags, no textbook meta-commentary phrases, and no title-restate opening — return it BYTE-FOR-BYTE unchanged.
+If a file has no "## Related", no duplicate "# h1", no "status: approved", no more than 5 tags, no textbook meta-commentary phrases, no title-restate opening, no poetic-flourish patterns (imperative chains, em-dash beats, chiastic closers, mirror-parallel pairs, italicized aphorism closers, standalone-paragraph aphorisms), and no metaphor inflation (cascading synonyms past a named concept, personification cascades, invented poetic metaphors) — return it BYTE-FOR-BYTE unchanged.
 
 FRONTMATTER
 Keep: kind, created_at, updated_at, tags (if present, pruned to 3-5)
