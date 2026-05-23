@@ -32,6 +32,8 @@ const OPEN_QUESTIONS_RULE = `Open Spanish questions — if the user message incl
    - \`(*"máscara" — mask*)\`                     ← vocab translation
    - \`(*"hervir" — to boil*)\`                   ← vocab translation
 
+3. **Grammaticality wins over coverage.** If a listed structure can't be woven into a sentence without breaking Spanish — mixing incompatible constructions (e.g. \`llevaba semanas iba siendo\`), mangling word order to force an "iba" in, inventing a subjuntivo trigger to slot in subjunctive, jamming a contrast gloss onto a sentence that doesn't actually use the structure — DROP IT for this tomo. The coverage check warns; it does not block. A warning is softer than a sentence a native speaker would reject. The structure must fit naturally or not appear.
+
 If no Open Spanish questions block is present, ignore this rule — and emit no inline parenthetical glosses at all.`;
 
 const GRAMMAR_GUARDRAILS = `Spanish grammar guardrails — recurring writer-model errors to avoid:
@@ -64,6 +66,7 @@ Depth, naming, anti-repetition — this is where prior tomos have failed:
 - Don't restate the same insight three times in different metaphors. If you've made the point with one image, MOVE FORWARD to the next mechanism, the next consequence, the next refinement — not the next paraphrase. Metaphor stacking is avoidance dressed as style.
 - Develop one frame linearly and DEEPLY. A tomo that explores one concept with three mechanisms in detail beats a tomo that gestures at five concepts.
 - If a real piece of research, named figure, or specific framework is relevant — cite it. ("Stephen Porges...", "el trabajo de Lisa Feldman Barrett sobre construcción afectiva...", "lo que en IFS se llama un protector preventivo..."). The reader can verify; vagueness is a tell.
+- Confidence threshold for named citations. Cite a named researcher, study, year, anatomical region, or invented technical term ONLY when you are confident of the exact spelling AND the attribution. If you'd hesitate to bet $20 on it — wrong first name (Alan vs Uta Frith), wrong brain region (subgenual cingulate vs insula for interoception), wrong author for a coined term (Jourard didn't write "transparencia unilateral") — attribute generically instead: "la investigación sobre interocepción sugiere", "el trabajo sobre apego adulto distingue", "estudios sobre la brecha caliente-fría muestran". A wrong proper name printed survives the reader's verification step and contaminates the tomo's authority. When in doubt, go generic — vagueness about WHO is cheaper than confident error.
 - The "Planner take" block in the user message contains the editor's deeper reasoning for this angle. USE IT as the spine of the tomo — its specificity is what you should match in the body, not dilute.
 
 Length: 1800 Spanish body words is a HARD floor — not a suggestion. Target ~2000, 2400 ceiling. Before writing "## Para llevarte", check whether the body has cleared 1800. If it has not, you MUST extend with one more beat — a remembered scene, an aftermath, a sensory dwell on a detail already introduced — and only then append the takeaways. Do not stop the body under 1800 because "the ending feels natural"; the natural ending arrives after 1800, not before. Don't pad with summary.
