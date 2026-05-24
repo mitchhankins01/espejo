@@ -193,7 +193,8 @@ export async function routeMessage(
       const transcription = (
         await transcribeVoiceMessage(
           msg.voice.fileId,
-          msg.voice.durationSeconds
+          msg.voice.durationSeconds,
+          msg.voice.fileName
         )
       ).trim();
       if (!transcription && !caption) {

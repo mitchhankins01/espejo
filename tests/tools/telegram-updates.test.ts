@@ -413,7 +413,11 @@ describe("processUpdate", () => {
         chatId: 100,
         text: "Please transcribe",
         messageId: 9,
-        voice: { fileId: "audio-789", durationSeconds: 34 },
+        voice: {
+          fileId: "audio-789",
+          durationSeconds: 34,
+          fileName: "AUDIO-2026-05-19-13-20-40.m4a",
+        },
       })
     );
   });

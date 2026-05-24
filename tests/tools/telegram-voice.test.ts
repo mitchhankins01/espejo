@@ -89,10 +89,11 @@ describe("transcribeVoiceMessage", () => {
     // Verify file download
     expect(fetchSpy.mock.calls[1][0]).toContain("/file/bot123:ABC/voice/file_123.ogg");
 
-    // Verify toFile was called with the buffer
+    // Verify toFile was called with the buffer + the real filename derived
+    // from the Telegram file_path.
     expect(mockToFile).toHaveBeenCalledWith(
       expect.any(Buffer),
-      "voice.ogg",
+      "file_123.ogg",
       { type: "audio/ogg" }
     );
 
@@ -103,6 +104,33 @@ describe("transcribeVoiceMessage", () => {
       response_format: "text",
     });
 
+  });
+
+  it("labels a forwarded .m4a audio file with its real extension", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ result: { file_path: "music/file_99.m4a" } }),
+        { status: 200 }
+      )
+    );
+    fetchSpy.mockResolvedValueOnce(
+      new Response(Buffer.from("fake-m4a-data"), { status: 200 })
+    );
+    mockTranscriptionCreate.mockResolvedValueOnce("transcribed audio");
+
+    const text = await transcribeVoiceMessage(
+      "file_99",
+      39,
+      "AUDIO-2026-05-23-16-04-48.m4a"
+    );
+
+    expect(text).toBe("transcribed audio");
+    // Hint name wins over file_path, and the m4a extension drives the type.
+    expect(mockToFile).toHaveBeenCalledWith(
+      expect.any(Buffer),
+      "AUDIO-2026-05-23-16-04-48.m4a",
+      { type: "audio/m4a" }
+    );
   });
 
   it("throws when file path is not returned", async () => {

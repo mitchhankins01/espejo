@@ -71,7 +71,7 @@ export interface AssembledMessage {
     mimeType?: string;
     caption: string;
   };
-  voice?: { fileId: string; durationSeconds: number };
+  voice?: { fileId: string; durationSeconds: number; fileName?: string };
   callbackData?: string;
   reactionEmoji?: string;
 }
@@ -454,7 +454,9 @@ export function processUpdate(update: TelegramUpdate): void {
   }
 
   // Audio file (e.g. WhatsApp .m4a forwarded to Telegram arrives as `audio`,
-  // not `voice`). Reuse the voice transcription path — Whisper handles .m4a.
+  // not `voice`). Reuse the voice transcription path, but carry the real file
+  // name so Whisper sees the true extension (.m4a, .mp3, …) — labeling it
+  // voice.ogg makes Whisper reject the non-ogg payload as "Invalid file format".
   if (msg.audio) {
     enqueue(String(msg.chat.id), () =>
       handler({
@@ -465,6 +467,7 @@ export function processUpdate(update: TelegramUpdate): void {
         voice: {
           fileId: msg.audio!.file_id,
           durationSeconds: msg.audio!.duration,
+          fileName: msg.audio!.file_name,
         },
       })
     );
