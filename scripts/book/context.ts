@@ -8,11 +8,8 @@ export interface ContextItem {
   text: string;
 }
 
-const ENTRY_LIMIT = 50;
-const INSIGHT_LIMIT = 40;
 const MIN_ENTRY_CHARS = 120;
 
-const LONG_ARC_LIMIT = 25;
 const LONG_ARC_DAYS = 365;
 
 export async function gatherContext(
@@ -29,9 +26,8 @@ export async function gatherContext(
        FROM entries
        WHERE created_at >= $1
          AND char_length(text) >= $2
-       ORDER BY created_at DESC
-       LIMIT $3`,
-      [sinceDate, MIN_ENTRY_CHARS, ENTRY_LIMIT]
+       ORDER BY created_at DESC`,
+      [sinceDate, MIN_ENTRY_CHARS]
     ),
     pool.query(
       `SELECT id, title, body, updated_at
@@ -40,9 +36,8 @@ export async function gatherContext(
          AND deleted_at IS NULL
          AND (source_path IS NULL OR source_path NOT LIKE '%Pending/%')
          AND updated_at >= $1
-       ORDER BY updated_at DESC
-       LIMIT $2`,
-      [sinceDate, INSIGHT_LIMIT]
+       ORDER BY updated_at DESC`,
+      [sinceDate]
     ),
   ]);
 
@@ -132,9 +127,8 @@ export async function gatherLongArcContext(
        AND deleted_at IS NULL
        AND (source_path IS NULL OR source_path NOT LIKE '%Pending/%')
        AND updated_at >= $1
-     ORDER BY updated_at DESC
-     LIMIT $2`,
-    [sinceDate, LONG_ARC_LIMIT * 4]
+     ORDER BY updated_at DESC`,
+    [sinceDate]
   );
 
   const items: ContextItem[] = [];
@@ -149,7 +143,6 @@ export async function gatherLongArcContext(
       title: r.title as string,
       text: r.body as string,
     });
-    if (items.length >= LONG_ARC_LIMIT) break;
   }
   return items;
 }

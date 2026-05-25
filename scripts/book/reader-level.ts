@@ -21,7 +21,6 @@ export async function generateReaderLevelParagraph(
   }
   const client = new Anthropic({ apiKey: config.anthropic.apiKey });
   const corpus = entries
-    .slice(0, 40)
     .map((e) => `[${e.date}]\n${e.text.slice(0, 1500)}`)
     .join("\n\n---\n\n");
 
@@ -55,8 +54,7 @@ export async function fetchRecentSpanishEntries(
        FROM entries
       WHERE created_at >= $1
         AND length(regexp_replace(text, '[^áéíóúñÁÉÍÓÚÑ¿¡]', '', 'g')) >= $2
-      ORDER BY created_at DESC
-      LIMIT 40`,
+      ORDER BY created_at DESC`,
     [sinceDate, minSpanishChars]
   );
   return res.rows.map((r) => ({
