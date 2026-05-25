@@ -324,7 +324,7 @@ describe("getOuraTrendMetric", () => {
     expect(result).toHaveLength(1);
     expect(pool.query).toHaveBeenCalledWith(
       expect.stringContaining("d.score"),
-      [30]
+      [30, expect.any(String)]
     );
   });
 
@@ -342,7 +342,7 @@ describe("getOuraTrendMetric", () => {
     await getOuraTrendMetric(pool, "stress", 30);
     expect(pool.query).toHaveBeenCalledWith(
       expect.stringContaining("oura_daily_stress"),
-      [30]
+      [30, expect.any(String)]
     );
   });
 });
@@ -373,7 +373,7 @@ describe("getOuraSleepDetailForRange", () => {
     await getOuraSleepDetailForRange(pool, 30);
     expect(pool.query).toHaveBeenCalledWith(
       expect.stringContaining("oura_daily_sleep"),
-      [30]
+      [30, expect.any(String)]
     );
   });
 });
@@ -384,7 +384,7 @@ describe("getOuraTemperatureData", () => {
     await getOuraTemperatureData(pool, 30);
     expect(pool.query).toHaveBeenCalledWith(
       expect.stringContaining("temperature_deviation"),
-      [30]
+      [30, expect.any(String)]
     );
   });
 });

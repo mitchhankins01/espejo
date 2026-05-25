@@ -1,4 +1,5 @@
 import type pg from "pg";
+import { todayInTimezone } from "../../utils/dates.js";
 
 export interface OuraSummaryRow {
   day: Date;
@@ -396,7 +397,8 @@ function joinClausesFor(metric: OuraTrendMetric): string {
 export async function getOuraTrendMetric(
   pool: pg.Pool,
   metric: OuraTrendMetric,
-  days: number
+  days: number,
+  today: string = todayInTimezone()
 ): Promise<Array<{ day: Date; value: number }>> {
   const result = await pool.query<{ day: Date; value: number }>(
     `SELECT d.day, ${ouraTrendColumnSql[metric]}::double precision AS value
@@ -405,10 +407,10 @@ export async function getOuraTrendMetric(
      LEFT JOIN oura_daily_activity a ON a.day = d.day
      ${longSleepLateral}
      ${joinClausesFor(metric)}
-     WHERE d.day >= (CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day')
+     WHERE d.day >= ($2::date - ($1::int - 1) * INTERVAL '1 day')
        AND ${ouraTrendColumnSql[metric]} IS NOT NULL
      ORDER BY d.day ASC`,
-    [days]
+    [days, today]
   );
   return result.rows;
 }
@@ -453,7 +455,8 @@ export interface OuraSleepDetailRow {
 
 export async function getOuraSleepDetailForRange(
   pool: pg.Pool,
-  days: number
+  days: number,
+  today: string = todayInTimezone()
 ): Promise<OuraSleepDetailRow[]> {
   const result = await pool.query<OuraSleepDetailRow>(
     `SELECT d.day, d.score,
@@ -469,24 +472,25 @@ export async function getOuraSleepDetailForRange(
      ${longSleepLateral}
      LEFT JOIN oura_daily_activity a ON a.day = d.day
      LEFT JOIN (SELECT day, COUNT(*) AS workout_count FROM oura_workouts GROUP BY day) w ON w.day = d.day
-     WHERE d.day >= (CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day')
+     WHERE d.day >= ($2::date - ($1::int - 1) * INTERVAL '1 day')
      ORDER BY d.day ASC`,
-    [days]
+    [days, today]
   );
   return result.rows;
 }
 
 export async function getOuraTemperatureData(
   pool: pg.Pool,
-  days: number
+  days: number,
+  today: string = todayInTimezone()
 ): Promise<Array<{ day: Date; temperature_deviation: number }>> {
   const result = await pool.query<{ day: Date; temperature_deviation: number }>(
     `SELECT day, temperature_deviation
      FROM oura_daily_readiness
-     WHERE day >= (CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day')
+     WHERE day >= ($2::date - ($1::int - 1) * INTERVAL '1 day')
        AND temperature_deviation IS NOT NULL
      ORDER BY day ASC`,
-    [days]
+    [days, today]
   );
   return result.rows;
 }
