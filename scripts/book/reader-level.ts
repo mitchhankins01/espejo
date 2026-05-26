@@ -1,6 +1,6 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../../src/config.js";
 import { pool } from "../../src/db/client.js";
+import { bookChat } from "./llm.js";
 
 const READER_LEVEL_SYSTEM = `You read a stack of Spanish-language journal entries and produce ONE short English paragraph (4-7 sentences) describing the writer's current Spanish level: confident structures, structures dodged, sentence-length growth, recurring errors, code-switch tells, and improvement deltas over the period. This paragraph is a time-capsule snapshot — concrete and specific, not generic. It is consumed by the Phase 1 menu surface read.
 
@@ -19,14 +19,12 @@ export async function generateReaderLevelParagraph(
   if (entries.length === 0) {
     return "Not enough recent Spanish-language journaling to produce a reliable level snapshot.";
   }
-  const client = new Anthropic({ apiKey: config.anthropic.apiKey });
   const corpus = entries
     .map((e) => `[${e.date}]\n${e.text.slice(0, 1500)}`)
     .join("\n\n---\n\n");
 
-  const response = await client.messages.create({
-    model: config.anthropic.model,
-    max_tokens: 600,
+  const text = await bookChat({
+    model: config.models.anthropicFast,
     system: READER_LEVEL_SYSTEM,
     messages: [
       {
@@ -34,12 +32,10 @@ export async function generateReaderLevelParagraph(
         content: `Here are recent Spanish-language journal entries from the writer. Produce the one-paragraph level snapshot.\n\n${corpus}`,
       },
     ],
+    maxTokens: 600,
+    label: "reader-level",
   });
-  const block = response.content.find((b) => b.type === "text");
-  if (!block || block.type !== "text") {
-    throw new Error("Reader-level call returned no text block");
-  }
-  return block.text.trim();
+  return text.trim();
 }
 
 export async function fetchRecentSpanishEntries(

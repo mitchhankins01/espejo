@@ -46,6 +46,8 @@ import { write, countWords, splitTomo } from "./book/writer.js";
 import {
   checkOpenQuestionsCoverage,
   checkTildes,
+  findUnmappedQuestions,
+  findLongGlosses,
 } from "./book/coverage-checks.js";
 import { interleave } from "./book/bilingual.js";
 import {
@@ -386,6 +388,12 @@ async function main(): Promise<void> {
     console.log(
       `      injecting ${openQuestions.length} open Spanish question(s) — gloss every occurrence`
     );
+    const unmapped = findUnmappedQuestions(openQuestions);
+    if (unmapped.length > 0) {
+      console.warn(
+        `      WARN: ${unmapped.length} open question(s) have no coverage-check category — gloss coverage is unverified for: ${unmapped.join("; ")}. Add a category to QUESTION_KEYWORDS in scripts/book/coverage-checks.ts.`
+      );
+    }
   }
   const writtenMarkdown = await write(
     picked,
@@ -416,6 +424,15 @@ async function main(): Promise<void> {
         `      WARN: no inline gloss detected for: ${coverage.missingQuestions.join(", ")}`
       );
     }
+    const longGlosses = findLongGlosses(tomoParts.body);
+    if (longGlosses.length > 0) {
+      console.warn(
+        `      WARN: ${longGlosses.length} gloss(es) over 12 words — tighten in review:`
+      );
+      for (const g of longGlosses) {
+        console.warn(`        (${g.words}w) ${g.gloss}`);
+      }
+    }
   }
 
   const tildes = checkTildes(writtenMarkdown);
@@ -438,8 +455,18 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Bilingual interleave is a SEND-TIME artifact. In the documented flow Phase 2
+  // runs with --no-send, Phase 3 edits the ES markdown, and Phase 4
+  // (rebuild-tomo --bilingual) regenerates the interleave from the reviewed ES.
+  // Interleaving here would just be discarded by those edits — so only do it when
+  // we're actually sending in this run. `wantsBilingual` still records intent.
   const wantsBilingual =
-    args.bilingual !== undefined ? args.bilingual : await askBilingual();
+    args.bilingual !== undefined
+      ? args.bilingual
+      : args.send
+        ? await askBilingual()
+        : false;
+  const builtBilingual = wantsBilingual && args.send;
 
   console.log("[5/5] packaging epub + recording history");
   const padded = String(n).padStart(4, "0");
@@ -450,12 +477,16 @@ async function main(): Promise<void> {
 
   let epubMarkdown = markdown;
   let filename = tomoFilename(n, picked.title);
-  if (wantsBilingual) {
+  if (builtBilingual) {
     console.log("[bilingual] interleaving ES + EN");
     epubMarkdown = await interleave(markdown);
     const biPath = join(TOMOS_DIR, `${padded}-bilingual.md`);
     await writeFile(biPath, epubMarkdown, "utf-8");
     filename = filename.replace(/\.epub$/, " (bilingual).epub");
+  } else if (wantsBilingual) {
+    console.log(
+      "[bilingual] deferred to Phase 4 — run `rebuild-tomo NNNN --bilingual` after review (interleaving now would be discarded by Phase-3 edits)"
+    );
   }
   const epubPath = join(BUILD_DIR, filename);
 
@@ -479,7 +510,7 @@ async function main(): Promise<void> {
   });
   await dropPickedFromPlan(picked.id, n + 1);
 
-  const subject = `Espejo — Tomo ${padded} — ${picked.title}${wantsBilingual ? " (bilingual)" : ""}`;
+  const subject = `Espejo — Tomo ${padded} — ${picked.title}${builtBilingual ? " (bilingual)" : ""}`;
 
   if (args.send) {
     console.log(`[send] emailing ${filename} to ${config.gmail.kindleEmail}`);

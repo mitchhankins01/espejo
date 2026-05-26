@@ -1,6 +1,5 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../../src/config.js";
-import { streamCreate } from "./stream-progress.js";
+import { bookChat } from "./llm.js";
 
 const SYSTEM = `You are creating a side-by-side bilingual study version of a Spanish essay for an English-speaking learner. The reader wants to scan ES then EN inline to learn translations quickly.
 
@@ -31,20 +30,13 @@ export async function interleave(markdown: string): Promise<string> {
   if (!config.anthropic.apiKey) {
     throw new Error("ANTHROPIC_API_KEY is required for the bilingual pass");
   }
-  const client = new Anthropic({ apiKey: config.anthropic.apiKey });
-  const response = await streamCreate(
-    client,
-    {
-      model: config.anthropic.model,
-      max_tokens: 16000,
-      system: SYSTEM,
-      messages: [{ role: "user", content: markdown }],
-    },
-    "bilingual"
-  );
-  const text = response.content.find((b) => b.type === "text");
-  if (!text || text.type !== "text") {
-    throw new Error("Bilingual pass returned no text block");
-  }
-  return text.text.trim() + "\n";
+  const text = await bookChat({
+    model: config.models.anthropicFast,
+    system: SYSTEM,
+    messages: [{ role: "user", content: markdown }],
+    maxTokens: 16000,
+    label: "bilingual",
+    progress: true,
+  });
+  return text.trim() + "\n";
 }

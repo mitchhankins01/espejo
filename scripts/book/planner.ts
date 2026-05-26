@@ -1,5 +1,5 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../../src/config.js";
+import { bookChat } from "./llm.js";
 import type { ContextItem } from "./context.js";
 import type { TomoSummary } from "./state.js";
 
@@ -92,7 +92,6 @@ export async function plan(
   if (!config.anthropic.apiKey) {
     throw new Error("ANTHROPIC_API_KEY is required for the planner");
   }
-  const client = new Anthropic({ apiKey: config.anthropic.apiKey });
 
   const formatItem = (c: ContextItem): string => {
     const head = `[${c.kind}:${c.uuid}] ${c.date}${c.title ? " — " + c.title : ""}`;
@@ -153,23 +152,18 @@ export async function plan(
     "Produce 6 candidates (3 essay, 3 flow). Output JSON only.",
   ].join("\n");
 
-  const response = await client.messages.create({
-    model: config.anthropic.model,
-    max_tokens: 4096,
+  const text = await bookChat({
+    model: config.models.anthropicChat,
     system: SYSTEM,
     messages: [{ role: "user", content: user }],
+    maxTokens: 4096,
+    label: "planner",
+    progress: true,
   });
 
-  const textBlock = response.content.find((b) => b.type === "text");
-  if (!textBlock || textBlock.type !== "text") {
-    throw new Error("Planner returned no text block");
-  }
-
-  const match = textBlock.text.match(/\{[\s\S]*\}/);
+  const match = text.match(/\{[\s\S]*\}/);
   if (!match) {
-    throw new Error(
-      "Planner returned no JSON object. Raw output:\n" + textBlock.text
-    );
+    throw new Error("Planner returned no JSON object. Raw output:\n" + text);
   }
 
   const parsed = JSON.parse(match[0]) as PlannerOutput;

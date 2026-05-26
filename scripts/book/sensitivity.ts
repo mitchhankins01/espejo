@@ -1,5 +1,5 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../../src/config.js";
+import { bookChat } from "./llm.js";
 
 export interface JuliaSensitivityResult {
   flagged: boolean;
@@ -30,19 +30,25 @@ export async function checkJuliaSensitivity(
       snippet: "",
     };
   }
-  const client = new Anthropic({ apiKey: config.anthropic.apiKey });
-  const response = await client.messages.create({
-    model: config.anthropic.model,
-    max_tokens: 400,
-    temperature: 0,
-    system: SYSTEM,
-    messages: [{ role: "user", content: markdown }],
-  });
-  const textBlock = response.content.find((b) => b.type === "text");
-  if (!textBlock || textBlock.type !== "text") {
-    return { flagged: true, reason: "classifier returned no text", snippet: "" };
+  let raw: string;
+  try {
+    raw = (
+      await bookChat({
+        model: config.models.anthropicFast,
+        system: SYSTEM,
+        messages: [{ role: "user", content: markdown }],
+        maxTokens: 400,
+        temperature: 0,
+        label: "julia-check",
+      })
+    ).trim();
+  } catch (err) {
+    return {
+      flagged: true,
+      reason: `classifier call failed: ${err instanceof Error ? err.message : String(err)}`,
+      snippet: "",
+    };
   }
-  const raw = textBlock.text.trim();
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
     return {

@@ -1,8 +1,8 @@
-import { buildEpub, tomoFilename } from "./epub.ts";
-import { sendToKindle } from "./send.ts";
-import { interleave } from "./bilingual.ts";
-import { offerJuliaShare, type ShareJuliaMode } from "./share.ts";
-import { splitTomo } from "./writer.ts";
+import { buildEpub, tomoFilename } from "./epub.js";
+import { sendToKindle } from "./send.js";
+import { interleave } from "./bilingual.js";
+import { offerJuliaShare, type ShareJuliaMode } from "./share.js";
+import { splitTomo } from "./writer.js";
 import { readFile, writeFile } from "fs/promises";
 
 async function main() {

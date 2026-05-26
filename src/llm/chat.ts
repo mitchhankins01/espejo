@@ -27,6 +27,8 @@ export interface ChatRequest {
   /** Anthropic ephemeral cache marker on the system message. */
   cacheSystem?: boolean;
   maxTokens?: number;
+  /** Sampling temperature. Omitted → provider default. Set 0 for deterministic classifiers. */
+  temperature?: number;
   /** Tool-loop step cap. Default 15. */
   maxSteps?: number;
   onTextDelta?: (snapshot: string) => void;
@@ -70,8 +72,14 @@ export async function chat(req: ChatRequest): Promise<ChatResponse> {
   const result = streamText({
     model: selectModel(req.provider, req.model),
     ...(useTopLevelSystem ? { system: req.system } : {}),
+    // The cacheSystem path deliberately carries the system prompt as a
+    // role:"system" message (so it can take an ephemeral cache marker); opt out
+    // of the AI SDK's prompt-injection warning for that intentional case.
+    ...(!useTopLevelSystem && req.system ? { allowSystemInMessages: true } : {}),
     messages,
     ...(req.tools ? { tools: req.tools } : {}),
+    ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
+    ...(req.maxTokens !== undefined ? { maxOutputTokens: req.maxTokens } : {}),
     stopWhen: stepCountIs(req.maxSteps ?? 15),
     onStepFinish: async ({ toolCalls, toolResults }) => {
       for (const c of toolCalls) {

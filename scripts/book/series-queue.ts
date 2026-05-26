@@ -1,23 +1,9 @@
-import { readFile } from "fs/promises";
-
-const TOMO_PROMPT_PATH = "Artifacts/Prompt/Spanish/Tomo.md";
-const BEGIN = "<!-- BEGIN SERIES QUEUE";
-const END = "<!-- END SERIES QUEUE";
+import { readMarkedBlock, TOMO_PROMPT_PATH } from "./prompt-doc.js";
 
 export async function readSeriesQueue(
   path: string = TOMO_PROMPT_PATH
 ): Promise<string> {
-  let text: string;
-  try {
-    text = await readFile(path, "utf-8");
-  } catch {
-    return "";
-  }
-  const start = text.indexOf(BEGIN);
-  const end = text.indexOf(END);
-  if (start === -1 || end === -1 || end < start) return "";
-  const blockStart = text.indexOf("\n", start) + 1;
-  return text.slice(blockStart, end).trim();
+  return (await readMarkedBlock("SERIES QUEUE", path)).trim();
 }
 
 export function formatSeriesQueueForPlanner(queue: string): string {

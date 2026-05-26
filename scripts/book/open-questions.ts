@@ -1,23 +1,9 @@
-import { readFile } from "fs/promises";
-
-const TOMO_PROMPT_PATH = "Artifacts/Prompt/Spanish/Tomo.md";
-const BEGIN = "<!-- BEGIN OPEN QUESTIONS";
-const END = "<!-- END OPEN QUESTIONS";
+import { readMarkedBlock, TOMO_PROMPT_PATH } from "./prompt-doc.js";
 
 export async function readOpenQuestions(
   path: string = TOMO_PROMPT_PATH
 ): Promise<string[]> {
-  let text: string;
-  try {
-    text = await readFile(path, "utf-8");
-  } catch {
-    return [];
-  }
-  const start = text.indexOf(BEGIN);
-  const end = text.indexOf(END);
-  if (start === -1 || end === -1 || end < start) return [];
-  const blockStart = text.indexOf("\n", start) + 1;
-  const block = text.slice(blockStart, end);
+  const block = await readMarkedBlock("OPEN QUESTIONS", path);
   return block
     .split("\n")
     .map((line) => line.replace(/^\s*-\s+/, "").trim())
