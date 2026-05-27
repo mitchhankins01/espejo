@@ -398,7 +398,10 @@ Artifacts/
   Review/      — structured reflections (evening/weekly/monthly)
   Note/        — general knowledge notes
   Project/     — maps-of-content linking related notes
-  Reference/   — external references
+  Reference/   — external references (Academic/ subfolder = fetched
+                 research papers from Madriguera, one file per paper,
+                 deduped by DOI; interim store for a future
+                 research_papers embedding table)
   Prompt/      — reusable prompts + user-defined slash commands
   Parts/       — IFS parts work (parts.md is a CONCISE OVERVIEW — preserve hierarchy)
   Attachment/  — media
@@ -447,6 +450,7 @@ Current inventory:
 | `Spanish/Tomo.md` | Generate the next Tomo (Phase 0 imports Kindle lookups). |
 | `Spanish/Vivo.md` | Update `Artifacts/Project/Español Vivo.md` from recent ingestion. |
 | `Spanish/Hilo.md` | Spanish thread / tutor prompt. |
+| `Madriguera.md` | Research rabbit-hole: AI interviews Mitch on a curiosity while pulling live papers from OpenAlex + Europe PMC. CLI-only. Every fetched paper is persisted to `Reference/Academic/` (one file per paper, deduped by DOI) as the interim store for a future `research_papers` embedding table. |
 | `Council Review.md` | Multi-model deliberation wrapper used by `Insights/Dedup.md` and other workflows. |
 
 ### SOP: Pending → Insight dedup
