@@ -132,7 +132,7 @@ export const config = {
     dedupCouncilClaude:
       process.env.DEDUP_COUNCIL_CLAUDE_MODEL || "claude-opus-4-7",
     dedupCouncilGemini:
-      process.env.DEDUP_COUNCIL_GEMINI_MODEL || "gemini-2.5-pro",
+      process.env.DEDUP_COUNCIL_GEMINI_MODEL || "gemini-3.1-pro-preview",
     dedupCouncilGpt: process.env.DEDUP_COUNCIL_GPT_MODEL || "gpt-5.5",
   },
   oura: {

@@ -62,7 +62,7 @@ const env = { ...readEnvFile(".env"), ...readEnvFile(".env.production.local"), .
 
 // Model ids — overridable via env, mirrors defaults in src/config.ts (config.models.dedupCouncil*)
 const CLAUDE_MODEL = env.DEDUP_COUNCIL_CLAUDE_MODEL || "claude-opus-4-7";
-const GEMINI_MODEL = env.DEDUP_COUNCIL_GEMINI_MODEL || "gemini-2.5-pro";
+const GEMINI_MODEL = env.DEDUP_COUNCIL_GEMINI_MODEL || "gemini-3.1-pro-preview";
 const GPT_MODEL = env.DEDUP_COUNCIL_GPT_MODEL || "gpt-5.5";
 
 // ─── wrapper prompt ─────────────────────────────────────────────────────────
@@ -86,13 +86,19 @@ Input: a JSON file embedded below (the "INPUT DATA" section). Each entry under \
 
 For EACH source × top-candidate pair, classify the relationship:
 
-- **Duplicate** — candidate already says exactly what source says, in different words. Action: delete source, keep candidate.
-- **Merge** — candidate covers the same idea but source adds a meaningful detail, evidence, source attribution, or precision the candidate lacks. Action: rewrite the candidate to integrate source's unique content, union the source wikilinks, delete source.
-- **Distinct** — same topic but different points (or fundamentally different ideas). Action: leave both. Promote the source to Insight/ as-is.
+- **Duplicate** — candidate already says what source says (paraphrase or restatement); source adds no meaningful new detail, evidence, attribution, framing, or precision. Action: delete source, keep candidate.
+- **Merge** — candidate covers the same core idea, but source genuinely adds detail, evidence, attribution, fresh angle, or precision the candidate lacks. Action: rewrite the candidate to integrate source's unique content while preserving its atomic shape, union the source wikilinks, delete source. **The vault is years old; insights should accrete, not multiply.**
+- **Distinct** — genuinely orthogonal idea: different core claim, different mechanism, or different domain with no shared anchor. Action: leave both. Promote the source to Insight/ as-is.
 
 Only consider the TOP candidate per source unless multiple candidates have RRF scores within 10% of the top.
 
-Be conservative on Merge — semantic merging atomic insights is destructive when wrong. If a pair is ambiguous, classify as **Distinct** and note uncertainty in your rationale.
+**Two boundaries, two different biases — apply them independently:**
+
+1. **Distinct ↔ Merge** (the consequential one). Prefer **Merge** when the source shares ANY core claim, mechanism, or domain anchor with the candidate — *even if the framing or scope differs* — provided the source contributes something the candidate doesn't already say. Reserve **Distinct** for genuinely orthogonal ideas with no overlap. Mitch wants insights to remain atomic but also to consolidate over time as the corpus grows; Distinct should not be the safe default for near-misses.
+
+2. **Duplicate ↔ Merge**. The test is whether the source contributes *new differentiating content*. If the source is a near-paraphrase that adds nothing — same claim, same scope, same evidence, same examples — classify as **Duplicate** even though the merge bias above might tempt you. The bias only applies at the Distinct↔Merge boundary; it does not push Duplicates into Merges. A Merge that fabricates new content from a true paraphrase is worse than a clean Duplicate.
+
+Think carefully about each pair before classifying — both boundaries are consequential, but they call for opposite default behaviors.
 
 Output ONE JSON array, one object per source. Schema:
 
@@ -187,7 +193,13 @@ async function legGemini(items = plan.plan, rawSuffix = "") {
   console.error(`[council] gemini: launching (${items.length} items${rawSuffix ? ` ${rawSuffix}` : ""})`);
   const body = JSON.stringify({
     contents: [{ parts: [{ text: input }] }],
-    generationConfig: { maxOutputTokens: 65536 },
+    generationConfig: {
+      maxOutputTokens: 65536,
+      // thinkingBudget: -1 = dynamic (model decides). For pair-classification
+      // we want extended reasoning on ambiguous merge-vs-distinct calls.
+      // Set to a positive integer (e.g. 16384) to cap explicit budget.
+      thinkingConfig: { thinkingBudget: -1 },
+    },
   });
   const r = await runProc("curl", [
     "-sS",
@@ -217,12 +229,19 @@ async function legGpt(items = plan.plan, rawSuffix = "") {
   const all = [];
   for (let i = 0; i < chunks.length; i++) {
     const input = buildInput(chunks[i]);
-    // Override user's xhigh reasoning effort — pair classification is a simple
-    // JSON-out task and xhigh stalls past 15min on ~12-item chunks.
+    // Reasoning effort: `high` is the upper bound that reliably completes
+    // within budget — xhigh stalls past 15min on ~12-item chunks (do not bump).
+    // The merge-vs-distinct call is the consequential one in this pipeline, so
+    // we accept higher per-run cost for sharper boundary judgments.
+    // Sandbox: `read-only` prevents Codex from acting on AGENTS.md session-init
+    // ("run pnpm ingest:sessions on session open"). Without this, Codex burns
+    // its budget executing those commands and times out before classifying.
+    // Observed 2026-05-28 on a 10-source neuro chunk at `high` effort.
     const r = await runProc("codex", [
       "exec", "--skip-git-repo-check",
+      "-s", "read-only",
       "-m", GPT_MODEL,
-      "-c", "model_reasoning_effort=\"medium\"",
+      "-c", "model_reasoning_effort=\"high\"",
       input,
     ], null);
     writeFileSync(`${outDir}/gpt${rawSuffix}-chunk-${i}.raw.txt`, r.stdout);
@@ -319,6 +338,20 @@ console.error();
 console.error("[council] Summary:");
 for (const [name, r] of results) {
   console.error(`  ${name}: ${r.ok ? `${r.count}/${itemCount} items` : `FAIL — ${r.error}`}`);
+}
+
+// Fail loud: a dead required leg means synth silently runs on a partial panel,
+// which collapses every row to likely_safe (auto_safe needs a full unanimous panel).
+// Abort unless --allow-degraded so the operator consciously accepts the degraded run.
+const REQUIRED_LEGS = ["claude", "gemini", "gpt"];
+const deadLegs = results
+  .filter(([name, r]) => REQUIRED_LEGS.includes(name) && !r.ok)
+  .map(([name]) => name);
+if (deadLegs.length && !has("--allow-degraded")) {
+  console.error(`\n[council] ABORT: required leg(s) failed: ${deadLegs.join(", ")}.`);
+  console.error(`[council] Synthesizing on a partial panel caps every row at likely_safe. The Gemini default rots — check model ids in Artifacts/Prompt/Council Review.md.`);
+  console.error(`[council] Re-run after fixing, or pass --allow-degraded to proceed anyway. Outputs: ${outDir}`);
+  process.exit(1);
 }
 
 // stdout = the manifest path (consumed by dedup:synth)
