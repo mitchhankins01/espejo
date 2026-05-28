@@ -4,7 +4,9 @@ MCP server + Telegram chatbot for semantic journal search over Day One exports i
 
 ## Session Init — Run This First
 
-When you (Claude Code, OpenCode, Codex, or any other agent) open or start working in this directory, run:
+**Scope: interactive multi-turn working sessions only.** Skip this block if you're invoked as a one-shot tool (`codex exec`, `claude -p` headless, library/script call, dedup-council leg, etc.) — the host process owns ingestion, not the inner call. Running these from a non-interactive inner invocation burns the model's budget on bootstrap before reaching the actual task (observed 2026-05-28: Codex `exec` in `scripts/dedup/council.mjs` hit a 600s timeout running these).
+
+When you (Claude Code, OpenCode, Codex, or any other agent) start an interactive multi-turn session in this directory, run:
 
 ```bash
 pnpm ingest:sessions --skip-if-fresh 24h
