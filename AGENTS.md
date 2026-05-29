@@ -4,7 +4,7 @@ MCP server + Telegram chatbot for semantic journal search over Day One exports i
 
 ## Session Init — Run This First
 
-**Scope: interactive multi-turn working sessions only.** Skip this block if you're invoked as a one-shot tool (`codex exec`, `claude -p` headless, library/script call, dedup-council leg, etc.) — the host process owns ingestion, not the inner call. Running these from a non-interactive inner invocation burns the model's budget on bootstrap before reaching the actual task (observed 2026-05-28: Codex `exec` in `scripts/dedup/council.mjs` hit a 600s timeout running these).
+**Scope: interactive multi-turn working sessions only.** Skip this block if you're invoked as a one-shot tool (`codex exec`, `claude -p` headless, library/script call, dedup-council leg, etc.) — the host process owns ingestion, not the inner call. Running these from a non-interactive inner invocation burns the model's budget on bootstrap before reaching the actual task (observed 2026-05-28: Codex `exec` in `scripts/dedup/council.mjs` hit a 600s timeout running these; the fix is to invoke the inner Codex with `-s read-only` so it cannot try to bootstrap).
 
 When you (Claude Code, OpenCode, Codex, or any other agent) start an interactive multi-turn session in this directory, run:
 
@@ -17,7 +17,7 @@ Both are no-ops if a successful run completed in the last 24 hours. Otherwise th
 - Claude Code / OpenCode / Codex session logs → `agent_sessions` table (see `specs/agent-sessions-ingestor.md`).
 - ActivityWatch window/web/afk events → `device_events` table (see `specs/2026-05-03-activity-capture-plan.md`, Phase 2). No-ops cleanly when ActivityWatch isn't installed.
 - Atuin shell history → `usage_logs` (`source='shell'`) (see plan, Phase 3). No-ops cleanly when atuin isn't installed.
-- Screenpipe OCR chunks → `screen_captures` (see plan, Phase 4 — **trial through 2026-05-17**; drop the table + uninstall if no SQL hits `screen_captures` by then). Audio capture disabled because macOS Sequoia + launchd can't deliver the runtime Microphone perm prompt the binary needs (Screen Recording allows manual `+`-add; Microphone does not). No-ops cleanly when Screenpipe isn't installed.
+- Screenpipe OCR chunks → `screen_captures` (see plan, Phase 4). Audio capture disabled because macOS Sequoia + launchd can't deliver the runtime Microphone perm prompt the binary needs (Screen Recording allows manual `+`-add; Microphone does not). No-ops cleanly when Screenpipe isn't installed.
 
 ## Development Loop
 
@@ -48,6 +48,126 @@ pnpm embed                              # Generate embeddings via OpenAI
 pnpm dev                                # Start MCP server (stdio)
 ```
 
+## Obsidian Vault Workflows
+
+`Artifacts/` is a symlink to `~/Documents/Artifacts` — Mitch's Obsidian vault (gitignored). Syncs bidirectionally with Postgres via Cloudflare R2 (Remotely Save plugin → R2 → `src/obsidian/sync.ts`).
+
+**Important:** most Claude Code sessions and all OpenCode sessions for espejo operate on the **vault + prod DB**, not on `src/`. Treat these as first-class, not edge cases. Distinguish from the DB-backed `knowledge_artifacts` table in `src/db/queries/artifacts.ts` — the vault is plain markdown on disk; the DB is the synced downstream index.
+
+### Vault folders
+
+```
+Artifacts/
+  Insight/     — atomic realizations (canonical home for approved insights)
+  Journal/     — entries migrated from Day One
+  Review/      — structured reflections (evening/weekly/monthly)
+  Note/        — general knowledge notes. Includes `Parts.md` — the concise IFS
+                 parts roster (preserve hierarchy, don't inline part bodies;
+                 check this before naming a "new" part).
+  Project/     — maps-of-content linking related notes
+  Reference/   — external references (Academic/ subfolder = fetched
+                 research papers from Madriguera, one file per paper,
+                 deduped by DOI; interim store for a future
+                 research_papers embedding table)
+  Prompt/      — reusable prompts + user-defined slash commands
+  Attachment/  — media
+  Template/    — Obsidian templates (NOT synced)
+  Pending/     — extracted insights awaiting dedup approval (written by `Artifacts/Prompt/Insights/Extract.md`)
+  Checkpoint/  — markdown mirrors of `checkpoints` table rows (one file per toll; backfill-only origin)
+```
+
+Any `.md` outside `.obsidian/`, `.trash/`, `Template/` syncs to the DB.
+
+### Frontmatter schema
+
+```yaml
+---
+kind: insight | reference | note | project | review
+status: pending | approved    # default: approved
+tags:
+  - lowercase-hyphenated
+---
+```
+
+- **Filename is the title.** Don't add an `# H1` heading inside the file — Obsidian renders the filename as the title, so an H1 produces a duplicated title in the UI. Sync falls back to the filename when no H1 exists, so dropping it is safe and correct.
+- Title is NEVER in frontmatter either. Just the filename.
+- Body starts immediately on the line after the closing `---`. No blank line.
+- `[[Wiki Links]]` become graph edges in the DB.
+- `status: pending` = excluded from semantic search until approved.
+- Tags are normalized to lowercase on sync.
+
+### Reusable prompts (Artifacts/Prompt/)
+
+`Artifacts/Prompt/` is the canonical home for cross-tool reusable prompts. Mitch invokes them by referring to the file in plain text — *"Run Artifacts/Prompt/Insights/Dedup.md"* — not as slash commands. When you see that pattern, read the matching file and execute it; don't regenerate.
+
+For the live inventory: `find Artifacts/Prompt -name '*.md'`. The major prompts:
+
+| file | purpose |
+|---|---|
+| `Audit.md` | Surface drift between AGENTS.md / code / vault state and propose surgical fixes. |
+| `Review/Evening.md` | End-of-day review prompt — closes the loop on the day's pulls/decisions. |
+| `Review/Weekly.md` | Weekly pattern-interrupt review (writes Review-kind artifacts). |
+| `Review/Monthly.md` | Monthly Proyecto Mitch review (writes Review-kind artifacts). |
+| `Insights/Curate.md` | **Unified Review→Insight pipeline** — extract → bridge → dedup → apply in one prompt. Primary daily flow for familiar themes. |
+| `Insights/Extract.md` | Per-Review atomic insight extraction → `Pending/`. Mitch supplies the Review filename. Use for novel conceptual domains where Curate's batched themes return zero palette hits. |
+| `Insights/Dedup.md` | Stage-1-through-4 dedup pipeline orchestrator. References `scripts/dedup/`. |
+| `Insights/Condense.md` | Periodic condensation of related insights into thematic clusters. |
+| `Sync Conflicts.md` | Cleanup pass over Remotely Save ` 2.md` conflict copies. Snapshots canonicals before bulk-rm and re-verifies after a 60s sleep — Remotely Save can drift the canonical post-cleanup. |
+| `Therapy/Prep.md` | Pre-therapy load + session-prep prompt. |
+| `Therapy/Processing.md` | Distill a therapy session transcript into `Artifacts/Review/YYYY-MM-DD — Therapy.md`. |
+| `Therapy/Parts Check-in.md` | IFS midday parts check-in protocol. |
+| `Therapy/Checkpoint.md` | Body-meeting / Checkpoint Protocol (3-turn). |
+| `Spanish/Tomo.md` | Generate the next Tomo (Phase 0 imports Kindle lookups). |
+| `Spanish/Hilo.md` | Spanish thread / tutor prompt. |
+| `Madriguera.md` | Research rabbit-hole: AI interviews Mitch on a curiosity while pulling live papers from OpenAlex + Europe PMC. CLI-only. Every fetched paper is persisted to `Reference/Academic/` (one file per paper, deduped by DOI) as the interim store for a future `research_papers` embedding table. |
+| `Council Review.md` | Multi-model deliberation wrapper used by `Insights/Dedup.md` and other workflows. |
+
+### SOP: Pending → Insight dedup
+
+1. Glob `Artifacts/Pending/*.md` and `Artifacts/Insight/*.md`.
+2. For each pending, classify vs. existing using **embedding similarity + tsvector** (hybrid RRF, same as `search_entries`). Don't LLM-compare — it gets expensive at scale.
+3. Label each **New / Duplicate / Merge** and show candidates.
+4. **Ask before acting.** Never move/merge/delete without explicit confirmation.
+5. On approval: `status: pending` → `approved`, optionally relocate out of `Pending/`, let Remotely Save → R2 → sync pick it up.
+6. To reject: delete the file.
+
+Scope rules **by `kind`** — `insight`-only logic should not apply to `review`/`note`.
+
+### SOP: Load context on topic/person
+
+"Pull in X" = hybrid RRF over DB (entries + artifacts) **plus** `Glob`/`Grep` under `Artifacts/`, with **max limits + request more if available**. MCP tools have implicit limits and under-retrieve — be explicit.
+
+### SOP: Run a checkin prompt
+
+Evening review, morning prompt, midday parts checkin, tolls: read from `Artifacts/Prompt/`, execute against current DB + vault state. Dates derive from source wikilink filenames — never hardcode.
+
+### Direct DB + filesystem > MCP (for vault-side prompt work)
+
+MCP tools have hardcoded limits and sometimes hardcoded dates. For prompt execution prefer direct access:
+
+```bash
+PGURL=$(grep ^DATABASE_URL .env.production.local | cut -d= -f2-)
+OPENAI_API_KEY=$(grep ^OPENAI_API_KEY .env.production.local | cut -d= -f2-)
+PSQL=/opt/homebrew/opt/libpq/bin/psql   # libpq Homebrew formula, not on PATH
+```
+
+Then `$PSQL "$PGURL"` + OpenAI embeddings API (`text-embedding-3-small` — same model as indexing).
+
+### Vault ↔ DB sync
+
+- Vault → R2: Remotely Save auto-syncs on edit.
+- R2 → DB: `sync_obsidian_vault` MCP tool, the timer in `src/obsidian/sync.ts`, or `pnpm sync:obsidian` (production, on-demand — preferred for LLM sessions that just edited the vault and want to land changes in DB without waiting for the timer).
+- Status: `get_obsidian_sync_status` MCP tool.
+
+### Writing notes — don'ts
+
+- No frontmatter-less files (they sync as `kind: note` with no tags).
+- No `status: active` — only `pending` / `approved`.
+- No content above frontmatter.
+- No duplicate title in both frontmatter and heading.
+- No H1 inside the file. Filename = title. Adding `# Title` after the frontmatter renders twice in Obsidian.
+- `Note/Parts.md` stays a concise OVERVIEW — don't inline part bodies.
+
 ## Architecture Overview
 
 ```
@@ -66,180 +186,46 @@ specs/schema.sql      ← Source of truth for database schema
 
 The web frontend, REST CRUD API, and entry-templates feature were removed in 2026-04 — Mitch edits via Obsidian, reads via MCP, logs via Telegram.
 
-### Directory Map
+### Repo skeleton
+
+The directory map below is intentionally shallow. For exact files use `ls` / `Glob`; for current registered MCP tools read `src/server.ts`; for current package deps read `package.json`; for live vault prompts run `find Artifacts/Prompt -name '*.md'`. Don't trust this map for fine-grained inventory — it's an entry map.
 
 ```
 src/
-  index.ts          — Entry point. Stdio + HTTP transport setup.
-  server.ts         — MCP server. Registers tools from spec.
-  config.ts         — Env-aware config. Fails fast if DATABASE_URL missing in prod.
-  db/
-    client.ts       — PG Pool. Reads DATABASE_URL from config.
-    embeddings.ts   — OpenAI embedding helper. Used by search tool at query time + embed script.
-    queries/        — ALL SQL lives here. Domain-split modules, parameterized queries only.
-      index.ts      — Re-exports all query modules (facade).
-      entries.ts    — Entry search + read queries (Day One imports).
-      artifacts.ts  — Artifact CRUD + search + graph queries.
-      oura.ts       — Oura biometric data queries.
-      chat.ts       — Chat message storage + retrieval.
-      weights.ts    — Weight tracking queries.
-      observability.ts — Activity logs.
-      content-search.ts — Unified cross-type search.
-      obsidian.ts   — Obsidian vault sync queries.
-      usage.ts      — Universal usage_logs writer (logUsage helper).
-      vault-fs.ts   — vault_fs_events writer (FS-event audit log, fed by fswatch).
-      vocab-reviews.ts — Kindle-lookup vocab review FSRS state (queue/serve/rate).
-      conjugations.ts — Read-only access to the vendored `conjugations` table.
-      conjugation-reviews.ts — Lazy-promotion + race-safe rate for `(lemma, tense, person)` cells. Pattern selection (most-due / cold-start bootstrap), queue build, session counts.
-      cloze-source.ts — Corpus lookup for cloze sentences. Curated sources only: vocab_reviews.examples (returns `{sentence, gloss}` so the reveal step can show English) → knowledge_artifacts.body with `kind='reference'` (Tomos, external Spanish references). Excluded by design: Day One `entries.text` (Mitch's Spanish errors); knowledge_artifacts with `kind IN ('insight','review','note','project')` (English-paraphrased about-Mitch text or YAML-structured notes — the insight body "Mitch has gone three days without weed" trivially matched on `has`/`son`/`es`). Post-filters: `looksSpanish` (rejects English-heavy passages via English-token counter), `looksStructured` (rejects YAML/bullets/headings/multi-line blocks); `imperative_negative` anchors on `no <form>`.
-  tools/
-    search.ts       — Hybrid RRF search. The most important tool.
-    get-entry.ts    — Single entry by UUID.
-    get-entries-by-date.ts — Date range query.
-    on-this-day.ts  — MM-DD across all years.
-    find-similar.ts — Cosine similarity from a source entry.
-    entry-stats.ts  — Writing frequency and trends.
-    get-artifact.ts — Single artifact by ID with sources and version.
-    list-artifacts.ts — List/filter artifacts by kind, pagination.
-    search-artifacts.ts — Hybrid RRF search over knowledge artifacts.
-    search-content.ts — Unified cross-type search over entries + artifacts.
-    get-oura-summary.ts — Single-day Oura health snapshot.
-    get-oura-weekly.ts — 7-day Oura overview with averages.
-    get-oura-trends.ts — N-day trend analysis for a metric.
-    get-oura-analysis.ts — Multi-type analysis: sleep quality, anomalies, HRV trend, temperature, best sleep.
-    oura-compare-periods.ts — Side-by-side metrics comparison between two date ranges.
-    oura-correlate.ts — Pearson correlation between two health metrics.
-    sync-obsidian-vault.ts — Trigger Obsidian vault sync from R2.
-    sync-oura.ts    — Trigger an Oura → Postgres sync. Mirrors `pnpm sync:oura`; takes a `lookback_days` parameter.
-    get-obsidian-sync-status.ts — Obsidian vault sync status.
-    write-vault-artifact.ts — Write a markdown file to the vault: R2 putObject + synchronous knowledge_artifacts upsert. Path whitelist (Pending/Insight/Review/Note/Project/Reference), frontmatter required, overwrite default false.
-    log-weights.ts  — Upsert one or more daily body-weight measurements (single or batch).
-    log-checkpoint.ts — Insert a Checkpoint Protocol toll into the `checkpoints` table; 10-min DB tuple dedup, accepts optional `kind`. `choice` defaults to `go` (substance kind: passes are mental, never logged — convention since 2026-05-13).
-    distill-hn-thread.ts — Distill a Hacker News thread (article + full Algolia comment tree) and email + save to Pending/Reference.
-    get-recent-checkpoints.ts — Last N days of checkpoints, oldest-first; used by Section B of the evening review prompt.
-    get-recent-weights.ts — Last N days of weight measurements; thin wrapper over `listWeights`.
-    get-oura-day-context.ts — Tags + meditation sessions + optimal-bedtime recommendation for a given day. Defaults to today.
-    get-recent-agent-chats.ts — User-turn prompts from agent_sessions (Claude Code/Codex) + chat_messages (Telegram conversational flows). Excludes utility flows.
-    get-recent-commits.ts — Public-repo GitHub REST fetch of recent commits to `mitchhankins01/espejo`. No auth. Only pushed commits show up.
-  llm/              — Cross-provider abstraction over Vercel AI SDK + OpenAI SDK.
-    chat.ts         — chat({provider, model, system, messages, tools, onTextDelta, cacheSystem}) wrapper around streamText.
-    embed.ts        — embedText helper (OpenAI text-embedding-3-small).
-    transcribe.ts   — Whisper wrapper.
-    vision.ts       — Image / PDF text extraction.
-    tts.ts          — OpenAI TTS (synthesizeSpeech).
-    cloze-gen.ts    — Haiku one-shot cloze sentence generator. Only fires on corpus-miss for /conj; output is cached on `conjugation_reviews.generated_sentence`.
-    index.ts        — Re-exports.
-  fsrs/
-    scheduler.ts    — Thin ts-fsrs wrapper. CardState ↔ FsrsCard adapters and `nextState(card, grade)`.
-    conj-grading.ts — Pure typed-conjugation grader (case-insensitive, whitespace-normalized, accent-sensitive). `-ra`/`-se` equivalence for imperfecto / pluscuamperfecto subjuntivo.
-    gloss.ts        — Haiku gloss-fill batched for vocab_reviews enrichment.
-  telegram/
-    webhook.ts      — Telegram webhook handler. Validates secret token, hands updates to router.
-    updates.ts      — Update deduplication, per-chat queue, fragment reassembly.
-    router.ts       — Tiered routing: Tier 1 media classifiers (screen-time, weight CSV) → Tier 2 extraction (voice/photo/doc → text) → Tier 3 dispatch (registered slashes, active flow, solo HN URL, default chat).
-    flow-state.ts   — Typed Map<chatId, FlowState> for in-memory per-chat flow state. Lost on restart by design.
-    flows/
-      checkpoint.ts — 2-step Checkpoint Protocol state machine (`/checkpoint` and `/c` aliases) + 1 Haiku mirror call at exit. Inserts into `checkpoints` table; substance resolution defaults to `go` (per 2026-05-13 convention — passes are handled mentally, never logged).
-      distill-hn.ts — Solo HN URL → distill_hn_thread tool. ~70 LOC.
-      weight-slash.ts — /weight value [today|yesterday|YYYY-MM-DD|last monday|N days ago] → log_weights.
-      weight-csv.ts — Tier-1 RENPHO CSV pre-router → log_weights batch.
-      practice.ts   — /practice + /done Spanish coach. Calls llm/chat() directly; extraction handled by practice-session.ts.
-      vault-prompt.ts — /hilo /evening generic vault-prompt runner. Loads body from knowledge_artifacts (R2 fallback), strips frontmatter, runs chat() with full read tools + write_vault_artifact.
-      chat.ts       — Default fallback. Anthropic Sonnet, 12-msg context cap (flow IS NULL OR flow='chat'), full read tools + write_vault_artifact, streams via chat() + createStreamEditor, prompt caching enabled.
-      conj.ts       — /conj typed Spanish conjugation drill. One pattern per session, FSRS-scheduled per (lemma, tense, person) cell. `/hint` and `/easy` are sub-commands of the conj flow (not globally registered). Cloze sentences come from curated sources only — vocab_reviews.examples first, then knowledge_artifacts.body — falling back to Haiku one-shot cached on the row. **`entries.text` (Day One journal) is deliberately excluded**: it contains Mitch's own Spanish slips, and using it as the model would test him against his own mistakes.
-      tool-catalog.ts — Builds the AI-SDK ToolSet from spec handlers for chat + vault-prompt flows.
-    truncation.ts   — Tool-result truncation for chat_messages persistence.
-    practice-session.ts — Practice extraction (Claude call → JSON → R2 + DB upsert of Español Vivo).
-    client.ts       — Telegram Bot API client. sendMessage/sendVoice, retry, chunking, streaming editor.
-    voice.ts        — Voice transcription (Whisper). Synthesis path removed.
-    media.ts        — Photo/document processing: vision, text/PDF extraction.
-    network-errors.ts — Recoverable network error classification for retry logic.
-    conj-hints.ts   — Pure pattern-hint builder for `/conj /hint`. 33 templates, never leaks expected_form.
-  oura/
-    client.ts       — Oura API v2 client.
-    sync.ts         — Oura sync engine: API fetch + DB upserts + advisory lock + timer.
-    context.ts      — Oura context prompt builder for Telegram agent injection.
-    formatters.ts   — Oura tool response formatting helpers.
-    analysis/       — Statistical analysis, split from monolithic analysis.ts.
-      index.ts      — Re-exports all analysis modules (facade).
-      statistics.ts — Core stats: mean, stddev, percentiles, linear regression.
-      trends.ts     — Trend detection, rolling averages, day-of-week patterns.
-      outliers.ts   — Outlier detection (IQR + Z-score).
-      correlations.ts — Pearson correlation, metric pairing.
-      sleep.ts      — Sleep debt, regularity, stage ratios, best conditions.
-      hrv.ts        — HRV recovery patterns, rolling averages.
-    types.ts        — TypeScript interfaces for stored Oura data.
-  obsidian/
-    sync.ts         — Obsidian vault sync engine: R2 fetch + DB upserts + timer. Tripwire: notifyAlert when a non-conflict canonical soft-deletes.
-    parser.ts       — Markdown frontmatter parser for Obsidian notes.
-    wiki-links.ts   — Wiki-link parsing and resolution.
-    fs-event-parsers.ts — fswatch / eslogger event-line parsers for the vault-fs-watcher script.
-  notifications/
-    on-this-day.ts  — "On This Day" morning reflection notification.
-  utils/
-    dates.ts        — Shared timezone-aware date utility (todayInTimezone).
-  transports/
-    http.ts         — Express HTTP bootstrap. Mounts MCP, OAuth, health, Telegram webhook.
-    oauth.ts        — OAuth token validation for HTTP API authentication.
-    routes/
-      health.ts     — Health check endpoint.
-  storage/
-    r2.ts           — Cloudflare R2 client. Upload, exists check, public URL.
-  formatters/
-    entry.ts        — Raw DB row → human-readable string with emoji, metadata, media URLs.
-    search-results.ts — Ranked results with RRF score context.
+  index.ts, server.ts, config.ts       — Entry, MCP wiring, env-aware config (fails fast on missing DATABASE_URL in prod).
+  db/queries/                          — ALL SQL lives here. Domain-split, parameterized only. Tools never write SQL.
+  tools/                               — MCP tool implementations. One file per tool; specs in `specs/tools.spec.ts`.
+  llm/                                 — Cross-provider chat / embed / transcribe / vision / tts (Vercel AI SDK + OpenAI).
+  fsrs/                                — ts-fsrs scheduler + Spanish-specific graders + Haiku gloss-fill.
+  telegram/                            — Webhook, router (tiered: media classifier → extraction → dispatch), per-chat flows (chat, vault-prompt, conj, practice, checkpoint, weight, distill-hn). Flow state is in-memory; lost on restart by design.
+  oura/                                — Oura v2 client + sync + analysis/ (statistics, trends, outliers, correlations, sleep, hrv).
+  obsidian/                            — R2→DB vault sync (with tripwire on canonical loss), frontmatter parser, wiki-link resolver, FS-event parsers.
+  ingest/                              — One-shot ingestors: claude-code, opencode, codex, activitywatch, atuin, screenpipe.
+  hn/                                  — Hacker News distillation pipeline (Algolia + article fetch + email + vault save).
+  email/                               — Nodemailer wrapper.
+  prompts/                             — In-code prompt strings (Spanish practice extractor, etc.).
+  formatters/                          — DB row → human-readable string. Pure functions.
+  transports/                          — Express HTTP + OAuth + /health.
+  storage/                             — Cloudflare R2 client.
+  utils/                               — Shared helpers (timezone-aware date utility, etc.).
 scripts/
-  sync-dayone.ts    — DayOne.sqlite → PG. Idempotent (ON CONFLICT DO UPDATE).
-  sync-obsidian.ts  — Trigger R2 → DB Obsidian sync on demand against prod (pnpm sync:obsidian). Callable by LLMs after vault edits.
-  sync-oura.ts      — Backfill/sync Oura biometrics into Postgres (pnpm sync:oura).
-  sync-weight.ts    — Sync weight data to production.
-  embed-entries.ts  — Batch embed all entries missing embeddings.
-  ingest-sessions.ts — Ingest Claude Code / OpenCode / Codex session metadata into agent_sessions (pnpm ingest:sessions). See specs/agent-sessions-ingestor.md.
-  ingest-activity.ts — Ingest ActivityWatch events into device_events, atuin shell history into usage_logs, Screenpipe OCR/audio chunks into screen_captures (pnpm ingest:activity). Args: --dry-run, --force, --since, --source <aw|atuin|screenpipe>, --skip-if-fresh 24h. See specs/2026-05-03-activity-capture-plan.md.
-  backfill-checkpoints.ts — One-time: parse Artifacts/Checkpoint/*.md from R2 into the `checkpoints` table. Idempotent via the dedup unique index. Default --dry-run; require --apply to mutate.
-  import-lookups.ts — Bulk import Spanish verbs + Kindle lookups.
-  import-conjugations.ts — One-shot import of `data/conjugations-es/verbs.json` + `data/verb-frequency-es.txt` into the `conjugations` table. Idempotent (`ON CONFLICT (lemma,tense,person) DO UPDATE`). Run as `pnpm import:conjugations`.
-  lib/
-    pattern-classifier.ts — Pure: `(lemma, tense, person, form) → one of 33 conjugation pattern buckets`. Person-scoped rules (e.g. yo-go separate from stem-changing tu/el/ellos) + small hardcoded irregular sets.
-  write-tomo.ts     — Write the next Espejo tomo. Two-step flow: `--plan-only` emits 6 candidates (3 essay + 3 flow) saved to `books/next-plan.json`; `--pick=<1-6>` runs the writer with the chosen candidate. Flags: `--steer "..."`, `--bilingual` / `--no-bilingual`, `--share-julia` / `--no-share-julia`, `--fresh-plan`. See `Artifacts/Prompt/Spanish/Tomo.md`.
-  condense-insights.ts — Periodic condensation pass over insights.
-  migrate.ts        — Runs SQL files, tracks applied migrations in _migrations table.
-  migrate-entries-to-artifacts.ts — One-time migration of entries into knowledge artifacts.
-  migrate-llm-entries.ts — One-time migration for LLM-generated entries.
-  cleanup-llm-entries.ts — One-time cleanup for LLM-generated entries.
-  backfill-artifact-timestamps.ts — One-time backfill for artifact created_at/updated_at.
-  deploy-smoke.ts   — Post-deploy smoke test.
-  telegram-setup.ts — Set/check/delete Telegram webhook.
-  spec-plan.sh      — Wraps the planning workflow.
-  vault-fs-watcher.ts — Stdin reader → vault_fs_events. Parses fswatch (`-x`) lines or eslogger JSON, batches inserts. Run by the launchd agent in scripts/vault-fs/.
-  vault-fs/         — Launchd plists + wrapper scripts for the FS-event watchers (fswatch deployed; eslogger archived as Sequoia TCC dead-end).
-  dedup/
-    retrieve.ts     — Stage 1: hybrid RRF over Insight ∪ Pending, emits dedup-plan.json (pnpm dedup:retrieve).
-    council.mjs     — Stage 2: fans out Claude/Gemini/GPT in parallel, chunks GPT, validates JSON (pnpm dedup:council).
-    synthesize.mjs  — Stage 3: tallies leg outputs, picks recommended merge bodies, writes synthesis.json + preview.md (pnpm dedup:synth).
-    apply.mjs       — Stage 4: snapshot + inbound-wikilink rewrite + execute. Dry-run default; --apply to mutate (pnpm dedup:apply).
-    check-faithfulness.mjs — Optional: per-sentence cosine sim check that LLM merge bodies trace back to source/target content (pnpm dedup:check).
+  sync-*.ts, ingest-*.ts               — On-demand and periodic syncs / ingestors.
+  embed-entries.ts                     — Batch embed; run after sync to populate vector column.
+  write-tomo.ts                        — Two-phase Tomo writer (`--plan-only` then `--pick=N`). See `Artifacts/Prompt/Spanish/Tomo.md`.
+  import-conjugations.ts               — Idempotent re-import of Spanish corpus into the read-only `conjugations` table.
+  migrate.ts, deploy-smoke.ts          — Schema migration + post-deploy check.
+  dedup/{retrieve,council,synthesize,apply,check-faithfulness}.{ts,mjs}
+                                       — Multi-stage Pending→Insight dedup. Dry-run by default; `--apply` to mutate.
+  vault-fs-watcher.ts, vault-fs/       — fswatch → `vault_fs_events` ingestor + launchd plists.
+  backfill-*.ts, migrate-*.ts, cleanup-*.ts
+                                       — One-off historical migrations. Consult before re-running; some are destructive.
 specs/
-  schema.sql        — Canonical DB schema.
-  tools.spec.ts     — Tool contracts: params, types, descriptions, examples.
-  — Implemented:
-  agent-sessions-ingestor.md, telegram-chatbot-plan.md, telegram-personality-plan.md,
-  self-healing-organism.md, 2026-05-04-telegram-refactor-plan.md,
-  oura-integration-plan.md, knowledge-artifacts.md, insights-dedup-rewrite.md,
-  insight-engine.md
-  — Removed Features (specs kept for history; feature was removed in 2026-04):
-  web-app.spec.md, web-quick-switcher.md, web-semantic-links.md, web-graph-view.md,
-  web-feature-rollout.md, web-journaling.md, web-db-observability.md,
-  web-weight-tracking.md
-  — Research: ltm-research.md, refactor.md
-  — Planned/Stub: aws-sst-migration-plan.md, chat-archive.md, project-management.md
-  fixtures/
-    seed.ts         — Test data with pre-computed embeddings for determinism.
+  schema.sql, tools.spec.ts            — Canonical schema + tool contracts. Always source of truth.
+  *.md                                 — Plans, research, removed-feature history. `*-plan.md` are implemented unless marked `[Planned]` or `[Stub]`.
 data/
-  conjugations-es/  — Vendored verbecc-derived Spanish conjugation cells (LGPL-3.0). `verbs.json` is the flat raw form/lemma/tense/person/template list consumed by `scripts/import-conjugations.ts`.
-  verb-frequency-es.txt — Hermit Dave FrequencyWords Spanish list (CC-BY-SA-4.0). Lemma rank seeds `conjugations.frequency_rank` and promotion ordering for /conj.
-  LICENSE-frequency-words.txt — Attribution + CC-BY-SA license preserved alongside the frequency list.
-docs/               — Deep documentation (see Deep Docs section below).
+  conjugations-es/, verb-frequency-es.txt
+                                       — Vendored Spanish corpora (LGPL-3.0 + CC-BY-SA-4.0). Rebuild via `pnpm import:conjugations`.
+docs/                                  — Deep documentation (see Deep Docs below).
 ```
 
 ## Key Patterns
@@ -358,21 +344,6 @@ Any time you commit and push directly to `main`, follow this order:
 - Prefer embedding/tsvector for cost-sensitive loops (dedup, matching) — don't LLM every comparison
 - Don't build CLI wrappers for things that can be a prompt or skill (YAGNI)
 
-## Dependencies
-
-| Package | Purpose |
-|---------|---------|
-| `@modelcontextprotocol/sdk` | MCP server + transport |
-| `pg` | PostgreSQL client |
-| `pgvector` | pgvector type support for node-postgres |
-| `openai` | Embedding generation |
-| `zod` | Runtime param validation |
-| `dotenv` | Env file loading |
-| `express` | HTTP server for Telegram webhook + MCP StreamableHTTP transport |
-| `@aws-sdk/client-s3` | Cloudflare R2 media storage (S3-compatible) |
-| `better-sqlite3` | Read DayOne.sqlite during sync |
-| `@anthropic-ai/sdk` | Claude agent for Telegram chatbot conversations |
-
 ## What's Out of Scope
 
 Do not implement these (they're planned future work, not part of the current build):
@@ -381,125 +352,9 @@ Do not implement these (they're planned future work, not part of the current bui
 - Write/update/delete MCP tools for journal entries — Day One is the canonical writer for `entries`; new long-form notes go into the Obsidian vault and flow through the artifact sync.
 - Multi-user support or auth beyond MCP SDK defaults
 - Chunking strategies (entries fit in single embeddings)
-- Auto-purge of compacted messages (function exists in `queries.ts`, not wired up)
+- Auto-purge of compacted messages (function exists in `src/db/queries/chat.ts`, not wired up)
 
 See `specs/*.md` files marked `[Stub]` or `[Planned]` for upcoming features.
-
-## Obsidian Vault Workflows
-
-`Artifacts/` is a symlink to `~/Documents/Artifacts` — Mitch's Obsidian vault (gitignored). Syncs bidirectionally with Postgres via Cloudflare R2 (Remotely Save plugin → R2 → `src/obsidian/sync.ts`).
-
-**Important:** most Claude Code sessions and all OpenCode sessions for espejo operate on the **vault + prod DB**, not on `src/`. Treat these as first-class, not edge cases. Distinguish from the DB-backed `knowledge_artifacts` table in `src/db/queries/artifacts.ts` — the vault is plain markdown on disk; the DB is the synced downstream index.
-
-### Vault folders
-
-```
-Artifacts/
-  Insight/     — atomic realizations (canonical home for approved insights)
-  Journal/     — entries migrated from Day One
-  Review/      — structured reflections (evening/weekly/monthly)
-  Note/        — general knowledge notes
-  Project/     — maps-of-content linking related notes
-  Reference/   — external references (Academic/ subfolder = fetched
-                 research papers from Madriguera, one file per paper,
-                 deduped by DOI; interim store for a future
-                 research_papers embedding table)
-  Prompt/      — reusable prompts + user-defined slash commands
-  Parts/       — IFS parts work (parts.md is a CONCISE OVERVIEW — preserve hierarchy)
-  Attachment/  — media
-  Template/    — Obsidian templates (NOT synced)
-  Pending/     — extracted insights awaiting dedup approval (written by `Artifacts/Prompt/Insights/Extract.md`)
-```
-
-Any `.md` outside `.obsidian/`, `.trash/`, `Template/` syncs to the DB.
-
-### Frontmatter schema
-
-```yaml
----
-kind: insight | reference | note | project | review
-status: pending | approved    # default: approved
-tags:
-  - lowercase-hyphenated
----
-```
-
-- **Filename is the title.** Don't add an `# H1` heading inside the file — Obsidian renders the filename as the title, so an H1 produces a duplicated title in the UI. Sync (`src/obsidian/parser.ts:66`) falls back to the filename when no H1 exists, so dropping it is safe and correct.
-- Title is NEVER in frontmatter either. Just the filename.
-- Body starts immediately on the line after the closing `---`. No blank line.
-- `[[Wiki Links]]` become graph edges in the DB.
-- `status: pending` = excluded from semantic search until approved.
-- Tags are normalized to lowercase on sync.
-
-### Reusable prompts (Artifacts/Prompt/)
-
-`Artifacts/Prompt/` is the canonical home for cross-tool reusable prompts. Mitch invokes them by referring to the file in plain text — *"Run Artifacts/Prompt/Insights/Dedup.md"* — not as slash commands. When you see that pattern, read the matching file and execute it; don't regenerate.
-
-Current inventory:
-
-| file | purpose |
-|---|---|
-| `Review/Evening.md` | End-of-day review prompt — closes the loop on the day's pulls/decisions. |
-| `Review/Weekly.md` | Weekly pattern-interrupt review (writes Review-kind artifacts). |
-| `Review/Monthly.md` | Monthly Proyecto Mitch review (writes Review-kind artifacts). |
-| `Insights/Extract.md` | Per-Review atomic insight extraction → `Pending/`. Mitch supplies the Review filename. Retrieval is for terminology/wikilinks only; dedup decisions live in `Insights/Dedup.md`. |
-| `Insights/Dedup.md` | Stage-1-through-4 dedup pipeline orchestrator. References `scripts/dedup/`. |
-| `Insights/Condense.md` | Periodic condensation of related insights into thematic clusters. |
-| `Therapy/Prep.md` | Pre-therapy load + session-prep prompt. |
-| `Therapy/Processing.md` | Distill a therapy session transcript into `Artifacts/Review/YYYY-MM-DD — Therapy.md`. |
-| `Therapy/Parts Check-in.md` | IFS midday parts check-in protocol. |
-| `Therapy/Checkpoint.md` | Body-meeting / Checkpoint Protocol (3-turn). |
-| `Spanish/Tomo.md` | Generate the next Tomo (Phase 0 imports Kindle lookups). |
-| `Spanish/Vivo.md` | Update `Artifacts/Project/Español Vivo.md` from recent ingestion. |
-| `Spanish/Hilo.md` | Spanish thread / tutor prompt. |
-| `Madriguera.md` | Research rabbit-hole: AI interviews Mitch on a curiosity while pulling live papers from OpenAlex + Europe PMC. CLI-only. Every fetched paper is persisted to `Reference/Academic/` (one file per paper, deduped by DOI) as the interim store for a future `research_papers` embedding table. |
-| `Council Review.md` | Multi-model deliberation wrapper used by `Insights/Dedup.md` and other workflows. |
-
-### SOP: Pending → Insight dedup
-
-1. Glob `Artifacts/Pending/*.md` and `Artifacts/Insight/*.md`.
-2. For each pending, classify vs. existing using **embedding similarity + tsvector** (hybrid RRF, same as `search_entries`). Don't LLM-compare — it gets expensive at scale.
-3. Label each **New / Duplicate / Merge** and show candidates.
-4. **Ask before acting.** Never move/merge/delete without explicit confirmation.
-5. On approval: `status: pending` → `approved`, optionally relocate out of `Pending/`, let Remotely Save → R2 → sync pick it up.
-6. To reject: delete the file.
-
-Scope rules **by `kind`** — `insight`-only logic should not apply to `review`/`note`.
-
-### SOP: Load context on topic/person
-
-"Pull in X" = hybrid RRF over DB (entries + artifacts) **plus** `Glob`/`Grep` under `Artifacts/`, with **max limits + request more if available**. MCP tools have implicit limits and under-retrieve — be explicit.
-
-### SOP: Run a checkin prompt
-
-Evening review, morning prompt, midday parts checkin, tolls: read from `Artifacts/Prompt/`, execute against current DB + vault state. Dates derive from source wikilink filenames — never hardcode.
-
-### Direct DB + filesystem > MCP (for vault-side prompt work)
-
-MCP tools have hardcoded limits and sometimes hardcoded dates. For prompt execution prefer direct access:
-
-```bash
-PGURL=$(grep ^DATABASE_URL .env.production.local | cut -d= -f2-)
-OPENAI_API_KEY=$(grep ^OPENAI_API_KEY .env.production.local | cut -d= -f2-)
-PSQL=/opt/homebrew/opt/libpq/bin/psql   # libpq Homebrew formula, not on PATH
-```
-
-Then `$PSQL "$PGURL"` + OpenAI embeddings API (`text-embedding-3-small` — same model as indexing).
-
-### Vault ↔ DB sync
-
-- Vault → R2: Remotely Save auto-syncs on edit.
-- R2 → DB: `sync_obsidian_vault` MCP tool, the timer in `src/obsidian/sync.ts`, or `pnpm sync:obsidian` (production, on-demand — preferred for LLM sessions that just edited the vault and want to land changes in DB without waiting for the timer).
-- Status: `get_obsidian_sync_status` MCP tool.
-
-### Writing notes — don'ts
-
-- No frontmatter-less files (they sync as `kind: note` with no tags).
-- No `status: active` — only `pending` / `approved`.
-- No content above frontmatter.
-- No duplicate title in both frontmatter and heading.
-- No H1 inside the file. Filename = title. Adding `# Title` after the frontmatter renders twice in Obsidian.
-- `parts.md` stays a concise OVERVIEW — don't inline part bodies.
 
 ## Gotchas
 
@@ -507,13 +362,17 @@ Then `$PSQL "$PGURL"` + OpenAI embeddings API (`text-embedding-3-small` — same
 - **Ports**: dev PG `5434`, test PG `5433` (5432 is claimed by the greenline project).
 - **Zod rejects `null` for optional date strings** — see `specs/2026-04-09-fix-mcp-null-optional-params-plan.md` before adding new optional-date params.
 - **DayOne sync**: null-byte/backslash handling required on text fields; `ZHASDATA=0` attachments are iCloud-only and must be skipped.
-- **Agent tool-call audit**: every Telegram agent run inserts a row in `activity_logs` with `tool_calls` JSONB containing `{name, args, result}` for each tool call. To inspect a recent agent action: `SELECT created_at, jsonb_pretty(tool_calls) FROM activity_logs WHERE tool_calls::text LIKE '%<tool_name>%' ORDER BY created_at DESC LIMIT 5;` — canonical way to see what arguments the agent passed without re-running anything.
-- **Universal usage log**: `usage_logs` records every MCP tool call (including from Claude desktop/mobile, which `activity_logs` does not capture), every HTTP request (excluding `/health`), Telegram tool dispatch (mirrors the per-tool slice of `activity_logs`), and cron fires (oura-sync, obsidian-sync, on-this-day). Schema: `(ts, source, surface, actor, action, args jsonb, ok, error, duration_ms, meta jsonb)`. Examples:
+- **`.env.production.local` is the only file with prod creds.** Never commit it; never echo its contents to chat or logs. When sourcing values, pipe through `cut -d= -f2-` rather than `cat`-ing the file.
+- **Prod DB session TZ is UTC.** Bucket `timestamptz` columns by `(col AT TIME ZONE 'Europe/Madrid')::date` before grouping by day, or you'll silently lose Madrid 00:00–02:00 rows. `DATE` columns need no cast.
+- **Embed after sync.** `pnpm sync:obsidian` inserts new artifacts with NULL embeddings. Run `pnpm embed:prod` before any retrieval / dedup or fresh pendings get silently dropped from semantic search.
+- **Persistent memory at `~/.claude/projects/-Users-mitch-Projects-espejo/memory/MEMORY.md`** — read it. Captures feedback, project state, and gotchas that don't belong in this file (private corrections, partner names, evolving prompt conventions, council-config drift, etc.).
+- **Agent tool-call audit**: Telegram chat + vault-prompt flows insert a row in `activity_logs` **only when at least one tool call fires** (`toolRecords.length > 0`). Pure-text replies don't create an `activity_logs` row — use `chat_messages` or `usage_logs` for no-tool runs. To inspect a tool-using run: `SELECT created_at, jsonb_pretty(tool_calls) FROM activity_logs WHERE tool_calls::text LIKE '%<tool_name>%' ORDER BY created_at DESC LIMIT 5;`.
+- **Universal usage log**: `usage_logs` records every MCP tool call (including from Claude desktop/mobile, which `activity_logs` does not capture), every HTTP request (excluding `/health`), Telegram tool dispatch (mirrors the per-tool slice of `activity_logs`), and cron fires (oura-sync, obsidian-sync). Schema: `(ts, source, surface, actor, action, args jsonb, ok, error, duration_ms, meta jsonb)`. Examples:
   - "Which MCP tools fired in the last 24h": `SELECT action, surface, COUNT(*) FROM usage_logs WHERE source = 'mcp' AND ts > NOW() - INTERVAL '1 day' GROUP BY 1,2 ORDER BY 3 DESC;`
   - "Did anything error today": `SELECT ts, source, action, error FROM usage_logs WHERE NOT ok AND ts > NOW() - INTERVAL '1 day' ORDER BY ts DESC;`
   - Use this table for traffic/source breakdowns; keep `activity_logs` for full-conversation Telegram audits (memories, cost, complete tool transcript).
 - **`daily_metrics` upsert preserves `created_at`**: the `ON CONFLICT (date) DO UPDATE SET weight_kg = EXCLUDED.weight_kg` clause only touches `weight_kg`, so `created_at` reflects the original insert. Use `activity_logs` (not `daily_metrics.created_at`) to determine when a value was last written.
-- **Chat logs** (useful when Mitch asks "what did I do last week"):
+- **Chat logs** (useful when Mitch asks "what did I do last week"): **query the DB you ingested at Session Init.** `agent_sessions` holds Claude Code / OpenCode / Codex prompt-and-response transcripts; `chat_messages` holds Telegram. Only fall back to the raw files when the ingestors haven't run for this session — and when that happens, run `pnpm ingest:sessions` first if you can. The raw paths (for reference / fallback only):
   - Claude Code sessions: `~/.claude/projects/-Users-mitch-Projects-espejo/*.jsonl`
   - Claude Code prompt history: `~/.claude/history.jsonl` (filter by `project`)
   - OpenCode DB: `~/.local/share/opencode/opencode.db` (tables: `session`, `message`, `part`)
