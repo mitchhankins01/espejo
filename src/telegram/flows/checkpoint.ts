@@ -1,5 +1,4 @@
 import type pg from "pg";
-import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../../config.js";
 import { todayDateInTimezone } from "../../utils/dates.js";
 import { insertChatMessage } from "../../db/queries/chat.js";
@@ -16,27 +15,17 @@ import {
 } from "../flow-state.js";
 
 const FLOW_NAME = "checkpoint";
-const MIRROR_FEATURE_ON = true;
 const DUPLICATE_WINDOW_MINUTES = 10;
 
 // One combined prompt: tap the button, answer all three in a single message
-// (periods/newlines separate trigger / body / want and unlock the mirror line;
-// a bare blob logs as the trigger alone). Bottom-up, breath-cued, no part-naming.
+// (periods/newlines separate trigger / body / want; a bare blob logs as the
+// trigger alone). Bottom-up, breath-cued, no part-naming.
 const CHECKPOINT_PROMPT = "Toll. One slow inhale, slower exhale. What, where, why?";
 
 export interface CheckpointDeps {
   pool: pg.Pool;
   chatId: string;
   externalMessageId: string | null;
-}
-
-function currentHHMMInTimezone(tz: string): string {
-  return new Intl.DateTimeFormat("en-GB", {
-    timeZone: tz,
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date());
 }
 
 function normalizeResolution(input: string): "pass" | "go" | "unset" {
@@ -83,37 +72,6 @@ async function persistAssistantTurn(deps: CheckpointDeps, content: string): Prom
   });
 }
 
-async function generateMirrorLine(
-  trigger: string,
-  bodySignal: string,
-  partVoice: string
-): Promise<string | null> {
-  if (!MIRROR_FEATURE_ON) return null;
-  if (!config.anthropic.apiKey) return null;
-  try {
-    const client = new Anthropic({ apiKey: config.anthropic.apiKey });
-    const response = await client.messages.create({
-      model: config.models.anthropicFast,
-      max_tokens: 256,
-      system:
-        "Reflect Mitch's part in one sentence, in the part's own voice. " +
-        "No preface, no commentary, no quotes. One sentence.",
-      messages: [
-        {
-          role: "user",
-          content: `Substance/trigger: ${trigger}\nBody signal: ${bodySignal}\nPart voice: ${partVoice}`,
-        },
-      ],
-    });
-    const textBlock = response.content.find(
-      (b): b is Anthropic.TextBlock => b.type === "text"
-    );
-    return textBlock?.text?.trim() ?? null;
-  } catch {
-    return null;
-  }
-}
-
 async function logCheckpointRow(
   deps: CheckpointDeps,
   data: {
@@ -123,8 +81,7 @@ async function logCheckpointRow(
     resolution: "pass" | "go" | "unset" | null;
     parserFallback: boolean;
   }
-): Promise<{ hhmm: string }> {
-  const hhmm = currentHHMMInTimezone(config.timezone);
+): Promise<void> {
   const localDate = todayDateInTimezone(config.timezone);
   const startedAt = Date.now();
   await insertCheckpoint(deps.pool, {
@@ -150,7 +107,6 @@ async function logCheckpointRow(
     ok: true,
     durationMs: Date.now() - startedAt,
   });
-  return { hhmm };
 }
 
 async function finalizeCheckpoint(
@@ -170,34 +126,11 @@ async function finalizeCheckpoint(
     partVoice: data.partVoice,
     withinMinutes: DUPLICATE_WINDOW_MINUTES,
   });
-  if (dup) {
-    const reply = `Already logged at ${formatHHMM(dup.occurred_at)}.`;
-    await sendTelegramMessage(deps.chatId, reply);
-    await persistAssistantTurn(deps, reply);
-    clearFlow(deps.chatId);
-    return;
-  }
-
-  const { hhmm } = await logCheckpointRow(deps, data);
-
-  const mirror =
-    data.bodySignal && data.partVoice
-      ? await generateMirrorLine(data.trigger, data.bodySignal, data.partVoice)
-      : null;
-
-  const reply = mirror ? `${mirror}\n\nLogged at ${hhmm}.` : `Logged at ${hhmm}.`;
+  const reply = dup ? "Already logged." : "Logged.";
+  if (!dup) await logCheckpointRow(deps, data);
   await sendTelegramMessage(deps.chatId, reply);
   await persistAssistantTurn(deps, reply);
   clearFlow(deps.chatId);
-}
-
-function formatHHMM(date: Date): string {
-  return new Intl.DateTimeFormat("en-GB", {
-    timeZone: config.timezone,
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(date);
 }
 
 export async function startCheckpointFlow(
