@@ -23,17 +23,6 @@ import {
   tryRunWeightCsvFlow,
 } from "./flows/weight-csv.js";
 import {
-  startPracticeFlow,
-  continuePracticeFlow,
-  endPracticeFlow,
-} from "./flows/practice.js";
-import {
-  isVaultPromptCommand,
-  startVaultPromptFlow,
-  continueVaultPromptFlow,
-  closeVaultPromptFlow,
-} from "./flows/vault-prompt.js";
-import {
   startSrsFlow,
   endSrsFlow,
   handleSrsCallback,
@@ -84,10 +73,7 @@ function parseSlashCommand(text: string): ParsedSlash | null {
 const REGISTERED_SLASHES = new Set<string>([
   "checkpoint",
   "c",
-  "practice",
   "weight",
-  "hilo",
-  "evening",
   "srs",
   "conj",
   "done",
@@ -245,20 +231,6 @@ async function routeText(
       // close handler clears state, so dispatching to the wrong one would
       // wipe the flow before its real close handler runs.
       const peek = getFlow(chatId);
-      if (peek?.flow === "practice") {
-        await endPracticeFlow({ pool: ctx.pool, chatId });
-        return;
-      }
-      if (peek?.flow === "vault-prompt") {
-        await closeVaultPromptFlow({
-          pool: ctx.pool,
-          chatId,
-          externalMessageId,
-          state: peek,
-          rawCommand: text,
-        });
-        return;
-      }
       if (peek?.flow === "srs") {
         await endSrsFlow({ pool: ctx.pool, chatId, externalMessageId });
         return;
@@ -297,22 +269,13 @@ async function routeText(
       });
       return;
     }
-    // Other registered slashes — clear any flow that isn't matching.
-    if (active && active.flow !== "vault-prompt") clearFlow(chatId);
+    // Other registered slashes — clear any active flow.
+    if (active) clearFlow(chatId);
     if (command.name === "checkpoint" || command.name === "c") {
       await startCheckpointFlow(
         { pool: ctx.pool, chatId, externalMessageId },
         command.argText
       );
-      return;
-    }
-    if (command.name === "practice") {
-      await startPracticeFlow({
-        pool: ctx.pool,
-        chatId,
-        externalMessageId,
-        rawText: text,
-      });
       return;
     }
     if (command.name === "weight") {
@@ -325,48 +288,13 @@ async function routeText(
       });
       return;
     }
-    if (isVaultPromptCommand(command.name)) {
-      // If a vault-prompt of this name is already active, treat as continuation.
-      if (active?.flow === "vault-prompt" && active.name === command.name) {
-        await continueVaultPromptFlow({
-          pool: ctx.pool,
-          chatId,
-          externalMessageId,
-          state: active,
-          text,
-        });
-        return;
-      }
-      // Otherwise, swap to the named vault prompt.
-      if (active) clearFlow(chatId);
-      await startVaultPromptFlow({
-        pool: ctx.pool,
-        chatId,
-        externalMessageId,
-        name: command.name,
-        rawText: text,
-      });
-      return;
-    }
-    return;
-  }
-
-  // Unknown slash with active vault-prompt → forward as user message.
-  if (command && active?.flow === "vault-prompt") {
-    await continueVaultPromptFlow({
-      pool: ctx.pool,
-      chatId,
-      externalMessageId,
-      state: active,
-      text,
-    });
     return;
   }
 
   if (command && !REGISTERED_SLASHES.has(command.name) && !active) {
     await sendTelegramMessage(
       chatId,
-      "Unknown command — try /c (or /checkpoint) /practice /hilo /evening /weight /srs."
+      "Unknown command — try /c (or /checkpoint) /weight /srs /conj."
     );
     return;
   }
@@ -396,25 +324,6 @@ async function routeText(
       active,
       text
     );
-    return;
-  }
-  if (active?.flow === "practice") {
-    await continuePracticeFlow({
-      pool: ctx.pool,
-      chatId,
-      externalMessageId,
-      text,
-    });
-    return;
-  }
-  if (active?.flow === "vault-prompt") {
-    await continueVaultPromptFlow({
-      pool: ctx.pool,
-      chatId,
-      externalMessageId,
-      state: active,
-      text,
-    });
     return;
   }
 

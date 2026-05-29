@@ -4,8 +4,6 @@
 export type FlowName =
   | "chat"
   | "checkpoint"
-  | "vault-prompt"
-  | "practice"
   | "srs"
   | "conj";
 
@@ -19,19 +17,6 @@ export interface CheckpointFlowState {
     resolution?: "pass" | "go" | "unset";
     parser_fallback?: boolean;
   };
-  startedAt: number;
-}
-
-export interface VaultPromptFlowState {
-  flow: "vault-prompt";
-  name: string;
-  conversation: { role: "user" | "assistant"; content: string }[];
-  startedAt: number;
-}
-
-export interface PracticeFlowState {
-  flow: "practice";
-  sessionId: string;
   startedAt: number;
 }
 
@@ -88,8 +73,6 @@ export interface ConjFlowState {
 
 export type FlowState =
   | CheckpointFlowState
-  | VaultPromptFlowState
-  | PracticeFlowState
   | SrsFlowState
   | ConjFlowState;
 

@@ -65,8 +65,6 @@ function escapeHtml(text: string): string {
 
 const FLOW_LABEL: Record<string, string> = {
   checkpoint: "checkpoint",
-  practice: "practice",
-  "vault-prompt": "vault-prompt",
   chat: "chat",
 };
 

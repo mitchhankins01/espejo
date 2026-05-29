@@ -11,12 +11,7 @@ import {
   type ActivityLogToolCall,
 } from "../../db/queries/observability.js";
 import { logUsage } from "../../db/queries/usage.js";
-import {
-  sendTelegramMessageReturningId,
-  createStreamEditor,
-  editTelegramMessageText,
-  sendTelegramMessage,
-} from "../client.js";
+import { sendTelegramMessage } from "../client.js";
 import { chat } from "../../llm/index.js";
 import { buildFlowTools } from "./tool-catalog.js";
 import { truncateToolResult } from "../truncation.js";
@@ -87,16 +82,12 @@ export async function runChatFlow(params: {
   const recent = await getRecentMessages(pool, chatId, CHAT_CONTEXT_LIMIT, FLOW_NAME);
   const messages = reconstructMessages(recent);
 
-  // Pin the persistent reply keyboard on the seed. Reply keyboards must ride
-  // a sendMessage (editMessageText can't carry one), and the seed is the one
-  // plain send in this flow; it stays pinned as the bubble text is edited.
-  const seedMessageId = await sendTelegramMessageReturningId(
-    chatId,
-    "…",
-    DEFAULT_KEYBOARD
-  );
-  const editor = seedMessageId != null ? createStreamEditor(chatId, seedMessageId) : null;
-
+  // No streaming seed bubble: a message carrying a ReplyKeyboardMarkup is
+  // non-editable (Telegram rejects editMessageText with "message can't be
+  // edited"), so we can't stream-edit a keyboard-bearing seed. The webhook
+  // already fired a native "typing…" indicator; we send the final reply as a
+  // fresh message with the keyboard attached (it persists client-side once
+  // sent, so this keeps it pinned and is restart-safe).
   const toolRecords: ActivityLogToolCall[] = [];
   let response: { text: string; finishReason: string } | null = null;
   try {
@@ -109,7 +100,6 @@ export async function runChatFlow(params: {
       maxTokens: CHAT_MAX_TOKENS,
       maxSteps: CHAT_MAX_STEPS,
       cacheSystem: true,
-      onTextDelta: editor ? (snapshot) => editor.update(snapshot) : undefined,
       onToolResult: async ({ toolName, args, result }) => {
         const resultText = typeof result === "string" ? result : JSON.stringify(result);
         const truncated = truncateToolResult(toolName, resultText);
@@ -138,13 +128,8 @@ export async function runChatFlow(params: {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (editor) await editor.flush().catch(() => undefined);
     const fallback = `Error: ${message}`;
-    if (seedMessageId != null) {
-      await editTelegramMessageText(chatId, seedMessageId, fallback, "HTML");
-    } else {
-      await sendTelegramMessage(chatId, fallback);
-    }
+    await sendTelegramMessage(chatId, fallback, DEFAULT_KEYBOARD);
     await insertChatMessage(pool, {
       chatId,
       externalMessageId: null,
@@ -164,16 +149,11 @@ export async function runChatFlow(params: {
     return;
   }
 
-  if (editor) await editor.flush().catch(() => undefined);
   const finalText = response.text.trim();
   if (finalText.length === 0) {
     return;
   }
-  if (seedMessageId != null) {
-    await editTelegramMessageText(chatId, seedMessageId, finalText, "HTML");
-  } else {
-    await sendTelegramMessage(chatId, finalText);
-  }
+  await sendTelegramMessage(chatId, finalText, DEFAULT_KEYBOARD);
 
   await insertChatMessage(pool, {
     chatId,

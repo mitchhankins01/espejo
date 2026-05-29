@@ -162,8 +162,8 @@ describe("flow-state", () => {
     expect(getFlow("c1")).toBeUndefined();
   });
   it("clearAllFlows wipes everything", () => {
-    setFlow("a", { flow: "practice", sessionId: "x", startedAt: 0 });
-    setFlow("b", { flow: "vault-prompt", name: "hilo", conversation: [], startedAt: 0 });
+    setFlow("a", { flow: "srs", sessionId: "x", startedAt: 0, queue: [], queueIndex: 0, reviewedCount: 0, countsByRating: { 1: 0, 2: 0, 3: 0, 4: 0 }, lastServedReviewId: null, lastServedAt: null });
+    setFlow("b", { flow: "checkpoint", step: "awaiting_pull", data: {}, startedAt: 0 });
     clearAllFlows();
     expect(getFlow("a")).toBeUndefined();
     expect(getFlow("b")).toBeUndefined();

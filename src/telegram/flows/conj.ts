@@ -40,8 +40,6 @@ const SAMPLE_MAX_LEN = 140;
 
 const FLOW_LABEL: Record<string, string> = {
   checkpoint: "checkpoint",
-  practice: "practice",
-  "vault-prompt": "vault-prompt",
   chat: "chat",
   srs: "srs",
   conj: "conj",

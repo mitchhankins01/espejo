@@ -3,7 +3,7 @@ import type pg from "pg";
 import { toolHandlers, type ToolResult } from "../../server.js";
 import { toolSpecs, type ToolName } from "../../../specs/tools.spec.js";
 
-/** Tools available to chat flow + vault-prompt flow. */
+/** Tools available to the chat flow. */
 export const FLOW_TOOL_NAMES: ToolName[] = [
   "search_content",
   "search_artifacts",
