@@ -48,6 +48,7 @@ import {
 import { parseSrsCallback } from "./srs-callbacks.js";
 import { parseConjCallback } from "./conj-callbacks.js";
 import { runChatFlow } from "./flows/chat.js";
+import { resolveButtonLabel } from "./keyboard.js";
 
 const END_FLOW_ALIASES = new Set([
   "done",
@@ -228,7 +229,12 @@ async function routeText(
   ctx: RouterContext,
   args: { chatId: string; externalMessageId: string; text: string }
 ): Promise<void> {
-  const { chatId, externalMessageId, text } = args;
+  const { chatId, externalMessageId } = args;
+  // A persistent-keyboard tap arrives as the exact button label. Rewrite it
+  // to the synthetic slash it stands for so it reuses the normal command
+  // dispatch below (soft-block for srs/conj, flow-clear for checkpoint, etc).
+  const buttonCommand = resolveButtonLabel(args.text);
+  const text = buttonCommand ? `/${buttonCommand}` : args.text;
   const command = parseSlashCommand(text);
   const active = getFlow(chatId);
 

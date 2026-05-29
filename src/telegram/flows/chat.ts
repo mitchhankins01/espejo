@@ -20,6 +20,7 @@ import {
 import { chat } from "../../llm/index.js";
 import { buildFlowTools } from "./tool-catalog.js";
 import { truncateToolResult } from "../truncation.js";
+import { DEFAULT_KEYBOARD } from "../keyboard.js";
 
 const FLOW_NAME = "chat";
 const CHAT_CONTEXT_LIMIT = 12;
@@ -86,7 +87,14 @@ export async function runChatFlow(params: {
   const recent = await getRecentMessages(pool, chatId, CHAT_CONTEXT_LIMIT, FLOW_NAME);
   const messages = reconstructMessages(recent);
 
-  const seedMessageId = await sendTelegramMessageReturningId(chatId, "…");
+  // Pin the persistent reply keyboard on the seed. Reply keyboards must ride
+  // a sendMessage (editMessageText can't carry one), and the seed is the one
+  // plain send in this flow; it stays pinned as the bubble text is edited.
+  const seedMessageId = await sendTelegramMessageReturningId(
+    chatId,
+    "…",
+    DEFAULT_KEYBOARD
+  );
   const editor = seedMessageId != null ? createStreamEditor(chatId, seedMessageId) : null;
 
   const toolRecords: ActivityLogToolCall[] = [];

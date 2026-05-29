@@ -197,7 +197,7 @@ src/
   tools/                               — MCP tool implementations. One file per tool; specs in `specs/tools.spec.ts`.
   llm/                                 — Cross-provider chat / embed / transcribe / vision / tts (Vercel AI SDK + OpenAI).
   fsrs/                                — ts-fsrs scheduler + Spanish-specific graders + Haiku gloss-fill.
-  telegram/                            — Webhook, router (tiered: media classifier → extraction → dispatch), per-chat flows (chat, vault-prompt, conj, practice, checkpoint, weight, distill-hn). Flow state is in-memory; lost on restart by design.
+  telegram/                            — Webhook, router (tiered: media classifier → extraction → dispatch), per-chat flows (chat, vault-prompt, conj, practice, checkpoint, weight, distill-hn). Flow state is in-memory; lost on restart by design. `keyboard.ts` = persistent reply keyboard (🎯 Checkpoint · 🧠 SRS · 🔤 Conj); a tap arrives as the exact emoji label and the router rewrites it to the matching slash. Pinned via the chat-flow seed message (reply keyboards ride sendMessage, persist across edits, and coexist with srs/conj inline keyboards).
   oura/                                — Oura v2 client + sync + analysis/ (statistics, trends, outliers, correlations, sleep, hrv).
   obsidian/                            — R2→DB vault sync (with tripwire on canonical loss), frontmatter parser, wiki-link resolver, FS-event parsers.
   ingest/                              — One-shot ingestors: claude-code, opencode, codex, activitywatch, atuin, screenpipe.

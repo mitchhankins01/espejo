@@ -390,6 +390,23 @@ describe("sendTelegramMessageReturningId", () => {
 
     expect(id).toBeNull();
   });
+
+  it("attaches reply_markup when provided", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ ok: true, result: { message_id: 7 } }),
+        { status: 200 }
+      )
+    );
+    const markup = { keyboard: [[{ text: "🎯 Checkpoint" }]], is_persistent: true };
+
+    const id = await sendTelegramMessageReturningId("12345", "…", markup);
+
+    expect(id).toBe(7);
+    const [, opts] = fetchSpy.mock.calls[0];
+    const body = JSON.parse(opts!.body as string);
+    expect(body.reply_markup).toEqual(markup);
+  });
 });
 
 describe("editTelegramMessageText", () => {

@@ -200,10 +200,13 @@ export async function sendChatAction(
  */
 export async function sendTelegramMessageReturningId(
   chatId: string,
-  text: string
+  text: string,
+  replyMarkup?: Record<string, unknown>
 ): Promise<number | null> {
   try {
-    const res = await telegramPost("sendMessage", { chat_id: chatId, text });
+    const sendBody: Record<string, unknown> = { chat_id: chatId, text };
+    if (replyMarkup) sendBody.reply_markup = replyMarkup;
+    const res = await telegramPost("sendMessage", sendBody);
     if (!res.ok) {
       const description = await extractTelegramDescription(res);
       console.error(
