@@ -8,8 +8,11 @@ const writePendingReference = vi.hoisted(() => vi.fn());
 const sendTelegramMessage = vi.hoisted(() => vi.fn());
 const logUsage = vi.hoisted(() => vi.fn());
 const todayInTimezone = vi.hoisted(() => vi.fn());
+const poolQuery = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ rows: [], rowCount: 0 })
+);
 
-vi.mock("../../src/db/client.js", () => ({ pool: {} }));
+vi.mock("../../src/db/client.js", () => ({ pool: { query: poolQuery } }));
 vi.mock("../../src/db/queries/usage.js", () => ({ logUsage }));
 vi.mock("../../src/config.js", () => ({
   config: { telegram: { allowedChatId: "12345" } },
@@ -53,6 +56,7 @@ beforeEach(() => {
   sendTelegramMessage.mockReset();
   logUsage.mockReset();
   todayInTimezone.mockReset().mockReturnValue("2026-04-26");
+  poolQuery.mockReset().mockResolvedValue({ rows: [], rowCount: 0 });
 });
 
 describe("runHnDistillWorkflow", () => {
@@ -201,6 +205,92 @@ describe("runHnDistillWorkflow", () => {
         error: "Algolia 503",
         action: "distill_hn_thread",
       })
+    );
+  });
+
+  it("skips when the article URL was distilled within 30 days, notifies via Telegram", async () => {
+    fetchHnItem.mockResolvedValueOnce(HN_ITEM);
+    poolQuery.mockResolvedValueOnce({
+      rows: [
+        {
+          source_path: "Pending/Reference/HN-2026-04-20-test.md",
+          created_at: new Date("2026-04-20T10:00:00Z"),
+        },
+      ],
+      rowCount: 1,
+    });
+    sendTelegramMessage.mockResolvedValueOnce(undefined);
+
+    await runHnDistillWorkflow({
+      itemId: 1,
+      hnUrl: "https://news.ycombinator.com/item?id=1",
+    });
+
+    expect(fetchArticleText).not.toHaveBeenCalled();
+    expect(distillThread).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(writePendingReference).not.toHaveBeenCalled();
+    expect(sendTelegramMessage).toHaveBeenCalledWith(
+      "12345",
+      expect.stringContaining("already distilled 2026-04-20")
+    );
+    expect(logUsage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        ok: true,
+        meta: expect.objectContaining({ skipped: "duplicate" }),
+      })
+    );
+  });
+
+  it("queries by article URL when item.url is present", async () => {
+    fetchHnItem.mockResolvedValueOnce(HN_ITEM);
+    distillThread.mockResolvedValueOnce({
+      markdown: "x",
+      model: "claude-opus-4-7",
+      usage: { inputTokens: 1, outputTokens: 1 },
+      cost: { inputCostUsd: 0, outputCostUsd: 0, totalCostUsd: 0 },
+    });
+    fetchArticleText.mockResolvedValueOnce(null);
+    sendEmail.mockResolvedValue(undefined);
+    writePendingReference.mockResolvedValueOnce({
+      filename: "x",
+      key: "Pending/Reference/x",
+    });
+
+    await runHnDistillWorkflow({
+      itemId: 1,
+      hnUrl: "https://news.ycombinator.com/item?id=1",
+    });
+
+    expect(poolQuery).toHaveBeenCalledWith(
+      expect.any(String),
+      [expect.stringContaining("Original article: https://example.com")]
+    );
+  });
+
+  it("queries by HN URL when item.url is null (self-post)", async () => {
+    fetchHnItem.mockResolvedValueOnce({ ...HN_ITEM, url: null });
+    distillThread.mockResolvedValueOnce({
+      markdown: "x",
+      model: "claude-opus-4-7",
+      usage: { inputTokens: 1, outputTokens: 1 },
+      cost: { inputCostUsd: 0, outputCostUsd: 0, totalCostUsd: 0 },
+    });
+    sendEmail.mockResolvedValue(undefined);
+    writePendingReference.mockResolvedValueOnce({
+      filename: "x",
+      key: "Pending/Reference/x",
+    });
+
+    await runHnDistillWorkflow({
+      itemId: 1,
+      hnUrl: "https://news.ycombinator.com/item?id=1",
+    });
+
+    expect(poolQuery).toHaveBeenCalledWith(
+      expect.any(String),
+      [expect.stringContaining("HN thread: https://news.ycombinator.com/item?id=1")]
     );
   });
 

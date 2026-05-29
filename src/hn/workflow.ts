@@ -52,6 +52,56 @@ export async function runHnDistillWorkflow(
     const item = await fetchHnItem(input.itemId);
     const totalNodes = countItems(item);
 
+    // Dedupe by article URL (or HN URL for self-posts) within a 30-day window.
+    // The interactive Telegram trigger is the only path through here; batch
+    // re-distill scripts bypass this by calling distillThread directly. To
+    // force a re-distill from Telegram, rm the existing Pending/Reference/HN-*.md
+    // and re-trigger.
+    const dedupUrl = item.url?.trim() || input.hnUrl;
+    const dedupNeedle = item.url?.trim()
+      ? `Original article: ${dedupUrl}`
+      : `HN thread: ${dedupUrl}`;
+    const existing = await pool.query<{
+      source_path: string;
+      created_at: Date;
+    }>(
+      `SELECT source_path, created_at
+         FROM knowledge_artifacts
+        WHERE source_path LIKE 'Pending/Reference/HN-%'
+          AND deleted_at IS NULL
+          AND body LIKE $1
+          AND created_at > NOW() - INTERVAL '30 days'
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [`%${dedupNeedle}%`]
+    );
+    if (existing.rowCount && existing.rowCount > 0) {
+      const row = existing.rows[0];
+      const when = row.created_at.toISOString().slice(0, 10);
+      logUsage(pool, {
+        source: "telegram",
+        surface: "hn-distill",
+        action: "distill_hn_thread",
+        actor: chatId || undefined,
+        ok: true,
+        durationMs: Date.now() - startedAt,
+        meta: {
+          itemId: input.itemId,
+          totalNodes,
+          skipped: "duplicate",
+          existingPath: row.source_path,
+          existingCreatedAt: when,
+        },
+      });
+      if (chatId) {
+        await sendTelegramMessage(
+          chatId,
+          `⏭️ HN #${input.itemId} already distilled ${when}: <code>${row.source_path}</code>. To re-distill: rm the existing file and re-trigger.`
+        );
+      }
+      return;
+    }
+
     const article =
       item.url && item.url.trim().length > 0
         ? await fetchArticleText(item.url).catch((err) => {

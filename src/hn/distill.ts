@@ -56,6 +56,7 @@ Personal context that matters when topics hit:
 - Specific benchmarks / numbers / API surfaces — don't say "fast"; give the number and the baseline
 - Jargon coined within the thread itself (memes, distinctive framings) — quote and translate
 - Anything where the load-bearing claim depends on a definition
+- When a load-bearing claim is illustrated by a specific implementation, name the underlying *pattern* explicitly and the implementation as one instance — so the pattern's generality is visible (e.g. Apple's \`@Generable\` is one instance of typed-output-schemas-with-NL-guides, which also describes Zod + Vercel AI SDK's \`generateObject\`)
 
 # Output format (markdown)
 
@@ -85,8 +86,21 @@ One to three bullets connecting the thread to his actual life and stack. Candida
 ## Useful resources
 Tools, links, papers, prior threads mentioned in passing worth saving. Bullet list with a short note each. Skip the section if none.
 
+## Insight neighborhoods
+Bullets naming vault topic-tags or specific Insight neighborhoods worth pulling for cross-linking when his downstream tenet-extraction pipeline classifies atoms from this distill. Format: \`- [neighborhood/topic]: why it's adjacent\`. As many bullets as are genuinely adjacent — skip the section if none. Examples: \`- embeddings-over-LLM bias: the intent-capture sub-thread sharpens it\`; \`- ADHD-as-amplifier: the cluster-vs-multimorbidity reframe extends it\`. Do not draft candidate tenets here — substantive claims belong in \`Comments by angle\` or \`The actual signal\`. This section is adjacency-tagging for downstream extraction, not editorial content.
+
 ## The actual signal
 Numbered list (typically 3–6 items) of what the story really is, beyond the surface complaints. Sharp, opinionated, specific. This IS the closing — no separate "in conclusion" wrap-up.
+
+# Time-sensitive claims
+
+Many threads contain claims that are true *now* but expire: market reads, model comparisons, company positions, technology adoption stages, prevalence numbers in fast-moving fields. When you state a time-sensitive claim, also state the durable *meta-claim* it instances, and tag the snapshot with \`[snapshot: YYYY-MM]\`.
+
+Example — DeepSeek V4:
+- Snapshot only (avoid): *"Use DeepSeek/GLM/Kimi unless you need Opus-tier planning."*
+- Meta + snapshot (do this): *"Price-per-quality crossover regions exist where a cheap-and-good-enough model becomes the rational default for entire task classes. \`[snapshot: 2026-05]\` Current instance: DeepSeek V4 / Kimi K2.6 / GLM 5.1 for refactor/extraction; frontier for planning."*
+
+The meta-claim holds up over time; the snapshot is the evidence at the moment of writing. Apply most strictly in \`The hidden number\` and \`The actual signal\` (where editorial synthesis lives); less critical in \`Headline facts\` (facts are facts).
 
 # Skip
 - Generic agreement, pile-on jokes, marketing language from the original post
