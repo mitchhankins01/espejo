@@ -19,6 +19,11 @@ const FLOW_NAME = "checkpoint";
 const MIRROR_FEATURE_ON = true;
 const DUPLICATE_WINDOW_MINUTES = 10;
 
+// One combined prompt: tap the button, answer all three in a single message
+// (periods/newlines separate trigger / body / want and unlock the mirror line;
+// a bare blob logs as the trigger alone). Bottom-up, breath-cued, no part-naming.
+const CHECKPOINT_PROMPT = "Toll. One slow inhale, slower exhale. What, where, why?";
+
 export interface CheckpointDeps {
   pool: pg.Pool;
   chatId: string;
@@ -221,30 +226,20 @@ export async function startCheckpointFlow(
     return;
   }
 
-  // Partial: pre-fill what we have and ask for the next missing field.
+  // Fewer than 3 segments: pre-fill what we have, then ask the one combined
+  // question and capture the rest in a single follow-up message.
   const data: CheckpointFlowState["data"] = {};
   if (segments[0]) data.trigger = segments[0];
   if (segments[1]) data.body_signal = segments[1];
-  if (segments[2]) data.part_voice = segments[2];
-
-  let step: CheckpointFlowState["step"] = "awaiting_pull";
-  let prompt = "Toll. What's pulling — and where in the body?";
-  if (data.trigger && data.body_signal) {
-    step = "awaiting_voice";
-    prompt = "One long inhale. Now the slowest exhale.\n\nWhat does it want?";
-  } else if (data.trigger) {
-    step = "awaiting_pull";
-    prompt = "Where in the body?";
-  }
 
   setFlow(deps.chatId, {
     flow: "checkpoint",
-    step,
+    step: "awaiting_pull",
     data,
     startedAt: Date.now(),
   });
-  await sendTelegramMessage(deps.chatId, prompt);
-  await persistAssistantTurn(deps, prompt);
+  await sendTelegramMessage(deps.chatId, CHECKPOINT_PROMPT);
+  await persistAssistantTurn(deps, CHECKPOINT_PROMPT);
 }
 
 export async function continueCheckpointFlow(
@@ -254,85 +249,39 @@ export async function continueCheckpointFlow(
 ): Promise<void> {
   await persistUserTurn(deps, text);
 
-  if (state.step === "awaiting_pull") {
-    // Expect "Substance. Body" — split on first period+space.
-    const trimmed = text.trim();
-    const split = trimmed.split(/\.\s+/, 2);
-    let trigger: string;
-    let body: string | undefined;
-    let parserFallback = false;
-    if (split.length === 2 && split[0].length > 0 && split[1].length > 0) {
-      trigger = split[0].trim();
-      body = split[1].trim().replace(/[.!?]+$/, "");
-    } else {
-      trigger = trimmed;
-      parserFallback = true;
-    }
-    const next: CheckpointFlowState = {
-      flow: "checkpoint",
-      step: "awaiting_voice",
-      data: {
-        trigger,
-        body_signal: body ?? state.data.body_signal,
-        parser_fallback: parserFallback,
-      },
-      startedAt: state.startedAt,
-    };
-    setFlow(deps.chatId, next);
+  // Single capture turn. Split the message on periods/newlines and drop each
+  // piece into the still-missing fields, in order: trigger → body → want.
+  // (A button tap pre-fills nothing, so all three come from this message;
+  // a partial `/c trigger. body` pre-fills the rest.) Extra pieces fold into
+  // "want". A blob with no separators logs as the trigger alone — no mirror.
+  const parts = text
+    .split(/[.\n]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  const pieces = parts.length > 0 ? parts : [text.trim()];
 
-    const prompt = body
-      ? "One long inhale. Now the slowest exhale.\n\nWhat does it want?"
-      : "Where in the body?";
-    await sendTelegramMessage(deps.chatId, prompt);
-    await persistAssistantTurn(deps, prompt);
+  const slots: ("trigger" | "body" | "voice")[] = [];
+  if (!state.data.trigger) slots.push("trigger");
+  if (!state.data.body_signal) slots.push("body");
+  slots.push("voice");
 
-    if (!body) {
-      // Need body separately — still in awaiting_pull effectively but we use
-      // awaiting_voice with body_signal undefined and re-prompt for body next.
-      next.step = "awaiting_pull";
-      next.data.body_signal = undefined;
-      setFlow(deps.chatId, next);
-    }
-    return;
-  }
+  let trigger = state.data.trigger ?? null;
+  let bodySignal = state.data.body_signal ?? null;
+  let partVoice: string | null = null;
+  pieces.forEach((piece, i) => {
+    const slot = slots[Math.min(i, slots.length - 1)];
+    if (slot === "trigger") trigger = piece;
+    else if (slot === "body") bodySignal = piece;
+    else partVoice = partVoice ? `${partVoice}. ${piece}` : piece;
+  });
 
-  if (state.step === "awaiting_voice") {
-    // If we still don't have body_signal, this turn is the body answer.
-    if (!state.data.body_signal) {
-      const next: CheckpointFlowState = {
-        flow: "checkpoint",
-        step: "awaiting_voice",
-        data: { ...state.data, body_signal: text.trim() },
-        startedAt: state.startedAt,
-      };
-      setFlow(deps.chatId, next);
-      const prompt = "One long inhale. Now the slowest exhale.\n\nWhat does it want?";
-      await sendTelegramMessage(deps.chatId, prompt);
-      await persistAssistantTurn(deps, prompt);
-      return;
-    }
-    // Part voice collected → finalize with the default "go" resolution.
-    // (Pass is mental, never logged.)
-    await finalizeCheckpoint(deps, {
-      trigger: state.data.trigger ?? "",
-      bodySignal: state.data.body_signal ?? null,
-      partVoice: text.trim(),
-      resolution: DEFAULT_RESOLUTION,
-      parserFallback: state.data.parser_fallback ?? false,
-    });
-    return;
-  }
-
-  if (state.step === "awaiting_choice") {
-    // Legacy step — left here for any in-flight flows mid-restart. Treat any
-    // text as the part_voice if missing, otherwise just finalize as "go".
-    await finalizeCheckpoint(deps, {
-      trigger: state.data.trigger ?? "",
-      bodySignal: state.data.body_signal ?? null,
-      partVoice: state.data.part_voice ?? text.trim(),
-      resolution: DEFAULT_RESOLUTION,
-      parserFallback: state.data.parser_fallback ?? false,
-    });
-    return;
-  }
+  await finalizeCheckpoint(deps, {
+    trigger: trigger ?? text.trim(),
+    bodySignal,
+    partVoice,
+    // Default "go" — pass is mental, never logged. parser_fallback marks a
+    // bare blob we couldn't structure into body/want (so no mirror line).
+    resolution: DEFAULT_RESOLUTION,
+    parserFallback: bodySignal == null && partVoice == null,
+  });
 }

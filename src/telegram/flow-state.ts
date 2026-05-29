@@ -9,13 +9,12 @@ export type FlowName =
 
 export interface CheckpointFlowState {
   flow: "checkpoint";
-  step: "awaiting_pull" | "awaiting_voice" | "awaiting_choice";
+  // One capture step: the flow asks a single combined question, then logs the
+  // next message. (Pre-formed `/c trigger. body. want` skips the flow entirely.)
+  step: "awaiting_pull";
   data: {
     trigger?: string;
     body_signal?: string;
-    part_voice?: string;
-    resolution?: "pass" | "go" | "unset";
-    parser_fallback?: boolean;
   };
   startedAt: number;
 }

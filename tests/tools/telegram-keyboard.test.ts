@@ -6,31 +6,21 @@ import {
 } from "../../src/telegram/keyboard.js";
 
 describe("telegram keyboard", () => {
-  it("every button label starts with an emoji", () => {
-    // The emoji prefix is the safety property: it makes a tap impossible to
-    // confuse with typed or Whisper-transcribed text. Enforce it, don't trust
-    // convention. \p{Extended_Pictographic} covers the emoji we use.
-    for (const label of KEYBOARD_LABELS) {
-      expect(label, `label "${label}" must start with an emoji`).toMatch(
-        /^\p{Extended_Pictographic}/u
-      );
-    }
-  });
-
   it("resolves each exact label to its command", () => {
-    expect(resolveButtonLabel("🎯 Checkpoint")).toBe("checkpoint");
-    expect(resolveButtonLabel("🧠 SRS")).toBe("srs");
-    expect(resolveButtonLabel("🔤 Conj")).toBe("conj");
+    expect(resolveButtonLabel("Checkpoint")).toBe("checkpoint");
+    expect(resolveButtonLabel("SRS")).toBe("srs");
+    expect(resolveButtonLabel("Conj")).toBe("conj");
   });
 
   it("tolerates surrounding whitespace from the client", () => {
-    expect(resolveButtonLabel("  🎯 Checkpoint  ")).toBe("checkpoint");
+    expect(resolveButtonLabel("  Checkpoint  ")).toBe("checkpoint");
   });
 
-  it("returns null for natural text that merely contains a command word", () => {
-    // No emoji prefix → not a tap. This is the disjointness the design relies on.
+  it("returns null for natural text, case-sensitively disjoint from taps", () => {
+    // Match is exact + case-sensitive: lowercase prose never resolves, so a
+    // tap (capitalized label) stays disjoint from how these words appear in
+    // natural text or Whisper transcription.
     expect(resolveButtonLabel("checkpoint")).toBeNull();
-    expect(resolveButtonLabel("Checkpoint")).toBeNull();
     expect(resolveButtonLabel("let's do an srs round")).toBeNull();
     expect(resolveButtonLabel("conj")).toBeNull();
     expect(resolveButtonLabel("")).toBeNull();

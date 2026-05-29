@@ -4,16 +4,17 @@
 // subsequent messages until replaced — so it coexists with the per-message
 // inline keyboards srs/conj cards use; we don't re-send it on every reply.
 //
-// Button label → command mapping is exact-match including the emoji prefix.
-// Whisper never transcribes the literal emoji, and a typed message never
-// reproduces it either, so a tap is unambiguous from natural text. The
-// emoji-prefix invariant is enforced by a unit test against KEYBOARD_LABELS.
+// Button label → command mapping is an exact, case-sensitive match (trim
+// only). A tap sends the literal capitalized label; natural prose and Whisper
+// transcription use lowercase ("let's do conj"), so taps stay disjoint from
+// typed/spoken text. The only collision is typing one of these words verbatim
+// with its exact capitalization — vanishingly rare for "SRS"/"Conj".
 
 /** Single source of truth: exact button label → slash command name. */
 const BUTTON_TO_COMMAND: Readonly<Record<string, string>> = {
-  "🎯 Checkpoint": "checkpoint",
-  "🧠 SRS": "srs",
-  "🔤 Conj": "conj",
+  Checkpoint: "checkpoint",
+  SRS: "srs",
+  Conj: "conj",
 };
 
 /** Ordered button labels (drives both the markup and the invariant test). */
