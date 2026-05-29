@@ -55,11 +55,10 @@ const migrations: Migration[] = [
           role TEXT NOT NULL,
           content TEXT NOT NULL,
           tool_call_id TEXT,
-          compacted_at TIMESTAMPTZ,
           created_at TIMESTAMPTZ DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_chat_messages_created ON chat_messages(created_at);
-      CREATE INDEX IF NOT EXISTS idx_chat_messages_active ON chat_messages(chat_id, created_at) WHERE compacted_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_chat_messages_chat_created ON chat_messages(chat_id, created_at);
 
       CREATE TABLE IF NOT EXISTS patterns (
           id SERIAL PRIMARY KEY,
@@ -2080,6 +2079,17 @@ const migrations: Migration[] = [
       ) STORED;
       CREATE INDEX IF NOT EXISTS idx_knowledge_artifacts_tsv
         ON knowledge_artifacts USING GIN (tsv);
+    `,
+  },
+  {
+    name: "060-drop-chat-compaction",
+    getSql: () => `
+      -- Remove the never-wired chat-message compaction artifact. The session
+      -- boundary is now a 'reset' marker row, not the compacted_at flag.
+      DROP INDEX IF EXISTS idx_chat_messages_active;
+      ALTER TABLE chat_messages DROP COLUMN IF EXISTS compacted_at;
+      CREATE INDEX IF NOT EXISTS idx_chat_messages_chat_created
+        ON chat_messages(chat_id, created_at);
     `,
   },
 ];

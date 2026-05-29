@@ -21,10 +21,9 @@ import {
   getWeightPatterns,
   insertChatMessage,
   getRecentMessages,
+  getSessionMessages,
+  resetChatSession,
   getMessagesSince,
-  markMessagesCompacted,
-  purgeCompactedMessages,
-  getLastCompactionTime,
   getRecentChatPrompts,
   getOuraDayContext,
   upsertOuraSleepTime,
@@ -568,7 +567,7 @@ describe("insertChatMessage", () => {
 });
 
 describe("getRecentMessages", () => {
-  it("returns uncompacted messages in chronological order", async () => {
+  it("returns messages in chronological order", async () => {
     await insertChatMessage(pool, {
       chatId: "12345",
       externalMessageId: "update:301",
@@ -642,6 +641,74 @@ describe("getRecentMessages", () => {
   });
 });
 
+describe("getSessionMessages / resetChatSession", () => {
+  it("returns only turns after the most recent reset marker, newest first", async () => {
+    await insertChatMessage(pool, {
+      chatId: "5500",
+      externalMessageId: "s1",
+      role: "user",
+      content: "old thread",
+      flow: "chat",
+    });
+    const before = await resetChatSession(pool, "5500", "chat");
+    expect(before).toBe(1); // the one pre-reset turn was in the closed session
+
+    await insertChatMessage(pool, {
+      chatId: "5500",
+      externalMessageId: "s2",
+      role: "user",
+      content: "new thread q",
+      flow: "chat",
+    });
+    await insertChatMessage(pool, {
+      chatId: "5500",
+      externalMessageId: null,
+      role: "assistant",
+      content: "new thread a",
+      flow: "chat",
+    });
+
+    const session = await getSessionMessages(pool, "5500", "chat", 100);
+    expect(session.map((m) => m.content)).toEqual(["new thread a", "new thread q"]);
+  });
+
+  it("excludes tool_result rows and respects the row cap", async () => {
+    await insertChatMessage(pool, {
+      chatId: "5501",
+      externalMessageId: "t1",
+      role: "user",
+      content: "q",
+      flow: "chat",
+    });
+    await insertChatMessage(pool, {
+      chatId: "5501",
+      externalMessageId: null,
+      role: "tool_result",
+      content: "[big tool payload]",
+      flow: "chat",
+    });
+    await insertChatMessage(pool, {
+      chatId: "5501",
+      externalMessageId: null,
+      role: "assistant",
+      content: "a",
+      flow: "chat",
+    });
+
+    const all = await getSessionMessages(pool, "5501", "chat", 100);
+    expect(all.map((m) => m.role)).toEqual(["assistant", "user"]);
+
+    const capped = await getSessionMessages(pool, "5501", "chat", 1);
+    expect(capped).toHaveLength(1);
+    expect(capped[0].content).toBe("a"); // newest first
+  });
+
+  it("reports zero when there is nothing to clear", async () => {
+    const n = await resetChatSession(pool, "5502", "chat");
+    expect(n).toBe(0);
+  });
+});
+
 describe("getMessagesSince", () => {
   it("returns only user and assistant messages since the cutoff, in order", async () => {
     // Before cutoff
@@ -693,75 +760,6 @@ describe("getMessagesSince", () => {
   it("returns empty when no messages since cutoff", async () => {
     const rows = await getMessagesSince(pool, "888999", new Date());
     expect(rows).toEqual([]);
-  });
-});
-
-describe("markMessagesCompacted", () => {
-  it("soft-deletes messages by setting compacted_at", async () => {
-    const r1 = await insertChatMessage(pool, {
-      chatId: "12345",
-      externalMessageId: "update:500",
-      role: "user",
-      content: "Old message",
-    });
-
-    await markMessagesCompacted(pool, [r1.id!]);
-
-    const messages = await getRecentMessages(pool, "12345", 100);
-    expect(messages).toHaveLength(0);
-  });
-});
-
-describe("purgeCompactedMessages", () => {
-  it("hard-deletes compacted messages older than threshold", async () => {
-    const r1 = await insertChatMessage(pool, {
-      chatId: "12345",
-      externalMessageId: "update:600",
-      role: "user",
-      content: "Old message",
-    });
-    await markMessagesCompacted(pool, [r1.id!]);
-
-    // Set compacted_at to the past
-    await pool.query(
-      "UPDATE chat_messages SET compacted_at = NOW() - INTERVAL '8 days' WHERE id = $1",
-      [r1.id]
-    );
-
-    const deleted = await purgeCompactedMessages(pool, new Date());
-    expect(deleted).toBe(1);
-  });
-});
-
-// ============================================================================
-// getLastCompactionTime
-// ============================================================================
-
-describe("getLastCompactionTime", () => {
-  it("returns null when no compacted messages exist", async () => {
-    const result = await getLastCompactionTime(pool, "999");
-    expect(result).toBeNull();
-  });
-
-  it("returns the latest compacted_at timestamp", async () => {
-    await insertChatMessage(pool, {
-      chatId: "999",
-      externalMessageId: "ext-1",
-      role: "user",
-      content: "hello",
-    });
-    await insertChatMessage(pool, {
-      chatId: "999",
-      externalMessageId: "ext-2",
-      role: "assistant",
-      content: "hi",
-    });
-
-    const messages = await getRecentMessages(pool, "999", 10);
-    await markMessagesCompacted(pool, messages.map((m) => m.id));
-
-    const result = await getLastCompactionTime(pool, "999");
-    expect(result).toBeInstanceOf(Date);
   });
 });
 

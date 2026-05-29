@@ -352,7 +352,6 @@ Do not implement these (they're planned future work, not part of the current bui
 - Write/update/delete MCP tools for journal entries — Day One is the canonical writer for `entries`; new long-form notes go into the Obsidian vault and flow through the artifact sync.
 - Multi-user support or auth beyond MCP SDK defaults
 - Chunking strategies (entries fit in single embeddings)
-- Auto-purge of compacted messages (function exists in `src/db/queries/chat.ts`, not wired up)
 
 See `specs/*.md` files marked `[Stub]` or `[Planned]` for upcoming features.
 

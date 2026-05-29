@@ -7,7 +7,6 @@ export interface ChatMessageRow {
   role: string;
   content: string;
   tool_call_id: string | null;
-  compacted_at: Date | null;
   flow: string | null;
   created_at: Date;
 }
@@ -68,7 +67,7 @@ export async function getMessagesSince(
 }
 
 /**
- * Get recent uncompacted messages, ordered oldest first.
+ * Get recent messages, ordered oldest first.
  * If `flow` is provided, returns rows where `flow IS NULL OR flow = $flow`
  * (NULL covers historical rows pre-`flow` migration).
  */
@@ -84,7 +83,7 @@ export async function getRecentMessages(
        FROM (
          SELECT *
          FROM chat_messages
-         WHERE chat_id = $1 AND compacted_at IS NULL AND (flow IS NULL OR flow = $3)
+         WHERE chat_id = $1 AND (flow IS NULL OR flow = $3)
          ORDER BY created_at DESC, id DESC
          LIMIT $2
        ) AS recent
@@ -98,7 +97,7 @@ export async function getRecentMessages(
      FROM (
        SELECT *
        FROM chat_messages
-       WHERE chat_id = $1 AND compacted_at IS NULL
+       WHERE chat_id = $1
        ORDER BY created_at DESC, id DESC
        LIMIT $2
      ) AS recent
@@ -109,30 +108,65 @@ export async function getRecentMessages(
 }
 
 /**
- * Soft-delete messages by marking them as compacted.
+ * Messages in the current chat session: user/assistant turns newer than the
+ * most recent session-boundary marker (see resetChatSession), newest first,
+ * bounded by maxRows. The caller trims to a token budget and reverses to
+ * oldest-first. tool_result rows are excluded — they're never replayed to the
+ * model.
  */
-export async function markMessagesCompacted(
+export async function getSessionMessages(
   pool: pg.Pool,
-  ids: number[]
-): Promise<void> {
-  await pool.query(
-    `UPDATE chat_messages SET compacted_at = NOW() WHERE id = ANY($1::int[])`,
-    [ids]
+  chatId: string,
+  flow: string,
+  maxRows: number
+): Promise<ChatMessageRow[]> {
+  const result = await pool.query(
+    `SELECT *
+     FROM chat_messages
+     WHERE chat_id = $1
+       AND (flow IS NULL OR flow = $2)
+       AND role IN ('user', 'assistant')
+       AND id > COALESCE(
+         (SELECT MAX(id) FROM chat_messages
+          WHERE chat_id = $1 AND role = 'reset' AND (flow IS NULL OR flow = $2)),
+         0)
+     ORDER BY created_at DESC, id DESC
+     LIMIT $3`,
+    [chatId, flow, maxRows]
   );
+  return result.rows;
 }
 
 /**
- * Hard-delete compacted messages older than the given timestamp.
+ * End the current chat session by writing a boundary marker row. The next
+ * getSessionMessages load starts after it, so context resets to empty without
+ * deleting anything — analytics (getRecentChatPrompts) still read every row.
+ * Returns the count of user/assistant messages that were in the closed session
+ * (0 means there was nothing to clear).
  */
-export async function purgeCompactedMessages(
+export async function resetChatSession(
   pool: pg.Pool,
-  olderThan: Date
+  chatId: string,
+  flow: string
 ): Promise<number> {
-  const result = await pool.query(
-    `DELETE FROM chat_messages WHERE compacted_at IS NOT NULL AND compacted_at < $1`,
-    [olderThan]
+  const countResult = await pool.query<{ n: string }>(
+    `SELECT COUNT(*)::text AS n
+     FROM chat_messages
+     WHERE chat_id = $1
+       AND (flow IS NULL OR flow = $2)
+       AND role IN ('user', 'assistant')
+       AND id > COALESCE(
+         (SELECT MAX(id) FROM chat_messages
+          WHERE chat_id = $1 AND role = 'reset' AND (flow IS NULL OR flow = $2)),
+         0)`,
+    [chatId, flow]
   );
-  return /* v8 ignore next -- defensive: rowCount is always set for DELETE */ result.rowCount ?? 0;
+  await pool.query(
+    `INSERT INTO chat_messages (chat_id, external_message_id, role, content, flow)
+     VALUES ($1, NULL, 'reset', '', $2)`,
+    [chatId, flow]
+  );
+  return Number(countResult.rows[0]?.n ?? 0);
 }
 
 /**
@@ -165,18 +199,4 @@ export async function getRecentChatPrompts(
     [options.fromDate, options.toDate, options.timezone]
   );
   return result.rows;
-}
-
-/**
- * Get the most recent compaction timestamp for a chat.
- */
-export async function getLastCompactionTime(
-  pool: pg.Pool,
-  chatId: string
-): Promise<Date | null> {
-  const result = await pool.query(
-    `SELECT MAX(compacted_at) AS last_compacted FROM chat_messages WHERE chat_id = $1 AND compacted_at IS NOT NULL`,
-    [chatId]
-  );
-  return result.rows[0]?.last_compacted ?? null;
 }

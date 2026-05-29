@@ -165,7 +165,8 @@ CREATE INDEX IF NOT EXISTS idx_daily_metrics_date ON daily_metrics(date);
 -- Chat & Pattern Memory (Telegram chatbot)
 -- ============================================================================
 
--- Short-term: raw conversation messages (pruned on compaction)
+-- Raw Telegram conversation messages. A 'reset' marker row bounds the current
+-- chat session (everything after the last marker); /done writes one.
 CREATE TABLE IF NOT EXISTS chat_messages (
     id SERIAL PRIMARY KEY,
     chat_id BIGINT NOT NULL,
@@ -173,12 +174,11 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     role TEXT NOT NULL,
     content TEXT NOT NULL,
     tool_call_id TEXT,
-    compacted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_chat_messages_created ON chat_messages(created_at);
-CREATE INDEX IF NOT EXISTS idx_chat_messages_active ON chat_messages(chat_id, created_at) WHERE compacted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_chat_messages_chat_created ON chat_messages(chat_id, created_at);
 
 -- ============================================================================
 -- Activity logs (per-agent-run observability)

@@ -5,7 +5,7 @@ import { sendTelegramMessage } from "./client.js";
 import { transcribeVoiceMessage } from "./voice.js";
 import { extractTextFromDocument, extractTextFromImage } from "./media.js";
 import { categorizeError, buildErrorMarkerMessage } from "./error-handling.js";
-import { insertChatMessage } from "../db/queries/chat.js";
+import { insertChatMessage, resetChatSession } from "../db/queries/chat.js";
 import { getFlow, clearFlow } from "./flow-state.js";
 import {
   startCheckpointFlow,
@@ -244,7 +244,13 @@ async function routeText(
         await sendTelegramMessage(chatId, "Sesión cerrada.");
         return;
       }
-      await sendTelegramMessage(chatId, "No hay sesión activa.");
+      // Nothing structured active → /done clears the free-chat thread by
+      // writing a session boundary; the next message starts with empty context.
+      const closed = await resetChatSession(ctx.pool, chatId, "chat");
+      await sendTelegramMessage(
+        chatId,
+        closed > 0 ? "Listo, empezamos de cero. 🌊" : "Ya estábamos de cero."
+      );
       return;
     }
     // /srs soft-blocks if any flow is active — handle BEFORE the swap-clear
