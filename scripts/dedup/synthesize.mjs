@@ -367,12 +367,42 @@ for (const [src, s] of Object.entries(mergeBySource)) {
   console.error(`[synth] cycle coalesced: primary=${primary.source_path.replace(/^Pending\//, "")} ⇄ skipped=${secondary.source_path.replace(/^Pending\//, "")}`);
 }
 
+// ─── Intra-batch dups (pre-classified by retrieve.ts; council never saw them) ─
+// These are Pending × Pending near-twins resolved by survivor-selection (longer
+// body wins). They flow straight through as `final_action: "Duplicate"` so
+// apply.mjs treats them like any other Duplicate (rewriteInbound + rm).
+const intraBatchDups = planFull.intra_batch_dups || [];
+for (const dup of intraBatchDups) {
+  synth.push({
+    source_path: dup.loser_path,
+    final_action: "Duplicate",
+    final_target: dup.survivor_path,
+    consensus: "auto_safe",
+    target_agreement: "agree",
+    tally: {},
+    votes_n: 0,
+    recommended_pick: null,
+    recommendation_rationale: dup.reason,
+    score_breakdown: [],
+    is_supersede: false,
+    classifications: {},
+    rationales: {},
+    merge_bodies: {},
+    intra_batch_dup: true,
+    cosine_distance: dup.cosine_distance,
+  });
+}
+if (intraBatchDups.length) {
+  console.error(`[synth] intra-batch dups appended: ${intraBatchDups.length}`);
+}
+
 const summary = {
   total: synth.length,
   buckets: synth.reduce((acc, s) => { acc[s.consensus] = (acc[s.consensus] || 0) + 1; return acc; }, {}),
   by_final_action: synth.reduce((acc, s) => { acc[s.final_action] = (acc[s.final_action] || 0) + 1; return acc; }, {}),
   coalesce_demotions: synth.filter(s => s.coalesce_demoted_from).length,
   cycle_skips: synth.filter(s => s.coalesce_cycle_paired_with).length,
+  intra_batch_dups: intraBatchDups.length,
   active_legs: activeLegs,
 };
 
@@ -436,12 +466,19 @@ if (skipActions.length) {
   md += `\n---\n\n`;
 }
 
-md += `## Deletes (${dupActions.length}) — Duplicate\n\n`;
-md += `| # | Source | Target it duplicates | Consensus |\n|---:|---|---|---|\n`;
+const intraBatchInDups = dupActions.filter(s => s.intra_batch_dup).length;
+const intraBatchNote = intraBatchInDups
+  ? ` _(${intraBatchInDups} intra-batch near-twin${intraBatchInDups === 1 ? "" : "s"} pre-resolved by survivor-selection)_`
+  : "";
+md += `## Deletes (${dupActions.length}) — Duplicate${intraBatchNote}\n\n`;
+md += `| # | Source | Target it duplicates | Consensus | Reason |\n|---:|---|---|---|---|\n`;
 i = 0;
 for (const s of dupActions) {
   i++;
-  md += `| ${i} | \`${shortSrc(s.source_path)}\` | \`${shortSrc(s.final_target)}\` | ${s.consensus} |\n`;
+  const reason = s.intra_batch_dup
+    ? `intra-batch (cosine ${(s.cosine_distance ?? 0).toFixed(3)})`
+    : "council";
+  md += `| ${i} | \`${shortSrc(s.source_path)}\` | \`${shortSrc(s.final_target)}\` | ${s.consensus} | ${reason} |\n`;
 }
 md += `\n---\n\n`;
 
@@ -490,7 +527,7 @@ if (supersedeActions.length) {
 }
 
 md += `## Merges (${trueMergeActions.length}) — REQUIRES YOUR ATTENTION\n\n`;
-md += `Each section: source body (will be deleted) + full target BEFORE + red/green diff + full target ⭐ recommended AFTER. Alternates collapsed.\n\n`;
+md += `Each section: source body (will be deleted) + red/green diff vs. the current target. Full alternate bodies live in \`synthesis.json\` if you need them.\n\n`;
 i = 0;
 for (const s of trueMergeActions) {
   i++;
@@ -506,37 +543,16 @@ for (const s of trueMergeActions) {
     const beforeBody = stripFrontmatter(readMd(s.final_target));
     const afterBody = s.merge_bodies[pick];
     const diff = unifiedDiff(beforeBody, afterBody);
-    md += `**Target BEFORE (\`${shortSrc(s.final_target)}\`):**\n\n\`\`\`md\n${beforeBody}\n\`\`\`\n\n`;
-    md += `**Target diff (BEFORE → AFTER ⭐ ${pick}):**\n\n`;
+    md += `**Target diff (⭐ ${pick}):**\n\n`;
     if (diff) {
       md += `\`\`\`diff\n${diff}\`\`\`\n\n`;
-      md += `**Target AFTER ⭐ ${pick} (full body):**\n\n\`\`\`md\n${afterBody}\n\`\`\`\n\n`;
     } else {
       md += `_(no changes — picked body is identical to current target)_\n\n`;
     }
   } else if (isDefer) {
-    md += `**Current target body:**\n\n\`\`\`md\n${stripFrontmatter(readMd(s.final_target))}\n\`\`\`\n\n`;
-    md += `_⚠️ Models picked different targets. Decide manually._\n\n`;
+    md += `_⚠️ Models picked different targets. Decide manually — see \`synthesis.json\` \`classifications\` for each leg's pick._\n\n`;
   }
 
-  const alts = activeLegs.filter(l => l !== pick && s.merge_bodies?.[l]);
-  if (alts.length) {
-    md += `<details><summary>Alternative merged bodies (${alts.join(", ")})</summary>\n\n`;
-    for (const l of alts) {
-      const altTargetPath = s.classifications[l]?.target;
-      const altTargetLabel = altTargetPath ? ` → \`${shortSrc(altTargetPath)}\`` : "";
-      md += `**${l}${altTargetLabel}:**\n\n`;
-      // If the alt picked the same target, show as a diff against current target;
-      // otherwise show plain body (since the diff baseline differs).
-      if (altTargetPath && altTargetPath === s.final_target) {
-        const altDiff = unifiedDiff(stripFrontmatter(readMd(altTargetPath)), s.merge_bodies[l]);
-        md += altDiff ? `\`\`\`diff\n${altDiff}\`\`\`\n\n` : `_(no changes)_\n\n`;
-      } else {
-        md += `\`\`\`md\n${s.merge_bodies[l]}\n\`\`\`\n\n`;
-      }
-    }
-    md += `</details>\n\n`;
-  }
   md += `---\n\n`;
 }
 

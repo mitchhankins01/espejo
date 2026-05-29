@@ -1,16 +1,23 @@
 /**
- * Dedup Stage 1 — retrieval. Hybrid RRF over Insight ∪ Pending, emits JSON
- * plan for the council (Stage 2).
+ * Dedup Stage 1 — retrieval. Hybrid RRF + intra-batch cluster, emits JSON plan
+ * for the council (Stage 2).
  *
  * Usage:
- *   pnpm dedup:retrieve --mode pending             # pending → (Insight ∪ Pending\self)
+ *   pnpm dedup:retrieve --mode pending             # pending → Insight only, intra-batch clustered separately
  *   pnpm dedup:retrieve --mode existing            # Insight pairwise sweep
  *   pnpm dedup:retrieve --mode existing --threshold 0.27
  *   pnpm dedup:retrieve --mode existing --top 10
+ *   pnpm dedup:retrieve --mode pending --intra-batch-threshold 0.15
  *
- * Mode pending includes other Pending files in the candidate pool so the
- * council catches intra-Pending dupes in one pass (2026-04-26 run had
- * ~14/52 pending near-twins that the old Insight-only pool missed).
+ * Mode pending emits TWO outputs:
+ *   - `plan[]`              — each Pending source × top-K Insight candidates (council classifies)
+ *   - `intra_batch_dups[]`  — Pending × Pending pairs above the intra-batch sim threshold
+ *                             (pre-classified as Duplicate, survivor = longer body; council never sees them).
+ *
+ * The 2026-05-28 split fixes the "council merges two Pending twins into a
+ * synthetic combined body" failure mode. Intra-batch near-twins are a Phase 1
+ * over-extraction artifact and should be resolved by survivor-selection, not
+ * by 3-leg deliberation + body synthesis.
  *
  * Output: JSON to stdout. No DB writes, no filesystem mutations.
  *
@@ -53,6 +60,10 @@ if (mode !== "pending" && mode !== "existing") {
 const threshold = Number(arg("--threshold") ?? "0.27");
 const topN = Number(arg("--top") ?? "100");
 const candidatesPerSource = Number(arg("--candidates") ?? "10");
+// Intra-batch near-twin threshold: pairs at or below this cosine distance are
+// resolved by survivor-selection (longer body wins) and skip the council.
+// 0.15 ≈ 0.85 cosine similarity — chosen conservatively; tuning lever.
+const intraBatchThreshold = Number(arg("--intra-batch-threshold") ?? "0.15");
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -108,10 +119,26 @@ interface PairwisePlan {
   cosine_distance: number;
 }
 
+interface IntraBatchDup {
+  loser_path: string;
+  loser_title: string;
+  survivor_path: string;
+  survivor_title: string;
+  cosine_distance: number;
+  reason: string;
+}
+
+interface ModePendingOutput {
+  plan: CandidatePairPlan[];
+  intra_batch_dups: IntraBatchDup[];
+}
+
 // ─── modes ───────────────────────────────────────────────────────────────────
 
 /**
- * MODE A: each pending insight → top-K most similar existing insights.
+ * MODE A: each pending insight → top-K Insight candidates for the council,
+ * PLUS a separate intra-batch dup list (Pending × Pending near-twins resolved
+ * by survivor-selection).
  *
  * Pending IS already in the DB (per src/obsidian/sync.ts:30 — only .obsidian/,
  * .trash/, Templates/ are excluded). So we use its existing embedding rather
@@ -119,13 +146,10 @@ interface PairwisePlan {
  * the pending row has no embedding yet (sync hasn't run, or content changed
  * and embedding was invalidated per src/db/queries/obsidian.ts:105).
  */
-async function modePending(): Promise<CandidatePairPlan[]> {
+async function modePending(): Promise<ModePendingOutput> {
   const pendingPaths = await listSourcePaths(PENDING_DIR, "Pending");
   const insightPaths = await listSourcePaths(INSIGHT_DIR, "Insight");
-  if (pendingPaths.length === 0) return [];
-
-  // Candidate pool = Insight ∪ Pending (self excluded later via id)
-  const candidatePool = [...insightPaths, ...pendingPaths];
+  if (pendingPaths.length === 0) return { plan: [], intra_batch_dups: [] };
 
   // Pendings: rows that exist on disk AND in the DB.
   const pendings = await pool.query<{
@@ -150,13 +174,123 @@ async function modePending(): Promise<CandidatePairPlan[]> {
     console.error(
       `No DB rows for ${pendingPaths.length} pending file(s). Run \`pnpm sync:obsidian\` first.`
     );
-    return [];
+    return { plan: [], intra_batch_dups: [] };
   }
 
+  // ─── Intra-batch cluster sweep ─────────────────────────────────────────────
+  // Find Pending × Pending pairs at/below the intra-batch threshold. Build
+  // clusters via union-find; in each cluster, the longest-body file wins
+  // (tiebreak: source_path lex order, deterministic). Losers skip the council
+  // and flow straight through synth as Duplicates.
+  const intraDups: IntraBatchDup[] = [];
+  const loserSet = new Set<string>();
+
+  if (pendings.rows.length >= 2) {
+    const pairs = await pool.query<{
+      a_path: string;
+      a_title: string;
+      a_len: number;
+      b_path: string;
+      b_title: string;
+      b_len: number;
+      cosine_distance: number;
+    }>(
+      `WITH pending_rows AS (
+         SELECT id, title, body, source_path, embedding
+           FROM knowledge_artifacts
+          WHERE kind = 'insight'
+            AND source = 'obsidian'
+            AND source_path = ANY($1::text[])
+            AND deleted_at IS NULL
+            AND embedding IS NOT NULL
+       )
+       SELECT a.source_path  AS a_path,
+              a.title        AS a_title,
+              LENGTH(a.body) AS a_len,
+              b.source_path  AS b_path,
+              b.title        AS b_title,
+              LENGTH(b.body) AS b_len,
+              (a.embedding <=> b.embedding)::float AS cosine_distance
+         FROM pending_rows a
+         JOIN pending_rows b ON a.source_path < b.source_path
+        WHERE (a.embedding <=> b.embedding) <= $2
+        ORDER BY cosine_distance ASC`,
+      [pendingPaths, intraBatchThreshold]
+    );
+
+    // Union-find over Pending paths
+    const parent = new Map<string, string>();
+    const find = (x: string): string => {
+      if (!parent.has(x)) parent.set(x, x);
+      let r = x;
+      while (parent.get(r) !== r) r = parent.get(r) as string;
+      // path compression
+      let cur = x;
+      while (parent.get(cur) !== r) {
+        const next = parent.get(cur) as string;
+        parent.set(cur, r);
+        cur = next;
+      }
+      return r;
+    };
+    const union = (a: string, b: string): void => {
+      const ra = find(a), rb = find(b);
+      if (ra !== rb) parent.set(ra, rb);
+    };
+
+    for (const row of pairs.rows) {
+      union(row.a_path, row.b_path);
+    }
+
+    // Group members by root and pick survivor per cluster: longest body wins,
+    // tiebreak by source_path ascending (deterministic).
+    const meta = new Map(pendings.rows.map(p => [p.source_path, { title: p.title, len: p.body.length }]));
+    const clusters = new Map<string, string[]>();
+    for (const p of pendings.rows) {
+      if (!parent.has(p.source_path)) continue; // not in any pair
+      const root = find(p.source_path);
+      if (!clusters.has(root)) clusters.set(root, []);
+      (clusters.get(root) as string[]).push(p.source_path);
+    }
+
+    // Build a fast lookup of pairwise cosine distance for reason-printing
+    const dist = new Map<string, number>();
+    for (const row of pairs.rows) {
+      dist.set(`${row.a_path}\t${row.b_path}`, row.cosine_distance);
+      dist.set(`${row.b_path}\t${row.a_path}`, row.cosine_distance);
+    }
+
+    for (const members of clusters.values()) {
+      if (members.length < 2) continue;
+      // Survivor: longest body, lex-tiebreak ascending
+      members.sort((a, b) => {
+        const la = meta.get(a)?.len ?? 0, lb = meta.get(b)?.len ?? 0;
+        if (la !== lb) return lb - la;
+        return a < b ? -1 : 1;
+      });
+      const survivor = members[0];
+      for (const loser of members.slice(1)) {
+        loserSet.add(loser);
+        const cd = dist.get(`${loser}\t${survivor}`) ?? 0;
+        intraDups.push({
+          loser_path: loser,
+          loser_title: meta.get(loser)?.title ?? loser,
+          survivor_path: survivor,
+          survivor_title: meta.get(survivor)?.title ?? survivor,
+          cosine_distance: cd,
+          reason: `intra-batch near-twin (cosine ${cd.toFixed(3)} ≤ ${intraBatchThreshold}); survivor has longer body`,
+        });
+      }
+    }
+  }
+
+  // ─── Council plan: surviving Pendings × Insight candidates only ────────────
   const plan: CandidatePairPlan[] = [];
   let openai: OpenAI | null = null;
 
   for (const p of pendings.rows) {
+    if (loserSet.has(p.source_path)) continue; // handled by intra-batch dedup
+
     let embedding: string | null = null;
 
     if (p.has_embedding) {
@@ -183,14 +317,15 @@ async function modePending(): Promise<CandidatePairPlan[]> {
       embedding = `[${emb.data[0].embedding.join(",")}]`;
     }
 
-    const candidates = await rrfCandidates(embedding, p.title, p.id, candidatePool);
+    // Council sees Insight candidates only — Pending twins are pre-resolved above.
+    const candidates = await rrfCandidates(embedding, p.title, p.id, insightPaths);
     plan.push({
       source: { id: p.id, title: p.title, body: p.body, source_path: p.source_path },
       candidates,
     });
   }
 
-  return plan;
+  return { plan, intra_batch_dups: intraDups };
 }
 
 /**
@@ -323,15 +458,18 @@ async function modeExisting(): Promise<PairwisePlan[]> {
 
 async function main(): Promise<void> {
   if (mode === "pending") {
-    const plan = await modePending();
+    const { plan, intra_batch_dups } = await modePending();
     console.log(
       JSON.stringify(
         {
           mode: "pending",
           generated_at: new Date().toISOString(),
           source_count: plan.length,
+          intra_batch_dup_count: intra_batch_dups.length,
+          intra_batch_threshold: intraBatchThreshold,
           candidates_per_source: candidatesPerSource,
           plan,
+          intra_batch_dups,
         },
         null,
         2
