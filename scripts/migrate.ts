@@ -2092,6 +2092,16 @@ const migrations: Migration[] = [
         ON chat_messages(chat_id, created_at);
     `,
   },
+  {
+    name: "061-add-tenet-kind",
+    getSql: () => `
+      ALTER TABLE knowledge_artifacts
+        DROP CONSTRAINT IF EXISTS knowledge_artifacts_kind_check;
+      ALTER TABLE knowledge_artifacts
+        ADD CONSTRAINT knowledge_artifacts_kind_check
+        CHECK (kind IN ('insight', 'reference', 'note', 'project', 'review', 'tenet'));
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

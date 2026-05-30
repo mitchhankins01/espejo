@@ -5,7 +5,7 @@ import { config } from "../../config.js";
 // Knowledge artifact types
 // ============================================================================
 
-export type ArtifactKind = "insight" | "reference" | "note" | "project" | "review";
+export type ArtifactKind = "insight" | "reference" | "note" | "project" | "review" | "tenet";
 
 export type ArtifactSource = "web" | "obsidian" | "mcp" | "telegram";
 

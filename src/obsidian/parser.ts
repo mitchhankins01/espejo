@@ -14,6 +14,7 @@ const VALID_KINDS: readonly string[] = [
   "note",
   "project",
   "review",
+  "tenet",
 ];
 
 const frontmatterSchema = z

@@ -394,7 +394,7 @@ export const toolSpecs = {
     description:
       "List knowledge artifacts with optional filtering by kind. Ordered by most recently updated.",
     params: z.object({
-      kind: z.enum(["insight", "reference", "note", "project", "review"]).nullable().optional().describe("Filter by artifact kind"),
+      kind: z.enum(["insight", "reference", "note", "project", "review", "tenet"]).nullable().optional().describe("Filter by artifact kind"),
       source: z.enum(["web", "obsidian", "mcp", "telegram"]).nullable().optional().describe("Filter by source"),
       limit: limitParam(20, 100),
       offset: z.number().int().min(0).default(0).describe("Pagination offset"),
@@ -415,7 +415,7 @@ export const toolSpecs = {
       "Same RRF approach as search_entries but scoped to artifacts only.",
     params: z.object({
       query: z.string().min(1).describe("Search query"),
-      kind: z.enum(["insight", "reference", "note", "project", "review"]).nullable().optional().describe("Filter by artifact kind"),
+      kind: z.enum(["insight", "reference", "note", "project", "review", "tenet"]).nullable().optional().describe("Filter by artifact kind"),
       source: z.enum(["web", "obsidian", "mcp", "telegram"]).nullable().optional().describe("Filter by source"),
       limit: limitParam(10, 50),
     }),
@@ -440,7 +440,7 @@ export const toolSpecs = {
       date_from: dateString.nullable().optional().describe("Filter entries from this date"),
       date_to: dateString.nullable().optional().describe("Filter entries up to this date"),
       city: z.string().nullable().optional().describe("Filter entries by city"),
-      artifact_kind: z.enum(["insight", "reference", "note", "project", "review"]).nullable().optional()
+      artifact_kind: z.enum(["insight", "reference", "note", "project", "review", "tenet"]).nullable().optional()
         .describe("Filter artifacts by kind"),
       artifact_source: z.enum(["web", "obsidian", "mcp", "telegram"]).nullable().optional()
         .describe("Filter artifacts by source"),

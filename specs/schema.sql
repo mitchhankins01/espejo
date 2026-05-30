@@ -448,7 +448,7 @@ CREATE INDEX IF NOT EXISTS idx_oura_ring_configurations_set_up ON oura_ring_conf
 
 CREATE TABLE IF NOT EXISTS knowledge_artifacts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    kind TEXT NOT NULL CHECK (kind IN ('insight', 'reference', 'note', 'project', 'review')),
+    kind TEXT NOT NULL CHECK (kind IN ('insight', 'reference', 'note', 'project', 'review', 'tenet')),
     title TEXT NOT NULL CHECK (char_length(title) BETWEEN 1 AND 300),
     body TEXT NOT NULL CHECK (char_length(body) > 0),
     tags TEXT[] NOT NULL DEFAULT '{}',
