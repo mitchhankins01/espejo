@@ -149,7 +149,7 @@ export async function runChatFlow(params: {
   try {
     response = await chat({
       provider: "anthropic",
-      model: config.anthropic.model,
+      model: config.telegram.chatModel,
       system: buildSystemPrompt(),
       messages,
       tools: buildFlowTools(pool),

@@ -113,15 +113,16 @@ export const config = {
     secretToken: process.env.TELEGRAM_SECRET_TOKEN || "",
     allowedChatId: process.env.TELEGRAM_ALLOWED_CHAT_ID || "",
     llmProvider: telegramLlmProvider,
+    // Model backing the conversational chat flow (src/telegram/flows/chat.ts).
+    // Chat-only — distinct from the fast/distill tiers in config.models.
+    chatModel: process.env.TELEGRAM_CHAT_MODEL || "claude-opus-4-8",
     voiceModel: process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts",
     voiceName: process.env.OPENAI_TTS_VOICE || "alloy",
   },
   anthropic: {
     apiKey: process.env.ANTHROPIC_API_KEY || "",
-    model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6",
   },
   models: {
-    anthropicChat: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6",
     anthropicFast:
       process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5-20251001",
     anthropicDistill:

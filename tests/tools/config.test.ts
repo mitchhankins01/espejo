@@ -198,24 +198,24 @@ describe("config", () => {
     );
   });
 
-  it("reads anthropic config from env vars", async () => {
+  it("reads anthropic + chat model config from env vars", async () => {
     process.env.NODE_ENV = "development";
     process.env.ANTHROPIC_API_KEY = "sk-ant-test";
-    process.env.ANTHROPIC_MODEL = "claude-opus-4-20250514";
+    process.env.TELEGRAM_CHAT_MODEL = "claude-opus-4-20250514";
 
     const { config } = await import("../../src/config.js");
     expect(config.anthropic.apiKey).toBe("sk-ant-test");
-    expect(config.anthropic.model).toBe("claude-opus-4-20250514");
+    expect(config.telegram.chatModel).toBe("claude-opus-4-20250514");
   });
 
-  it("uses anthropic defaults when env vars are missing", async () => {
+  it("uses defaults when env vars are missing", async () => {
     process.env.NODE_ENV = "development";
     delete process.env.ANTHROPIC_API_KEY;
-    delete process.env.ANTHROPIC_MODEL;
+    delete process.env.TELEGRAM_CHAT_MODEL;
 
     const { config } = await import("../../src/config.js");
     expect(config.anthropic.apiKey).toBe("");
-    expect(config.anthropic.model).toBe("claude-sonnet-4-6");
+    expect(config.telegram.chatModel).toBe("claude-opus-4-8");
   });
 
   it("reads TIMEZONE from env", async () => {
