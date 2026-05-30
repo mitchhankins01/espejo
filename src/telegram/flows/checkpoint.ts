@@ -8,6 +8,7 @@ import {
 } from "../../db/queries/checkpoints.js";
 import { logUsage } from "../../db/queries/usage.js";
 import { sendTelegramMessage } from "../client.js";
+import { END_KEYBOARD, DEFAULT_KEYBOARD } from "../keyboard.js";
 import {
   clearFlow,
   setFlow,
@@ -128,7 +129,8 @@ async function finalizeCheckpoint(
   });
   const reply = dup ? "Already logged." : "Logged.";
   if (!dup) await logCheckpointRow(deps, data);
-  await sendTelegramMessage(deps.chatId, reply);
+  // Flow over → restore the idle (start) keyboard.
+  await sendTelegramMessage(deps.chatId, reply, DEFAULT_KEYBOARD);
   await persistAssistantTurn(deps, reply);
   clearFlow(deps.chatId);
 }
@@ -171,7 +173,8 @@ export async function startCheckpointFlow(
     data,
     startedAt: Date.now(),
   });
-  await sendTelegramMessage(deps.chatId, CHECKPOINT_PROMPT);
+  // Entering the capture turn → swap the bottom row to a single End button.
+  await sendTelegramMessage(deps.chatId, CHECKPOINT_PROMPT, END_KEYBOARD);
   await persistAssistantTurn(deps, CHECKPOINT_PROMPT);
 }
 

@@ -241,7 +241,7 @@ async function routeText(
       }
       if (peek) {
         clearFlow(chatId);
-        await sendTelegramMessage(chatId, "Sesión cerrada.");
+        await sendTelegramMessage(chatId, "Sesión cerrada.", DEFAULT_KEYBOARD);
         return;
       }
       // Nothing structured active → /done clears the free-chat thread by

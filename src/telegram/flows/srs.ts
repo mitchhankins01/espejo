@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import type pg from "pg";
 import { sendTelegramMessage, editTelegramMessageText } from "../client.js";
+import { END_KEYBOARD, DEFAULT_KEYBOARD } from "../keyboard.js";
 import { insertChatMessage } from "../../db/queries/chat.js";
 import { logUsage } from "../../db/queries/usage.js";
 import {
@@ -240,7 +241,8 @@ async function endSessionWithSummary(
     `(${r[1]} again, ${r[2]} hard, ${r[3]} good, ${r[4]} easy).\n` +
     `${counts.due} pendientes, ${counts.stalling} atascadas, ` +
     `${counts.newCards} nuevas esperando.`;
-  await sendTelegramMessage(deps.chatId, summary);
+  // Session over → restore the idle (start) keyboard.
+  await sendTelegramMessage(deps.chatId, summary, DEFAULT_KEYBOARD);
   await persistAssistant(deps.pool, deps.chatId, summary);
   clearFlow(deps.chatId);
 }
@@ -306,6 +308,13 @@ export async function startSrsFlow(
     args: { queueSize: queue.length, newCap },
     ok: true,
   });
+
+  // Swap the bottom row to a single End button for the session. The cards that
+  // follow carry inline keyboards (which don't touch the reply keyboard), so
+  // this one banner keeps End pinned until endSessionWithSummary restores it.
+  const banner = `🧠 SRS · ${queue.length} cartas. Toca End para salir.`;
+  await sendTelegramMessage(chatId, banner, END_KEYBOARD);
+  await persistAssistant(pool, chatId, banner);
 
   await serveNextCard(deps, state);
 }

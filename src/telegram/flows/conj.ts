@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import type pg from "pg";
 import { sendTelegramMessage } from "../client.js";
+import { END_KEYBOARD, DEFAULT_KEYBOARD } from "../keyboard.js";
 import { insertChatMessage } from "../../db/queries/chat.js";
 import { logUsage } from "../../db/queries/usage.js";
 import {
@@ -583,7 +584,8 @@ async function endSessionWithSummary(
 ): Promise<void> {
   const counts = await getConjugationSessionCounts(deps.pool);
   const summary = renderSessionSummary(prefix, state.patterns, state, counts);
-  await sendTelegramMessage(deps.chatId, summary);
+  // Session over → restore the idle (start) keyboard.
+  await sendTelegramMessage(deps.chatId, summary, DEFAULT_KEYBOARD);
   await persistAssistant(deps.pool, deps.chatId, summary);
   logUsage(deps.pool, {
     source: "telegram",
@@ -687,6 +689,13 @@ export async function startConjFlow(
     args: { patterns, cap, queueSize: queue.length },
     ok: true,
   });
+
+  // Swap the bottom row to a single End button for the session. The inline-
+  // keyboard cards that follow don't touch the reply keyboard, so this banner
+  // keeps End pinned until endSessionWithSummary restores the start buttons.
+  const banner = `🔤 Conj · ${queue.length} cartas. Toca End para salir.`;
+  await sendTelegramMessage(chatId, banner, END_KEYBOARD);
+  await persistAssistant(pool, chatId, banner);
 
   await serveNextCard(deps, state);
 }

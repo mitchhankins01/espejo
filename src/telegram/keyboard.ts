@@ -10,15 +10,23 @@
 // typed/spoken text. The only collision is typing one of these words verbatim
 // with its exact capitalization — vanishingly rare for "SRS"/"Conj".
 
+/** The single button shown while a flow or chat thread is active; maps to /done. */
+const END_LABEL = "End";
+
 /** Single source of truth: exact button label → slash command name. */
 const BUTTON_TO_COMMAND: Readonly<Record<string, string>> = {
   Checkpoint: "checkpoint",
   SRS: "srs",
   Conj: "conj",
+  [END_LABEL]: "done",
 };
 
-/** Ordered button labels (drives both the markup and the invariant test). */
-export const KEYBOARD_LABELS: readonly string[] = Object.keys(BUTTON_TO_COMMAND);
+/**
+ * Ordered labels for the idle (default) layout — the three "start" buttons.
+ * `End` is intentionally excluded: it's its own single-button layout, swapped
+ * in while something is active.
+ */
+export const KEYBOARD_LABELS: readonly string[] = ["Checkpoint", "SRS", "Conj"];
 
 /**
  * Resolve a raw incoming message to the command a keyboard tap maps to, or
@@ -30,9 +38,10 @@ export function resolveButtonLabel(text: string): string | null {
 }
 
 /**
- * The persistent reply keyboard. `is_persistent` keeps it pinned;
- * `resize_keyboard` shrinks it to a single compact row. Sent on /done (and
- * other resets) — its lack of a placeholder clears the active-thread hint.
+ * The idle reply keyboard (Checkpoint · SRS · Conj) — shown when nothing is
+ * active, i.e. when you can *start* something. Sent on every flow/thread end so
+ * the bottom row returns to the three start buttons. `is_persistent` keeps it
+ * pinned; `resize_keyboard` shrinks it to a single compact row.
  */
 export const DEFAULT_KEYBOARD: Record<string, unknown> = {
   keyboard: [KEYBOARD_LABELS.map((label) => ({ text: label }))],
@@ -41,13 +50,23 @@ export const DEFAULT_KEYBOARD: Record<string, unknown> = {
 };
 
 /**
- * Same keyboard, but with a greyed compose-box hint. The chat flow sends this
- * on every reply so that — even days later, on opening the chat — Mitch can see
- * a thread's context is still loaded and `/done` would reset it. Cleared the
- * moment /done sends DEFAULT_KEYBOARD (no placeholder). `input_field_placeholder`
- * caps at 64 chars.
+ * The active-state reply keyboard: a single "End" button (a tap maps to /done,
+ * which ends whatever flow is active or resets the chat thread). The structured
+ * flows send this on start; it's restored to DEFAULT_KEYBOARD on end.
+ */
+export const END_KEYBOARD: Record<string, unknown> = {
+  keyboard: [[{ text: END_LABEL }]],
+  is_persistent: true,
+  resize_keyboard: true,
+};
+
+/**
+ * The End keyboard plus a greyed compose-box hint, sent on every free-chat
+ * reply. Even days later, on opening the chat, Mitch sees both the reminder
+ * that context is still loaded and the End button to clear it. Cleared the
+ * moment /done sends DEFAULT_KEYBOARD. `input_field_placeholder` caps at 64.
  */
 export const ACTIVE_THREAD_KEYBOARD: Record<string, unknown> = {
-  ...DEFAULT_KEYBOARD,
-  input_field_placeholder: "Active thread · /done to reset",
+  ...END_KEYBOARD,
+  input_field_placeholder: "Active thread — tap End to reset",
 };
