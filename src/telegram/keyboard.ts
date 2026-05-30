@@ -31,10 +31,23 @@ export function resolveButtonLabel(text: string): string | null {
 
 /**
  * The persistent reply keyboard. `is_persistent` keeps it pinned;
- * `resize_keyboard` shrinks it to a single compact row.
+ * `resize_keyboard` shrinks it to a single compact row. Sent on /done (and
+ * other resets) — its lack of a placeholder clears the active-thread hint.
  */
 export const DEFAULT_KEYBOARD: Record<string, unknown> = {
   keyboard: [KEYBOARD_LABELS.map((label) => ({ text: label }))],
   is_persistent: true,
   resize_keyboard: true,
+};
+
+/**
+ * Same keyboard, but with a greyed compose-box hint. The chat flow sends this
+ * on every reply so that — even days later, on opening the chat — Mitch can see
+ * a thread's context is still loaded and `/done` would reset it. Cleared the
+ * moment /done sends DEFAULT_KEYBOARD (no placeholder). `input_field_placeholder`
+ * caps at 64 chars.
+ */
+export const ACTIVE_THREAD_KEYBOARD: Record<string, unknown> = {
+  ...DEFAULT_KEYBOARD,
+  input_field_placeholder: "Active thread · /done to reset",
 };

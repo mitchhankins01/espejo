@@ -37,7 +37,7 @@ import {
 import { parseSrsCallback } from "./srs-callbacks.js";
 import { parseConjCallback } from "./conj-callbacks.js";
 import { runChatFlow } from "./flows/chat.js";
-import { resolveButtonLabel } from "./keyboard.js";
+import { resolveButtonLabel, DEFAULT_KEYBOARD } from "./keyboard.js";
 
 const END_FLOW_ALIASES = new Set([
   "done",
@@ -247,9 +247,11 @@ async function routeText(
       // Nothing structured active → /done clears the free-chat thread by
       // writing a session boundary; the next message starts with empty context.
       const closed = await resetChatSession(ctx.pool, chatId, "chat");
+      // DEFAULT_KEYBOARD has no placeholder → clears the "Active thread" hint.
       await sendTelegramMessage(
         chatId,
-        closed > 0 ? "Listo, empezamos de cero. 🌊" : "Ya estábamos de cero."
+        closed > 0 ? "Listo, empezamos de cero. 🌊" : "Ya estábamos de cero.",
+        DEFAULT_KEYBOARD
       );
       return;
     }
