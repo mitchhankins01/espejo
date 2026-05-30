@@ -6,6 +6,13 @@ import {
 } from "../../src/hn/pricing.js";
 
 describe("MODEL_PRICING", () => {
+  it("includes claude-opus-4-8 at $5/$25 per MTok", () => {
+    expect(MODEL_PRICING["claude-opus-4-8"]).toEqual({
+      inputPerMTok: 5,
+      outputPerMTok: 25,
+    });
+  });
+
   it("includes claude-opus-4-7 at $5/$25 per MTok", () => {
     expect(MODEL_PRICING["claude-opus-4-7"]).toEqual({
       inputPerMTok: 5,

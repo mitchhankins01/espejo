@@ -61,7 +61,7 @@ function readEnvFile(path) {
 const env = { ...readEnvFile(".env"), ...readEnvFile(".env.production.local"), ...process.env };
 
 // Model ids — overridable via env, mirrors defaults in src/config.ts (config.models.dedupCouncil*)
-const CLAUDE_MODEL = env.DEDUP_COUNCIL_CLAUDE_MODEL || "claude-opus-4-7";
+const CLAUDE_MODEL = env.DEDUP_COUNCIL_CLAUDE_MODEL || "claude-opus-4-8";
 const GEMINI_MODEL = env.DEDUP_COUNCIL_GEMINI_MODEL || "gemini-3.1-pro-preview";
 const GPT_MODEL = env.DEDUP_COUNCIL_GPT_MODEL || "gpt-5.5";
 

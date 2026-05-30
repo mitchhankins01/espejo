@@ -17,7 +17,7 @@ beforeEach(() => {
 });
 
 describe("distillThread", () => {
-  it("calls Opus 4.7 with the spec system prompt and user content", async () => {
+  it("calls Opus 4.8 with the spec system prompt and user content", async () => {
     messagesCreate.mockResolvedValueOnce({
       content: [{ type: "text", text: "## Headline facts\n\nA test." }],
       usage: { input_tokens: 1000, output_tokens: 200 },
@@ -36,7 +36,7 @@ describe("distillThread", () => {
 
     expect(messagesCreate).toHaveBeenCalledTimes(1);
     const call = messagesCreate.mock.calls[0][0];
-    expect(call.model).toBe("claude-opus-4-7");
+    expect(call.model).toBe("claude-opus-4-8");
     expect(call.max_tokens).toBe(4096);
     expect(call.system).toContain("distill Hacker News threads");
     expect(call.messages[0].role).toBe("user");
@@ -47,7 +47,7 @@ describe("distillThread", () => {
     expect(call.messages[0].content).toContain("3 comments)");
 
     expect(result.markdown).toBe("## Headline facts\n\nA test.");
-    expect(result.model).toBe("claude-opus-4-7");
+    expect(result.model).toBe("claude-opus-4-8");
     expect(result.usage).toEqual({ inputTokens: 1000, outputTokens: 200 });
     // 1000 in * $5/M = $0.005, 200 out * $25/M = $0.005 → $0.01
     expect(result.cost.totalCostUsd).toBeCloseTo(0.01, 6);

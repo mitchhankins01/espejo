@@ -126,12 +126,12 @@ export const config = {
     anthropicFast:
       process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5-20251001",
     anthropicDistill:
-      process.env.ANTHROPIC_DISTILL_MODEL || "claude-opus-4-7",
+      process.env.ANTHROPIC_DISTILL_MODEL || "claude-opus-4-8",
     openaiVision: process.env.OPENAI_VISION_MODEL || "gpt-4.1",
     openaiTranscribe: process.env.OPENAI_TRANSCRIBE_MODEL || "whisper-1",
     openaiCondense: process.env.OPENAI_CONDENSE_MODEL || "gpt-4o",
     dedupCouncilClaude:
-      process.env.DEDUP_COUNCIL_CLAUDE_MODEL || "claude-opus-4-7",
+      process.env.DEDUP_COUNCIL_CLAUDE_MODEL || "claude-opus-4-8",
     dedupCouncilGemini:
       process.env.DEDUP_COUNCIL_GEMINI_MODEL || "gemini-3.1-pro-preview",
     dedupCouncilGpt: process.env.DEDUP_COUNCIL_GPT_MODEL || "gpt-5.5",
