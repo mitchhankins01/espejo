@@ -58,7 +58,8 @@ pnpm dev                                # Start MCP server (stdio)
 
 ```
 Artifacts/
-  Insight/     — atomic realizations (canonical home for approved insights)
+  Insight/     — atomic realizations about Mitch's lived experience (canonical home for approved insights — the "Me graph")
+  Tenet/       — external claims endorsed as true-and-important (canonical home for approved tenets — the "world graph"; parallel to Insight/, sourced from References/HN distills via `Artifacts/Prompt/Tenets/Curate.md`)
   Journal/     — entries migrated from Day One
   Review/      — structured reflections (evening/weekly/monthly)
   Note/        — general knowledge notes. Includes `Parts.md` — the concise IFS
@@ -72,7 +73,10 @@ Artifacts/
   Prompt/      — reusable prompts + user-defined slash commands
   Attachment/  — media
   Template/    — Obsidian templates (NOT synced)
-  Pending/     — extracted insights awaiting dedup approval (written by `Artifacts/Prompt/Insights/Extract.md`)
+  Pending/     — extracted artifacts awaiting dedup approval. Top-level `Pending/*.md` = insights
+                 (written by Insights/Curate.md). `Pending/Tenet/*.md` = tenets (written by
+                 Tenets/Curate.md). `Pending/Reference/HN-*.md` = HN distills (written by
+                 the distill_hn_thread Telegram tool).
   Checkpoint/  — markdown mirrors of `checkpoints` table rows (one file per toll; backfill-only origin)
 ```
 
@@ -82,7 +86,7 @@ Any `.md` outside `.obsidian/`, `.trash/`, `Template/` syncs to the DB.
 
 ```yaml
 ---
-kind: insight | reference | note | project | review
+kind: insight | reference | note | project | review | tenet
 status: pending | approved    # default: approved
 tags:
   - lowercase-hyphenated
@@ -110,6 +114,7 @@ For the live inventory: `find Artifacts/Prompt -name '*.md'`. The major prompts:
 | `Review/Monthly.md` | Monthly Proyecto Mitch review (writes Review-kind artifacts). |
 | `Insights/Curate.md` | **Unified Review→Insight pipeline** — extract → bridge → dedup → apply in one prompt. Primary daily flow for familiar themes. |
 | `Insights/Extract.md` | Per-Review atomic insight extraction → `Pending/`. Mitch supplies the Review filename. Use for novel conceptual domains where Curate's batched themes return zero palette hits. |
+| `Tenets/Curate.md` | **Unified Reference→Tenet pipeline** — mirror of `Insights/Curate.md` over the "world graph". Extracts atomic tenets (external claims, endorsed-not-just-used) from HN distills in `Pending/Reference/` into `Pending/Tenet/`, then bridge → council → apply into `Tenet/`. Cross-links to Insights via wikilinks; the two graphs stay distinct in v1. Requires the dedup-script `--kind tenet` PREREQUISITE noted inside the prompt. |
 | `Insights/Dedup.md` | Stage-1-through-4 dedup pipeline orchestrator. References `scripts/dedup/`. |
 | `Insights/Condense.md` | Periodic condensation of related insights into thematic clusters. |
 | `Sync Conflicts.md` | Cleanup pass over Remotely Save ` 2.md` conflict copies. Snapshots canonicals before bulk-rm and re-verifies after a 60s sleep — Remotely Save can drift the canonical post-cleanup. |
