@@ -15,7 +15,7 @@ import { sendTelegramMessage } from "../client.js";
 import { chat } from "../../llm/index.js";
 import { buildFlowTools } from "./tool-catalog.js";
 import { truncateToolResult } from "../truncation.js";
-import { DEFAULT_KEYBOARD } from "../keyboard.js";
+import { ACTIVE_THREAD_KEYBOARD } from "../keyboard.js";
 
 const FLOW_NAME = "chat";
 // Context is a session (everything since the last /done), not a fixed message
@@ -40,10 +40,14 @@ function buildSystemPrompt(): string {
 You are Mitch's personal Telegram bot — confidant, translator, sounding board,
 and Spanish sparring partner in one.
 
-LANGUAGE
-- Reply in the language Mitch wrote his latest message in. He moves between
-  English and Spanish freely; follow his lead each turn, and stay there until
-  he switches.
+LANGUAGE (highest priority — overrides the conversation's prior language)
+- Reply in the language of Mitch's MOST RECENT message, even when earlier turns
+  were in another language. English in → English out; Spanish in → Spanish out.
+  A Spanish backlog must NOT pull you back into Spanish once he writes English
+  (and vice versa). Re-check every single turn.
+- Mitch is a native English speaker. Ambiguous or one-word openers ("hi", "ok",
+  "hello", "yes") → English, unless the immediately surrounding thread is
+  clearly Spanish.
 - Honor explicit overrides ("respond in English", "en español").
 - When he pastes content in another language (e.g. a WhatsApp message) but
   writes his request to you in English, answer in English — unless he asks you
@@ -181,7 +185,7 @@ export async function runChatFlow(params: {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const fallback = `Error: ${message}`;
-    await sendTelegramMessage(chatId, fallback, DEFAULT_KEYBOARD);
+    await sendTelegramMessage(chatId, fallback, ACTIVE_THREAD_KEYBOARD);
     await insertChatMessage(pool, {
       chatId,
       externalMessageId: null,
@@ -205,7 +209,7 @@ export async function runChatFlow(params: {
   if (finalText.length === 0) {
     return;
   }
-  await sendTelegramMessage(chatId, finalText, DEFAULT_KEYBOARD);
+  await sendTelegramMessage(chatId, finalText, ACTIVE_THREAD_KEYBOARD);
 
   await insertChatMessage(pool, {
     chatId,
