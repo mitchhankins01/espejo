@@ -8,19 +8,38 @@ import { fetchTelegramFile } from "./media.js";
 import { todayInTimezone } from "../utils/dates.js";
 import type { AssembledPhoto } from "./updates.js";
 
+// iOS lists some apps/categories with an unreadable or sub-minute duration, so
+// the vision model occasionally emits `minutes: null` (or `count: null`) for a
+// single entry. Coerce those to 0 (matching the "<1m → 0" prompt convention)
+// rather than letting one bad row reject the entire screenshot payload.
 const AppMinutesSchema = z.object({
   app: z.string().min(1),
-  minutes: z.number().int().min(0),
+  minutes: z
+    .number()
+    .int()
+    .min(0)
+    .nullable()
+    .transform((v) => v ?? 0),
 });
 
 const CategoryMinutesSchema = z.object({
   name: z.string().min(1),
-  minutes: z.number().int().min(0),
+  minutes: z
+    .number()
+    .int()
+    .min(0)
+    .nullable()
+    .transform((v) => v ?? 0),
 });
 
 const AppCountSchema = z.object({
   app: z.string().min(1),
-  count: z.number().int().min(0),
+  count: z
+    .number()
+    .int()
+    .min(0)
+    .nullable()
+    .transform((v) => v ?? 0),
 });
 
 const ScreenTimeJsonSchema = z.object({

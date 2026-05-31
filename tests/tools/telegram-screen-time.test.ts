@@ -114,6 +114,44 @@ describe("extractScreenTimeJson", () => {
     expect((userContent[0] as { text: string }).text).toContain("2026-05-03");
   });
 
+  it("coerces null per-entry minutes/count to 0 instead of rejecting the payload", async () => {
+    // iOS lists some apps with an unreadable/sub-minute duration, so the vision
+    // model occasionally emits `minutes: null` for one row. A single bad entry
+    // must not sink the whole screenshot (regression: app-breakdown dropped).
+    const create = vi.fn().mockResolvedValue(
+      buildResponse({
+        is_screen_time: true,
+        date: "2026-05-02",
+        total_minutes: 312,
+        categories: [{ name: "Social", minutes: null }],
+        apps: [
+          { app: "WhatsApp", minutes: 169 },
+          { app: "Settings", minutes: null },
+        ],
+        pickups: 47,
+        first_pickup: "07:30",
+        pickup_apps: [{ app: "Telegram", count: null }],
+        notifications: 88,
+        notification_apps: [{ app: "Mail", count: 20 }],
+      })
+    );
+    const fakeClient = { chat: { completions: { create } } } as unknown as
+      import("openai").default;
+
+    const { json } = await extractScreenTimeJson(
+      [Buffer.from("a")],
+      fakeClient,
+      "2026-05-03"
+    );
+
+    expect(json.apps).toEqual([
+      { app: "WhatsApp", minutes: 169 },
+      { app: "Settings", minutes: 0 },
+    ]);
+    expect(json.categories).toEqual([{ name: "Social", minutes: 0 }]);
+    expect(json.pickup_apps).toEqual([{ app: "Telegram", count: 0 }]);
+  });
+
   it("parses a non-screen-time response with nulls", async () => {
     const create = vi.fn().mockResolvedValue(
       buildResponse({
