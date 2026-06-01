@@ -5,7 +5,7 @@ describe("find_similar spec", () => {
   it("validates valid UUID", () => {
     const result = validateToolInput("find_similar", { uuid: "ABC-123" });
     expect(result.uuid).toBe("ABC-123");
-    expect(result.limit).toBe(5); // default
+    expect(result.limit).toBe(100); // default
   });
 
   it("accepts custom limit", () => {
@@ -22,9 +22,8 @@ describe("find_similar spec", () => {
     ).toThrow();
   });
 
-  it("rejects limit over 20", () => {
-    expect(() =>
-      validateToolInput("find_similar", { uuid: "ABC", limit: 21 })
-    ).toThrow();
+  it("accepts a large limit (no hard cap)", () => {
+    const result = validateToolInput("find_similar", { uuid: "ABC", limit: 200 });
+    expect(result.limit).toBe(200);
   });
 });

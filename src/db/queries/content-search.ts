@@ -74,7 +74,7 @@ export async function searchContent(
         WHERE e.embedding IS NOT NULL
         ${entryFilterWhere}
         ORDER BY e.embedding <=> p.query_embedding
-        LIMIT 20
+        LIMIT GREATEST($3, 20)
       ),
       fulltext AS (
         SELECT e.id,
@@ -82,7 +82,7 @@ export async function searchContent(
         FROM entries e, params p
         WHERE e.text_search @@ p.ts_query
         ${entryFilterWhere}
-        LIMIT 20
+        LIMIT GREATEST($3, 20)
       )
       SELECT
         'journal_entry' AS content_type,
@@ -146,7 +146,7 @@ export async function searchContent(
           AND a.deleted_at IS NULL
         ${artFilterWhere}
         ORDER BY a.embedding <=> p.query_embedding
-        LIMIT 20
+        LIMIT GREATEST($3, 20)
       ),
       fulltext AS (
         SELECT a.id,
@@ -155,7 +155,7 @@ export async function searchContent(
         WHERE a.tsv @@ p.ts_query
           AND a.deleted_at IS NULL
         ${artFilterWhere}
-        LIMIT 20
+        LIMIT GREATEST($3, 20)
       )
       SELECT
         'knowledge_artifact' AS content_type,

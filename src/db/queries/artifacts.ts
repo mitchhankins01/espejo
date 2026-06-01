@@ -672,7 +672,7 @@ export async function searchArtifacts(
         AND a.deleted_at IS NULL
       ${filterWhere}
       ORDER BY a.embedding <=> p.query_embedding
-      LIMIT 20
+      LIMIT GREATEST($3, 20)
     ),
     fulltext AS (
       SELECT a.id,
@@ -687,7 +687,7 @@ export async function searchArtifacts(
          OR (p.prefix_query IS NOT NULL AND a.tsv @@ p.prefix_query))
         AND a.deleted_at IS NULL
       ${filterWhere}
-      LIMIT 20
+      LIMIT GREATEST($3, 20)
     )
     SELECT
       a.id, a.kind, a.title, a.body,

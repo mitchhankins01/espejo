@@ -9,7 +9,7 @@ describe("get_entries_by_date spec", () => {
     });
     expect(result.date_from).toBe("2024-01-01");
     expect(result.date_to).toBe("2024-01-31");
-    expect(result.limit).toBe(20); // default
+    expect(result.limit).toBe(100); // default
   });
 
   it("rejects missing date_from", () => {
@@ -24,7 +24,7 @@ describe("get_entries_by_date spec", () => {
     });
     expect(result.date_from).toBe("2024-01-01");
     expect(result.date_to).toBeUndefined();
-    expect(result.limit).toBe(20);
+    expect(result.limit).toBe(100);
   });
 
   it("rejects invalid date format", () => {
@@ -45,13 +45,12 @@ describe("get_entries_by_date spec", () => {
     expect(result.limit).toBe(5);
   });
 
-  it("rejects limit over 50", () => {
-    expect(() =>
-      validateToolInput("get_entries_by_date", {
-        date_from: "2024-01-01",
-        date_to: "2024-01-31",
-        limit: 51,
-      })
-    ).toThrow();
+  it("accepts a large limit (no hard cap)", () => {
+    const result = validateToolInput("get_entries_by_date", {
+      date_from: "2024-01-01",
+      date_to: "2024-01-31",
+      limit: 500,
+    });
+    expect(result.limit).toBe(500);
   });
 });

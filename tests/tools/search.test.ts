@@ -7,7 +7,7 @@ describe("search_entries spec", () => {
       query: "feeling overwhelmed",
     });
     expect(result.query).toBe("feeling overwhelmed");
-    expect(result.limit).toBe(10); // default
+    expect(result.limit).toBe(100); // default
   });
 
   it("rejects empty query", () => {
@@ -43,13 +43,12 @@ describe("search_entries spec", () => {
     ).toThrow();
   });
 
-  it("rejects limit over max", () => {
-    expect(() =>
-      validateToolInput("search_entries", {
-        query: "test",
-        limit: 51,
-      })
-    ).toThrow();
+  it("accepts a large limit (no hard cap)", () => {
+    const result = validateToolInput("search_entries", {
+      query: "test",
+      limit: 200,
+    });
+    expect(result.limit).toBe(200);
   });
 
   it("rejects limit under min", () => {

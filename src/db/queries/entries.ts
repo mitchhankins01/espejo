@@ -154,7 +154,7 @@ export async function searchEntries(
       WHERE e.embedding IS NOT NULL
       ${filterWhere}
       ORDER BY e.embedding <=> p.query_embedding
-      LIMIT 20
+      LIMIT GREATEST($3, 20)
     ),
     fulltext AS (
       SELECT e.id,
@@ -162,7 +162,7 @@ export async function searchEntries(
       FROM entries e, params p
       WHERE e.text_search @@ p.ts_query
       ${filterWhere}
-      LIMIT 20
+      LIMIT GREATEST($3, 20)
     )
     SELECT
       e.*,

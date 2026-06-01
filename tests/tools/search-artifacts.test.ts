@@ -7,7 +7,7 @@ describe("search_artifacts spec", () => {
       query: "dopamine regulation",
     });
     expect(result.query).toBe("dopamine regulation");
-    expect(result.limit).toBe(10);
+    expect(result.limit).toBe(100);
   });
 
   it("rejects empty query", () => {
@@ -26,10 +26,9 @@ describe("search_artifacts spec", () => {
     expect(result.limit).toBe(20);
   });
 
-  it("rejects limit over max", () => {
-    expect(() =>
-      validateToolInput("search_artifacts", { query: "test", limit: 51 })
-    ).toThrow();
+  it("accepts a large limit (no hard cap)", () => {
+    const result = validateToolInput("search_artifacts", { query: "test", limit: 200 });
+    expect(result.limit).toBe(200);
   });
 
   it("has correct tool name", () => {

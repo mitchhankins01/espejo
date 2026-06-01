@@ -7,7 +7,7 @@ describe("search_content spec", () => {
       query: "sleep quality",
     });
     expect(result.query).toBe("sleep quality");
-    expect(result.limit).toBe(10);
+    expect(result.limit).toBe(100);
     expect(result.content_types).toBeUndefined();
   });
 

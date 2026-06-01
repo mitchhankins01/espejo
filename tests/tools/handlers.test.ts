@@ -196,7 +196,7 @@ describe("handleFindSimilar", () => {
     expect(mockQueries.findSimilarEntries).toHaveBeenCalledWith(
       mockPool,
       "TEST",
-      5
+      100
     );
     expect(parsed).toHaveLength(1);
     expect(parsed[0]).toMatchObject({

@@ -4,7 +4,7 @@ import { validateToolInput, toolSpecs } from "../../specs/tools.spec.js";
 describe("list_artifacts spec", () => {
   it("accepts empty params with defaults", () => {
     const result = validateToolInput("list_artifacts", {});
-    expect(result.limit).toBe(20);
+    expect(result.limit).toBe(100);
     expect(result.offset).toBe(0);
   });
 
@@ -19,10 +19,9 @@ describe("list_artifacts spec", () => {
     ).toThrow();
   });
 
-  it("rejects limit over max", () => {
-    expect(() =>
-      validateToolInput("list_artifacts", { limit: 101 })
-    ).toThrow();
+  it("accepts a large limit (no hard cap)", () => {
+    const result = validateToolInput("list_artifacts", { limit: 500 });
+    expect(result.limit).toBe(500);
   });
 
   it("has correct tool name", () => {

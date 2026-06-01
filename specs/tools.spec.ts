@@ -54,14 +54,17 @@ const monthDayString = z
   .regex(/^\d{2}-\d{2}$/, "Must be MM-DD format")
   .describe("Month and day in MM-DD format");
 
-const limitParam = (defaultVal: number, max: number) =>
-  z
-    .number()
-    .int()
-    .min(1)
-    .max(max)
+const limitParam = (defaultVal: number, max?: number) => {
+  const base = z.number().int().min(1);
+  const bounded = max === undefined ? base : base.max(max);
+  return bounded
     .default(defaultVal)
-    .describe(`Max results to return (default: ${defaultVal}, max: ${max})`);
+    .describe(
+      max === undefined
+        ? `Max results to return (default: ${defaultVal}, no hard cap). The default is intentionally generous — leave it unset to retrieve broadly. Only pass a smaller value when you explicitly want a narrow result set; pass higher to pull even more.`
+        : `Max results to return (default: ${defaultVal}, max: ${max})`
+    );
+};
 
 
 const ouraMetricParam = z.enum([
@@ -161,7 +164,7 @@ export const toolSpecs = {
         .nullable().optional()
         .describe("Filter entries up to this date, inclusive"),
       city: z.string().nullable().optional().describe("Filter by city name"),
-      limit: limitParam(10, 50),
+      limit: limitParam(100),
     }),
     examples: [
       {
@@ -211,12 +214,12 @@ export const toolSpecs = {
       date_to: dateString
         .nullable().optional()
         .describe("End of date range, inclusive; defaults to today"),
-      limit: limitParam(20, 50),
+      limit: limitParam(100),
     }),
     examples: [
       {
         input: { date_from: "2025-01-01", date_to: "2025-01-31" },
-        behavior: "Returns up to 20 entries from January 2025, oldest first",
+        behavior: "Returns up to 100 entries from January 2025, oldest first",
       },
       {
         input: {
@@ -240,7 +243,7 @@ export const toolSpecs = {
         .string()
         .min(1)
         .describe("UUID of the source entry to find similar entries for"),
-      limit: limitParam(5, 20),
+      limit: limitParam(100),
     }),
     examples: [
       {
@@ -392,17 +395,19 @@ export const toolSpecs = {
     name: "list_artifacts" as const,
     annotations: READ_ONLY,
     description:
-      "List knowledge artifacts with optional filtering by kind. Ordered by most recently updated.",
+      "List knowledge artifacts with optional filtering by kind, ordered by most recently updated (newest first). " +
+      "USE THIS for recency questions — 'my latest/most recent weekly review', 'last few reviews', 'newest insight'. " +
+      "search_artifacts ranks by topical relevance, NOT date, so it is the wrong tool for 'latest X'.",
     params: z.object({
       kind: z.enum(["insight", "reference", "note", "project", "review", "tenet"]).nullable().optional().describe("Filter by artifact kind"),
       source: z.enum(["web", "obsidian", "mcp", "telegram"]).nullable().optional().describe("Filter by source"),
-      limit: limitParam(20, 100),
+      limit: limitParam(100),
       offset: z.number().int().min(0).default(0).describe("Pagination offset"),
     }),
     examples: [
       {
         input: { kind: "insight" },
-        behavior: "Returns up to 20 insight artifacts ordered by updated_at DESC",
+        behavior: "Returns up to 100 insight artifacts ordered by updated_at DESC",
       },
     ],
   },
@@ -412,12 +417,14 @@ export const toolSpecs = {
     annotations: READ_ONLY_OPEN,
     description:
       "Hybrid semantic + keyword search across knowledge artifacts using Reciprocal Rank Fusion. " +
-      "Same RRF approach as search_entries but scoped to artifacts only.",
+      "Same RRF approach as search_entries but scoped to artifacts only. " +
+      "Ranks by TOPICAL RELEVANCE, not by date — do NOT use for 'latest/most recent X'; use list_artifacts for that. " +
+      "To pull everything on a topic (e.g. 'everything related to Miguel'), pass a large limit — there is no hard cap.",
     params: z.object({
       query: z.string().min(1).describe("Search query"),
       kind: z.enum(["insight", "reference", "note", "project", "review", "tenet"]).nullable().optional().describe("Filter by artifact kind"),
       source: z.enum(["web", "obsidian", "mcp", "telegram"]).nullable().optional().describe("Filter by source"),
-      limit: limitParam(10, 50),
+      limit: limitParam(100),
     }),
     examples: [
       {
@@ -432,7 +439,9 @@ export const toolSpecs = {
     annotations: READ_ONLY_OPEN,
     description:
       "Unified search across both journal entries and knowledge artifacts using Reciprocal Rank Fusion. " +
-      "Returns results with a content_type discriminator. Use this when you want to search across all content types.",
+      "Returns results with a content_type discriminator. Use this when you want to search across all content types. " +
+      "Ranks by TOPICAL RELEVANCE, not by date. To pull everything on a topic (e.g. 'everything related to Miguel'), " +
+      "pass a large limit — there is no hard cap.",
     params: z.object({
       query: z.string().min(1).describe("Search query"),
       content_types: z.array(z.enum(["journal_entry", "knowledge_artifact"])).nullable().optional()
@@ -444,7 +453,7 @@ export const toolSpecs = {
         .describe("Filter artifacts by kind"),
       artifact_source: z.enum(["web", "obsidian", "mcp", "telegram"]).nullable().optional()
         .describe("Filter artifacts by source"),
-      limit: limitParam(10, 50),
+      limit: limitParam(100),
     }),
     examples: [
       {
