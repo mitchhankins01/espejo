@@ -215,6 +215,8 @@ src/
   utils/                               — Shared helpers (timezone-aware date utility, etc.).
 scripts/
   sync-*.ts, ingest-*.ts               — On-demand and periodic syncs / ingestors.
+  gather-evening.ts                    — Evening-review data gatherer (`pnpm gather:evening`). Reads DB + vault + Mac WhatsApp into one digest at `/tmp/espejo-evening-gather/<date>.md`; the deterministic half of `Artifacts/Prompt/Review/Evening.md` (the prompt is now just persona + synthesis). Per-section error surfacing; `--date` / `--no-whatsapp` / `--no-transcribe` flags.
+  gather-review.ts                     — Weekly/Monthly review gatherer (`pnpm gather:weekly --end <date>` / `pnpm gather:monthly --month <YYYY-MM>`). Windowed sibling of gather-evening (no WhatsApp); digest at `/tmp/espejo-review-gather/<window>-<label>.md`. Deterministic half of Weekly.md / Monthly.md. **Always pass `--month` for monthly** — it defaults to the current calendar month via `now()`, so a review written a day into the next month would otherwise gather the wrong month.
   embed-entries.ts                     — Batch embed; run after sync to populate vector column.
   write-tomo.ts                        — Two-phase Tomo writer (`--plan-only` then `--pick=N`). See `Artifacts/Prompt/Spanish/Tomo.md`.
   import-conjugations.ts               — Idempotent re-import of Spanish corpus into the read-only `conjugations` table.
