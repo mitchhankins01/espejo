@@ -146,31 +146,48 @@ export async function plan(
     `Produce ${CANDIDATE_COUNT} candidates. Output JSON only.`,
   ].join("\n");
 
-  const text = await bookChat({
-    model: config.models.bookWriter,
-    system: SYSTEM,
-    messages: [{ role: "user", content: user }],
-    maxTokens: 4096,
-    label: "planner",
-    progress: true,
-  });
-
-  const match = text.match(/\{[\s\S]*\}/);
-  if (!match) {
-    throw new Error("Planner returned no JSON object. Raw output:\n" + text);
-  }
-
-  const parsed = JSON.parse(match[0]) as PlannerOutput;
-  for (const c of parsed.candidates) {
-    c.format = "essay";
-    c.source_refs = c.source_refs.map(normalizeUuid);
-  }
   const allUuids = new Set<string>([
     ...longArc.map((c) => c.uuid),
     ...recent.map((c) => c.uuid),
   ]);
-  validatePlannerOutput(parsed, allUuids);
-  return parsed;
+
+  // The planner LLM occasionally corrupts or hallucinates a single source UUID
+  // among the 6 candidates. A strict validation failure should not throw away the
+  // whole generation — retry a bounded number of times before giving up.
+  const MAX_ATTEMPTS = 4;
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const text = await bookChat({
+      model: config.models.bookWriter,
+      system: SYSTEM,
+      messages: [{ role: "user", content: user }],
+      maxTokens: 4096,
+      label: attempt === 1 ? "planner" : `planner (retry ${attempt - 1})`,
+      progress: true,
+    });
+
+    try {
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) {
+        throw new Error("Planner returned no JSON object. Raw output:\n" + text);
+      }
+      const parsed = JSON.parse(match[0]) as PlannerOutput;
+      for (const c of parsed.candidates) {
+        c.format = "essay";
+        c.source_refs = c.source_refs.map(normalizeUuid);
+      }
+      validatePlannerOutput(parsed, allUuids);
+      return parsed;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < MAX_ATTEMPTS) {
+        console.warn(
+          `      [planner] attempt ${attempt} rejected (${(err as Error).message.split("\n")[0]}); retrying`
+        );
+      }
+    }
+  }
+  throw lastErr;
 }
 
 function normalizeUuid(ref: string): string {
