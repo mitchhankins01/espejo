@@ -1,28 +1,24 @@
 /**
- * Write the next tomo of the Espejo series.
+ * Write the next tomo(s) of the Espejo series.
  *
- * Two-step flow:
- *   1. pnpm tsx scripts/write-tomo.ts --plan-only         # plan 6 candidates (3 essay + 3 flow), save, print
- *   2. pnpm tsx scripts/write-tomo.ts --pick=<id>         # write that candidate + epub + email
+ * Flow:
+ *   1. pnpm tsx scripts/write-tomo.ts --plan-only        # plan 6 anchored-essay candidates
+ *   2. pnpm tsx scripts/write-tomo.ts --pick=3           # write one
+ *      pnpm tsx scripts/write-tomo.ts --pick=2,3,5       # write several IN PARALLEL (cap 2)
+ *
+ * This script writes Spanish markdown (books/tomos/NNNN.md) and records history.
+ * It does NOT build EPUBs, interleave the bilingual edition, or send to Kindle —
+ * that is Phase 4 (scripts/book/rebuild-tomo.ts), run after Phase-3 review.
  *
  * Other flags:
- *   --dry              # plan + write, print to stdout, no files, no email (requires --pick)
- *   --no-send          # everything except the email
- *   --bilingual        # render ES + EN side-by-side without prompting
- *   --no-bilingual     # skip the bilingual prompt, ship ES-only
- *   --share-julia      # send unshared tomos to Julia after Mitch's send
- *   --no-share-julia   # skip Julia-share prompt
+ *   --dry              # plan + write, print to stdout, no files/history (requires --pick)
  *   --steer "..."      # nudge the planner with editorial direction (use with --plan-only)
- *   --fresh-plan       # delete books/next-plan.json before reading (forces re-plan on next --plan-only)
- *
- * If neither --bilingual nor --no-bilingual is passed, a TTY prompt asks after the tomo is written.
+ *   --fresh-plan       # delete books/next-plan.json before reading
  *
  * Plan persistence: `--plan-only` writes books/next-plan.json with all 6 candidates.
- * `--pick=<id>` reuses that file; on success, drops the picked candidate from the plan
- * and bumps tomo_n so the remaining candidates stay pickable across sequential writes.
- * The file is deleted once all candidates are picked. Source UUIDs that the new tomo's
- * recent-exclusion filter would normally hide are fetched directly by UUID so the
- * writer still sees their bodies.
+ * `--pick` reuses that file; successfully-written candidates are dropped from the
+ * plan and tomo_n is bumped so the remainder stay pickable. Source UUIDs hidden by
+ * the recent-exclusion filter are fetched directly by UUID so the writer sees them.
  */
 
 import { writeFile, mkdir, readFile, unlink } from "fs/promises";
@@ -40,16 +36,11 @@ import {
   gatherContext,
   gatherLongArcContext,
   fetchContextByUuid,
+  type ContextItem,
 } from "./book/context.js";
 import { plan, type Candidate, type PlannerOutput } from "./book/planner.js";
-import { write, countWords, splitTomo } from "./book/writer.js";
-import {
-  checkOpenQuestionsCoverage,
-  checkTildes,
-  findUnmappedQuestions,
-  findLongGlosses,
-} from "./book/coverage-checks.js";
-import { interleave } from "./book/bilingual.js";
+import { write, countWords } from "./book/writer.js";
+import { checkTildes } from "./book/coverage-checks.js";
 import {
   formatLookupsForWriter,
   readLookups,
@@ -66,25 +57,24 @@ import {
   recentHighlights,
 } from "./book/highlights.js";
 import {
-  formatOpenQuestionsForWriter,
-  readOpenQuestions,
-} from "./book/open-questions.js";
-import {
   formatSeriesQueueForPlanner,
   readSeriesQueue,
 } from "./book/series-queue.js";
-import { buildEpub, tomoFilename } from "./book/epub.js";
-import { sendToKindle } from "./book/send.js";
-import { offerJuliaShare, type ShareJuliaMode } from "./book/share.js";
+import {
+  academicCorpusSize,
+  matchAcademic,
+  formatAcademicForWriter,
+} from "./book/academic.js";
 import {
   fetchRecentSpanishEntries,
   generateReaderLevelParagraph,
 } from "./book/reader-level.js";
-import { config } from "../src/config.js";
 
 const TOMOS_DIR = "books/tomos";
-const BUILD_DIR = "books/build";
 const PLAN_PATH = "books/next-plan.json";
+const FLOOR_WORDS = 3600;
+const CEILING_WORDS = 4400;
+const WRITE_CONCURRENCY = 2;
 
 interface SavedPlan {
   tomo_n: number;
@@ -107,23 +97,23 @@ async function loadSavedPlan(
     return null;
   }
   if (!Array.isArray(saved.candidates) || saved.candidates.length === 0) {
-    console.warn(
-      `      ${PLAN_PATH} has no candidates left — ignoring`
-    );
+    console.warn(`      ${PLAN_PATH} has no candidates left — ignoring`);
     await unlink(PLAN_PATH).catch(() => {});
     return null;
   }
   return { candidates: saved.candidates, readerLevel: saved.reader_level };
 }
 
-async function dropPickedFromPlan(
-  pickedId: number,
+/** After a batch, drop successfully-written ids and point the plan at the next number. */
+async function updatePlanAfterBatch(
+  writtenIds: number[],
   nextTomoN: number
 ): Promise<void> {
   if (!existsSync(PLAN_PATH)) return;
   const raw = await readFile(PLAN_PATH, "utf-8");
   const saved = JSON.parse(raw) as SavedPlan;
-  const remaining = saved.candidates.filter((c) => c.id !== pickedId);
+  const written = new Set(writtenIds);
+  const remaining = saved.candidates.filter((c) => !written.has(c.id));
   if (remaining.length === 0) {
     await unlink(PLAN_PATH).catch(() => {});
     return;
@@ -157,12 +147,9 @@ async function clearSavedPlan(): Promise<void> {
 
 interface Args {
   planOnly: boolean;
-  pick?: number;
+  picks: number[];
   dry: boolean;
-  send: boolean;
   steer?: string;
-  bilingual?: boolean;
-  shareJulia: ShareJuliaMode;
   freshPlan: boolean;
 }
 
@@ -171,64 +158,39 @@ function parseArgs(): Args {
   const steerIdx = argv.indexOf("--steer");
   const steer = steerIdx >= 0 ? argv[steerIdx + 1] : process.env.STEER;
 
-  let bilingual: boolean | undefined;
-  if (argv.includes("--bilingual")) bilingual = true;
-  else if (argv.includes("--no-bilingual")) bilingual = false;
-
-  let shareJulia: ShareJuliaMode;
-  if (argv.includes("--share-julia")) shareJulia = "yes";
-  else if (argv.includes("--no-share-julia")) shareJulia = "skip";
-  else shareJulia = process.stdin.isTTY ? "prompt" : "skip";
-
-  let pick: number | undefined;
+  const picks: number[] = [];
   for (const a of argv) {
     if (a.startsWith("--pick=")) {
-      const v = Number(a.slice("--pick=".length));
-      if (!Number.isInteger(v) || v < 1 || v > 6) {
-        throw new Error(`--pick must be an integer 1-6, got "${a.slice("--pick=".length)}"`);
+      const list = a.slice("--pick=".length).split(",");
+      for (const tok of list) {
+        const v = Number(tok.trim());
+        if (!Number.isInteger(v) || v < 1 || v > 6) {
+          throw new Error(`--pick values must be integers 1-6, got "${tok}"`);
+        }
+        if (!picks.includes(v)) picks.push(v);
       }
-      pick = v;
     }
   }
+  picks.sort((a, b) => a - b);
 
   const planOnly = argv.includes("--plan-only");
-  if (planOnly && pick !== undefined) {
-    throw new Error("--plan-only and --pick=<id> cannot be combined");
+  if (planOnly && picks.length > 0) {
+    throw new Error("--plan-only and --pick cannot be combined");
   }
 
   return {
     planOnly,
-    pick,
+    picks,
     dry: argv.includes("--dry"),
-    send: !argv.includes("--no-send"),
     steer,
-    bilingual,
-    shareJulia,
     freshPlan: argv.includes("--fresh-plan"),
   };
-}
-
-async function askBilingual(): Promise<boolean> {
-  if (!process.stdin.isTTY) return false;
-  const readline = await import("readline/promises");
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-  try {
-    const answer = await rl.question(
-      "[bilingual] Render this tomo as ES + EN sentence-by-sentence? [y/N] "
-    );
-    return answer.trim().toLowerCase().startsWith("y");
-  } finally {
-    rl.close();
-  }
 }
 
 function printCandidates(candidates: Candidate[]): void {
   const sorted = [...candidates].sort((a, b) => a.id - b.id);
   for (const c of sorted) {
-    console.log(`\n  [${c.id}] ${c.format.toUpperCase()} · ${c.domain}`);
+    console.log(`\n  [${c.id}] ${c.domain}`);
     console.log(`      "${c.title}"`);
     console.log(`      topic: ${c.topic}`);
     console.log(`      angle: ${c.angle}`);
@@ -237,28 +199,115 @@ function printCandidates(candidates: Candidate[]): void {
   }
 }
 
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>
+): Promise<PromiseSettledResult<R>[]> {
+  const out: PromiseSettledResult<R>[] = new Array(items.length);
+  let next = 0;
+  async function worker(): Promise<void> {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) return;
+      try {
+        out[i] = { status: "fulfilled", value: await fn(items[i], i) };
+      } catch (reason) {
+        out[i] = { status: "rejected", reason };
+      }
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, worker)
+  );
+  return out;
+}
+
+interface WrittenTomo {
+  n: number;
+  candidate: Candidate;
+  words: number;
+}
+
+async function writeOne(
+  candidate: Candidate,
+  n: number,
+  allContext: ContextItem[],
+  lookupsBlock: string,
+  highlightsBlock: string,
+  hasAcademicCorpus: boolean,
+  dry: boolean
+): Promise<WrittenTomo> {
+  const padded = String(n).padStart(4, "0");
+  console.log(
+    `\n[tomo ${padded}] "${candidate.title}" (${candidate.domain})`
+  );
+
+  let academicBlock = "";
+  if (hasAcademicCorpus) {
+    const matches = await matchAcademic(candidate);
+    if (matches.length > 0) {
+      academicBlock = formatAcademicForWriter(matches);
+      console.log(
+        `      [${padded}] academic grounding: ${matches.length} paper(s) — ${matches
+          .map((m) => m.similarity.toFixed(2))
+          .join(", ")}`
+      );
+    } else {
+      console.log(`      [${padded}] academic grounding: no strong match`);
+    }
+  }
+
+  const markdown = await write(
+    candidate,
+    allContext,
+    lookupsBlock,
+    highlightsBlock,
+    academicBlock
+  );
+  const counts = countWords(markdown);
+  console.log(`      [${padded}] ${counts.total} words`);
+  if (counts.total < FLOOR_WORDS || counts.total > CEILING_WORDS) {
+    console.warn(
+      `      [${padded}] WARN: word count ${counts.total} outside ${FLOOR_WORDS}-${CEILING_WORDS} band`
+    );
+  }
+
+  const tildes = checkTildes(markdown);
+  for (const h of tildes.hits) {
+    console.warn(
+      `      [${padded}] WARN: tilde slip "${h.word}" → "${h.correction}" (${h.count}x)`
+    );
+  }
+
+  if (dry) {
+    console.log(`\n--- dry run: tomo ${padded} (not saved) ---\n`);
+    console.log(markdown);
+  } else {
+    await mkdir(TOMOS_DIR, { recursive: true });
+    await writeFile(join(TOMOS_DIR, `${padded}.md`), markdown, "utf-8");
+    console.log(`      [${padded}] saved books/tomos/${padded}.md`);
+  }
+
+  return { n, candidate, words: counts.total };
+}
+
 async function main(): Promise<void> {
   const args = parseArgs();
-
-  const batchIdx = process.env.BATCH_INDEX;
-  const batchTotal = process.env.BATCH_TOTAL;
-  if (batchIdx && batchTotal) {
-    console.log(`\n==== batch tomo ${batchIdx}/${batchTotal} ====`);
-  }
 
   if (args.freshPlan) {
     await clearSavedPlan();
     console.log("[fresh-plan] cleared books/next-plan.json");
   }
 
-  console.log("[1/5] reading history");
+  console.log("[1/4] reading history");
   const history = await readHistory();
   const n = nextTomoNumber(history);
   const excluded = recentSourceUuids(history, 30);
   const recent = recentTomoSummaries(history, 30);
   console.log(`      tomo #${n}, ${history.length} prior, ${excluded.size} UUIDs excluded`);
 
-  console.log("[2/5] gathering context (recent 14d + long-arc 365d)");
+  console.log("[2/4] gathering context (recent 14d + long-arc 365d)");
   const context = await gatherContext(excluded, 14);
   const recentUuids = new Set(context.map((c) => c.uuid));
   const longArc = await gatherLongArcContext(excluded, recentUuids, 365);
@@ -274,7 +323,7 @@ async function main(): Promise<void> {
   }
 
   if (args.planOnly) {
-    console.log("[3/5] planning 6 candidates (Claude pass 1)");
+    console.log("[3/4] planning 6 candidates + reader-level snapshot");
     if (args.steer) {
       const preview = args.steer.slice(0, 120);
       console.log(`      steering planner with: ${preview}${args.steer.length > 120 ? "..." : ""}`);
@@ -289,7 +338,6 @@ async function main(): Promise<void> {
         `      injecting series queue (${veinCount} active vein${veinCount === 1 ? "" : "s"})`
       );
     }
-    console.log("      planner (1) + reader-level snapshot (1b) in parallel");
     const [output, readerLevel] = await Promise.all([
       plan(recent, longArc, context, args.steer, seriesQueueBlock),
       fetchRecentSpanishEntries(90, 5).then(generateReaderLevelParagraph),
@@ -298,62 +346,64 @@ async function main(): Promise<void> {
     console.log(`      saved 6 candidates to ${PLAN_PATH}`);
     console.log("\n--- candidates ---");
     printCandidates(output.candidates);
-    console.log(`\nPick one with: pnpm tsx scripts/write-tomo.ts --pick=<1-6>`);
+    console.log(`\nPick with: pnpm tsx scripts/write-tomo.ts --pick=<ids,comma,separated>`);
     await pool.end();
     return;
   }
 
-  if (args.pick === undefined) {
+  if (args.picks.length === 0) {
     console.error(
-      "[error] no candidate selected. Run with --plan-only first, then --pick=<1-6>."
+      "[error] no candidate selected. Run with --plan-only first, then --pick=<ids>."
     );
     await pool.end();
     process.exit(2);
   }
 
-  console.log(`[3/5] loading saved candidates and picking #${args.pick}`);
+  console.log(`[3/4] loading plan and picking ${args.picks.join(", ")}`);
   const loaded = await loadSavedPlan(n);
   if (!loaded) {
-    console.error(
-      `[error] no saved plan for tomo #${n}. Run --plan-only first.`
-    );
+    console.error(`[error] no saved plan for tomo #${n}. Run --plan-only first.`);
     await pool.end();
     process.exit(2);
   }
   const { candidates } = loaded;
-  const picked = candidates.find((c) => c.id === args.pick);
-  if (!picked) {
-    console.error(
-      `[error] candidate #${args.pick} not in saved plan. Available ids: ${candidates.map((c) => c.id).join(", ")}`
-    );
-    await pool.end();
-    process.exit(2);
+  const picked: Candidate[] = [];
+  for (const id of args.picks) {
+    const c = candidates.find((x) => x.id === id);
+    if (!c) {
+      console.error(
+        `[error] candidate #${id} not in saved plan. Available ids: ${candidates.map((x) => x.id).join(", ")}`
+      );
+      await pool.end();
+      process.exit(2);
+    }
+    picked.push(c);
   }
-  console.log(`      ${picked.format}/${picked.domain} — "${picked.title}"`);
-  console.log(`      angle: ${picked.angle}`);
-  console.log(`      sources: ${picked.source_refs.length}`);
 
+  // Freeze context once; rescue any source UUIDs the recent-exclusion filter hid.
   const allContext = [...longArc, ...context];
   const validUuids = new Set(allContext.map((c) => c.uuid));
-  const missing = picked.source_refs.filter((u) => !validUuids.has(u));
+  const missing = [
+    ...new Set(picked.flatMap((c) => c.source_refs).filter((u) => !validUuids.has(u))),
+  ];
   if (missing.length > 0) {
     const rescued = await fetchContextByUuid(missing);
     if (rescued.length > 0) {
-      console.log(
-        `      rescuing ${rescued.length} source UUID(s) excluded by recent-tomo filter`
-      );
+      console.log(`      rescuing ${rescued.length} excluded source UUID(s)`);
       allContext.push(...rescued);
       rescued.forEach((c) => validUuids.add(c.uuid));
     }
-    const stillMissing = picked.source_refs.filter((u) => !validUuids.has(u));
+    const stillMissing = picked
+      .flatMap((c) => c.source_refs)
+      .filter((u) => !validUuids.has(u));
     if (stillMissing.length > 0) {
       throw new Error(
-        `Picked candidate references ${stillMissing.length} source UUIDs not in DB: ${stillMissing.join(", ")}. Re-plan with --fresh-plan + --plan-only.`
+        `Picked candidate(s) reference source UUIDs not in DB: ${[...new Set(stillMissing)].join(", ")}. Re-plan with --fresh-plan + --plan-only.`
       );
     }
   }
 
-  console.log("[4/5] writing (Claude pass 2)");
+  // Shared writer inputs (computed once, reused across the batch).
   const lookups = await readLookups();
   const recentLookupRows = recentLookups(lookups, 30);
   const stateMap = await getVocabStateForStems(
@@ -368,164 +418,89 @@ async function main(): Promise<void> {
     );
   }
   const lookupsBlock = formatLookupsForWriter(recentLookupRows, stateByStem);
-  if (lookups.length > 0) {
-    console.log(
-      `      injecting ${Math.min(lookups.length, 30)} recent lookups — vocab (${lookups.length} total)`
-    );
-  }
-  const highlights = await readHighlights();
   const highlightsBlock = formatHighlightsForWriter(
-    recentHighlights(highlights, 12)
+    recentHighlights(await readHighlights(), 12)
   );
-  if (highlights.length > 0) {
-    console.log(
-      `      injecting ${Math.min(highlights.length, 12)} recent highlights — grammar/conjugation (${highlights.length} total)`
-    );
-  }
-  const openQuestions = await readOpenQuestions();
-  const openQuestionsBlock = formatOpenQuestionsForWriter(openQuestions);
-  if (openQuestions.length > 0) {
-    console.log(
-      `      injecting ${openQuestions.length} open Spanish question(s) — gloss every occurrence`
-    );
-    const unmapped = findUnmappedQuestions(openQuestions);
-    if (unmapped.length > 0) {
-      console.warn(
-        `      WARN: ${unmapped.length} open question(s) have no coverage-check category — gloss coverage is unverified for: ${unmapped.join("; ")}. Add a category to QUESTION_KEYWORDS in scripts/book/coverage-checks.ts.`
-      );
-    }
-  }
-  const writtenMarkdown = await write(
-    picked,
-    allContext,
-    lookupsBlock,
-    highlightsBlock,
-    openQuestionsBlock
-  );
-  const counts = countWords(writtenMarkdown);
-  console.log(`      ${counts.total} words`);
-  if (counts.total < 1700 || counts.total > 2700) {
-    console.warn(`      WARN: word count ${counts.total} is outside 1800-2400 target`);
-  }
 
-  const tomoParts = splitTomo(writtenMarkdown);
-
-  if (openQuestions.length > 0) {
-    const coverage = checkOpenQuestionsCoverage(tomoParts.body);
-    console.log(
-      `      [open-questions check] ${coverage.totalGlosses} inline gloss(es)`
+  const corpusSize = await academicCorpusSize();
+  if (corpusSize === 0) {
+    console.warn(
+      "      WARN: no embedded Reference/Academic papers found — academic grounding disabled (run pnpm sync:obsidian + pnpm embed:prod to enable)"
     );
-    for (const q of coverage.perQuestion) {
-      const mark = q.matches.length > 0 ? "✓" : "✗";
-      console.log(`        ${mark} ${q.question}: ${q.matches.length}`);
-    }
-    if (coverage.missingQuestions.length > 0) {
-      console.warn(
-        `      WARN: no inline gloss detected for: ${coverage.missingQuestions.join(", ")}`
-      );
-    }
-    const longGlosses = findLongGlosses(tomoParts.body);
-    if (longGlosses.length > 0) {
-      console.warn(
-        `      WARN: ${longGlosses.length} gloss(es) over 12 words — tighten in review:`
-      );
-      for (const g of longGlosses) {
-        console.warn(`        (${g.words}w) ${g.gloss}`);
-      }
-    }
-  }
-
-  const tildes = checkTildes(writtenMarkdown);
-  if (tildes.hits.length === 0) {
-    console.log("      [tilde check] none");
   } else {
-    for (const h of tildes.hits) {
-      console.warn(
-        `      WARN: tilde slip "${h.word}" → "${h.correction}" (${h.count}x)`
-      );
-    }
+    console.log(`      academic corpus: ${corpusSize} embedded paper(s) available`);
   }
 
-  const markdown = writtenMarkdown;
+  // Assign tomo numbers up front, in pick order, then write in parallel (cap 2).
+  console.log(
+    `[4/4] writing ${picked.length} tomo(s) #${n}-${n + picked.length - 1} (concurrency ${WRITE_CONCURRENCY})`
+  );
+  const numbered = picked.map((c, i) => ({ c, n: n + i }));
+  const results = await mapWithConcurrency(
+    numbered,
+    WRITE_CONCURRENCY,
+    ({ c, n: tomoN }) =>
+      writeOne(
+        c,
+        tomoN,
+        allContext,
+        lookupsBlock,
+        highlightsBlock,
+        corpusSize > 0,
+        args.dry
+      )
+  );
 
-  if (args.dry) {
-    console.log("\n--- dry run (tomo not saved) ---\n");
-    console.log(markdown);
-    await pool.end();
-    return;
-  }
-
-  // Bilingual interleave is a SEND-TIME artifact. In the documented flow Phase 2
-  // runs with --no-send, Phase 3 edits the ES markdown, and Phase 4
-  // (rebuild-tomo --bilingual) regenerates the interleave from the reviewed ES.
-  // Interleaving here would just be discarded by those edits — so only do it when
-  // we're actually sending in this run. `wantsBilingual` still records intent.
-  const wantsBilingual =
-    args.bilingual !== undefined
-      ? args.bilingual
-      : args.send
-        ? await askBilingual()
-        : false;
-  const builtBilingual = wantsBilingual && args.send;
-
-  console.log("[5/5] packaging epub + recording history");
-  const padded = String(n).padStart(4, "0");
-  const tomoPath = join(TOMOS_DIR, `${padded}.md`);
-  await mkdir(TOMOS_DIR, { recursive: true });
-  await mkdir(BUILD_DIR, { recursive: true });
-  await writeFile(tomoPath, markdown, "utf-8");
-
-  let epubMarkdown = markdown;
-  let filename = tomoFilename(n, picked.title);
-  if (builtBilingual) {
-    console.log("[bilingual] interleaving ES + EN");
-    epubMarkdown = await interleave(markdown);
-    const biPath = join(TOMOS_DIR, `${padded}-bilingual.md`);
-    await writeFile(biPath, epubMarkdown, "utf-8");
-    filename = filename.replace(/\.epub$/, " (bilingual).epub");
-  } else if (wantsBilingual) {
-    console.log(
-      "[bilingual] deferred to Phase 4 — run `rebuild-tomo NNNN --bilingual` after review (interleaving now would be discarded by Phase-3 edits)"
-    );
-  }
-  const epubPath = join(BUILD_DIR, filename);
-
-  await buildEpub({
-    tomoNum: n,
-    title: picked.title,
-    markdown: epubMarkdown,
-    outPath: epubPath,
+  const written: WrittenTomo[] = [];
+  const failed: { id: number; n: number; error: string }[] = [];
+  results.forEach((r, i) => {
+    if (r.status === "fulfilled") written.push(r.value);
+    else
+      failed.push({
+        id: numbered[i].c.id,
+        n: numbered[i].n,
+        error: (r.reason as Error)?.message ?? String(r.reason),
+      });
   });
 
-  await appendHistory({
-    n,
-    title: picked.title,
-    format: picked.format,
-    domain: picked.domain,
-    topic: picked.topic,
-    source_uuids: picked.source_refs,
-    date: new Date().toISOString().slice(0, 10),
-    word_count: counts.total,
-    bilingual: wantsBilingual,
-  });
-  await dropPickedFromPlan(picked.id, n + 1);
-
-  const subject = `Espejo — Tomo ${padded} — ${picked.title}${builtBilingual ? " (bilingual)" : ""}`;
-
-  if (args.send) {
-    console.log(`[send] emailing ${filename} to ${config.gmail.kindleEmail}`);
-    await sendToKindle({ epubPath, filename, subject });
-    console.log("[send] sent");
-    await offerJuliaShare({ mode: args.shareJulia });
-  } else {
-    console.log("\n=== SEND SKIPPED (--no-send) ===");
-    console.log(`to: ${config.gmail.kindleEmail}`);
-    console.log(`subject: ${subject}`);
-    console.log(`attachment: ${epubPath}`);
-    console.log("================================\n");
+  if (!args.dry) {
+    // History append is read-modify-write — serialize it after the parallel pass.
+    for (const w of written.sort((a, b) => a.n - b.n)) {
+      await appendHistory({
+        n: w.n,
+        title: w.candidate.title,
+        format: "essay",
+        domain: w.candidate.domain,
+        topic: w.candidate.topic,
+        source_uuids: w.candidate.source_refs,
+        date: new Date().toISOString().slice(0, 10),
+        word_count: w.words,
+        bilingual: true,
+      });
+    }
+    const afterHistory = await readHistory();
+    await updatePlanAfterBatch(
+      written.map((w) => w.candidate.id),
+      nextTomoNumber(afterHistory)
+    );
   }
+
+  console.log("\n=== batch summary ===");
+  for (const w of written.sort((a, b) => a.n - b.n)) {
+    console.log(`  ✓ tomo ${String(w.n).padStart(4, "0")} — "${w.candidate.title}" (${w.words}w)`);
+  }
+  for (const f of failed) {
+    console.log(`  ✗ tomo ${String(f.n).padStart(4, "0")} (candidate #${f.id}) — ${f.error}`);
+  }
+  if (!args.dry && written.length > 0) {
+    console.log(
+      "\nReview books/tomos/NNNN.md, fix in place, then deliver each with:\n  NODE_ENV=production pnpm tsx scripts/book/rebuild-tomo.ts NNNN [--no-send]"
+    );
+  }
+  console.log("=====================\n");
 
   await pool.end();
+  if (failed.length > 0 && written.length === 0) process.exit(1);
 }
 
 main().catch(async (err) => {

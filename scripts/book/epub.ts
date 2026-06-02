@@ -16,11 +16,16 @@ export async function buildEpub(opts: EpubOptions): Promise<void> {
   const { tomoNum, title, markdown, outPath } = opts;
 
   const { body, takeaways } = splitTomo(markdown);
-  const bodyHtml = await marked.parse(body);
+  // `breaks: true` turns a single newline into a <br>, so each bilingual pair
+  // (Spanish line + literal English line) renders as two visible lines on the
+  // Kindle instead of collapsing into one run-on paragraph.
+  const bodyHtml = await marked.parse(body, { breaks: true });
 
   // Strip the section heading line — the chapter title supplies it.
   const takeawaysBody = takeaways.replace(/^##\s+Para llevarte\s*\n?/m, "").trim();
-  const takeawaysHtml = takeawaysBody ? await marked.parse(takeawaysBody) : "";
+  const takeawaysHtml = takeawaysBody
+    ? await marked.parse(takeawaysBody, { breaks: true })
+    : "";
 
   const padded = String(tomoNum).padStart(4, "0");
   const bookTitle = `${SERIES_NAME} — Tomo ${padded} — ${title}`;

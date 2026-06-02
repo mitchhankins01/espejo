@@ -1,42 +1,123 @@
 import { config } from "../../src/config.js";
 import { bookChat } from "./llm.js";
 
-const SYSTEM = `You are creating a side-by-side bilingual study version of a Spanish essay for an English-speaking learner. The reader wants to scan ES then EN inline to learn translations quickly.
+/**
+ * Faithful/structural bilingual interleave. For every Spanish sentence we emit
+ * the sentence, then on the NEXT line a deliberately literal English rendering
+ * in italics — the point is to show the reader HOW Spanish maps to English
+ * (clause order, function words, tense/aspect), not a smooth idiomatic gloss.
+ *
+ * Done in chunks: the output is ~2x the input (ES + EN for every sentence), so a
+ * single 4000-word book would blow the token ceiling and truncate mid-book.
+ * Chunks are order-independent → translated in parallel and reassembled in order.
+ */
 
-Take the input Spanish markdown and output an interleaved version. For every Spanish sentence, immediately follow it (same line, separated by a single space) with the English translation in italics, so each ES↔EN pair reads as one continuous line on a Kindle.
+const SYSTEM = `You are producing a FAITHFUL, STRUCTURAL bilingual study version of a Spanish text for a fluent reader who wants to see exactly how the Spanish maps to English.
+
+For every Spanish sentence, output the Spanish sentence on its own line, then on the NEXT line its English translation wrapped in single asterisks for italics. The two lines form one pair; separate pairs with a blank line.
+
+The English is FAITHFUL/STRUCTURAL, not idiomatic:
+- Keep the Spanish clause order wherever English grammar tolerates it. Do not restructure for smoothness.
+- Render each content word with its direct counterpart; surface function words and grammatical mechanics rather than hiding them. Examples:
+  - "por ti" → "because of you"; "para ti" → "for you" (keep por/para distinct in English).
+  - "Quiero que vengas" → "I want [that] you come" (show the subjunctive complement).
+  - "Se me cayó" → "It fell on me" rendered structurally, e.g. "[itself] to-me it-fell" only where that stays readable; otherwise the closest structural English that preserves the reflexive/dative.
+  - "Llevo años haciéndolo" → "I carry years doing it" before "I've been doing it for years".
+- Translate idioms literally but keep the line parseable English. The goal is transparency of mechanics, never natural-sounding prose.
+- It must still be grammatical English a reader can parse — faithful, not word-salad. When a maximally literal rendering would be unreadable, step back to the closest structural version that stays readable, and stop there. Never smooth all the way to idiomatic.
 
 Rules:
-- Headings: keep "# " and "## " prefixes. Translate the heading text inline as "Título — English title".
-- Body paragraphs: split into sentences. For each Spanish sentence, write the Spanish sentence, then a single space, then the English translation wrapped in single asterisks for italics. Each ES↔EN pair is one line. Separate pairs with a blank line (so each pair reads as its own paragraph).
-- Bullets in "## Para llevarte": each Spanish bullet stays a bullet ("- ..."). Write the Spanish sentence, a single space, then the English translation in italics, all on one line. The next bullet starts on its own line.
+- Headings ("# ..." and "## ...") are kept EXACTLY as written, Spanish only, on their own line. Do NOT translate them, do NOT add an English line after them. (In particular "## Para llevarte" must survive verbatim.)
+- Body paragraphs: split into sentences; each Spanish sentence becomes a pair (ES line, italic EN line), pairs separated by a blank line.
+- Bullets ("- ..."): keep the "- " prefix on the Spanish line; put the italic English on the next line indented by two spaces ("  *...*"). Separate bullets with a blank line.
 - Treat short interjections, fragments, and quoted speech as their own sentence pairs.
-- **Preserve inline grammar glosses verbatim.** Some Spanish sentences already contain an inline grammar gloss formatted as an italic parenthetical in English: \`(*"hubo" = a single completed event*)\`. Keep these glosses INSIDE the Spanish half exactly as written — same position, same asterisks, same text. Do NOT translate them, do NOT duplicate them in the English half, do NOT remove them. The English half that you append after the Spanish sentence is the translation of the surrounding Spanish prose, treating the gloss as if it were not there.
-- Output pure markdown. No preamble, no commentary, no closing note.
+- Output pure markdown. No preamble, no commentary, no closing note. Process the input block by block in order.
 
-Example of correct ES↔EN pairing in body:
+Example body pairs:
 
-Imagina que llevas años conduciendo por la misma ciudad. *Imagine you've spent years driving through the same city.* El mapa está en la cabeza — no tienes que pensar. *The map lives in your head — you don't have to think.*
+El mapa vive en tu cabeza.
+*The map lives in your head.*
 
-Example with an inline gloss preserved verbatim:
+No lo hice por miedo, sino por amor.
+*I did not do it because of fear, but because of love.*
 
-Hubo (*"hubo" = a single completed event, vs. "había" = ongoing state*) muchos encuentros donde el deseo era conexión. *There were many encounters where the desire was connection.*
+Example heading (unchanged, no English line):
 
-Example for a Para llevarte bullet:
+## Para llevarte
 
-- El cerebro no percibe la realidad directamente. *The brain does not perceive reality directly.*
-- Un modelo formado en condiciones extremas no está roto. *A model formed under extreme conditions is not broken.*`;
+Example bullet:
+
+- El cerebro no percibe la realidad directamente.
+  *The brain does not perceive reality directly.*`;
+
+const CHUNK_WORD_BUDGET = 800;
+const CHUNK_CONCURRENCY = 4;
+
+/** Split markdown into chunks of whole blocks under a word budget, preserving order. */
+export function chunkMarkdown(
+  markdown: string,
+  wordBudget = CHUNK_WORD_BUDGET
+): string[] {
+  const blocks = markdown.split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
+  const chunks: string[] = [];
+  let current: string[] = [];
+  let words = 0;
+  const wc = (s: string): number =>
+    s.split(/\s+/).filter((w) => w.length > 0).length;
+  for (const block of blocks) {
+    const bw = wc(block);
+    if (current.length > 0 && words + bw > wordBudget) {
+      chunks.push(current.join("\n\n"));
+      current = [];
+      words = 0;
+    }
+    current.push(block);
+    words += bw;
+  }
+  if (current.length > 0) chunks.push(current.join("\n\n"));
+  return chunks;
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  async function worker(): Promise<void> {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) return;
+      out[i] = await fn(items[i], i);
+    }
+  }
+  const workers = Array.from({ length: Math.min(limit, items.length) }, worker);
+  await Promise.all(workers);
+  return out;
+}
 
 export async function interleave(markdown: string): Promise<string> {
   if (!config.anthropic.apiKey) {
     throw new Error("ANTHROPIC_API_KEY is required for the bilingual pass");
   }
-  const text = await bookChat({
-    model: config.models.anthropicFast,
-    system: SYSTEM,
-    messages: [{ role: "user", content: markdown }],
-    maxTokens: 16000,
-    label: "bilingual",
-    progress: true,
-  });
-  return text.trim() + "\n";
+  const chunks = chunkMarkdown(markdown);
+  console.log(
+    `      [bilingual] ${chunks.length} chunk(s), up to ${CHUNK_CONCURRENCY} in parallel`
+  );
+  const translated = await mapWithConcurrency(
+    chunks,
+    CHUNK_CONCURRENCY,
+    async (chunk, i) => {
+      const text = await bookChat({
+        model: config.models.anthropicFast,
+        system: SYSTEM,
+        messages: [{ role: "user", content: chunk }],
+        maxTokens: 4000,
+        label: `bilingual.${i + 1}/${chunks.length}`,
+      });
+      return text.trim();
+    }
+  );
+  return translated.join("\n\n") + "\n";
 }

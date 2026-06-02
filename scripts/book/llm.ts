@@ -23,7 +23,7 @@ function formatElapsed(ms: number): string {
 }
 
 export interface BookChatParams {
-  /** Model id — e.g. config.models.anthropicChat (writer/planner) or anthropicFast (mechanical). */
+  /** Model id — e.g. config.models.bookWriter (writer/planner) or anthropicFast (mechanical). */
   model: string;
   system: string;
   messages: ModelMessage[];
@@ -38,8 +38,20 @@ export interface BookChatParams {
   progress?: boolean;
 }
 
-/** Run one non-tool generation through the shared wrapper; return its text. */
-export async function bookChat(p: BookChatParams): Promise<string> {
+export interface BookChatResult {
+  text: string;
+  /** Provider finish reason — "stop"/"end_turn" = complete, "length" = hit maxTokens (truncated). */
+  finishReason: string;
+  outputTokens: number;
+}
+
+/**
+ * Run one non-tool generation through the shared wrapper; return text +
+ * metadata. `finishReason` lets callers detect truncation (a book cut off at
+ * the token ceiling otherwise passes a naive word-count check, then ships
+ * mid-sentence to the Kindle).
+ */
+export async function bookChatMeta(p: BookChatParams): Promise<BookChatResult> {
   const start = Date.now();
   let reported = 0;
 
@@ -66,7 +78,12 @@ export async function bookChat(p: BookChatParams): Promise<string> {
 
   const tok = res.usage.outputTokens ?? Math.round(res.text.length / CHARS_PER_TOK);
   console.log(
-    `      [${p.label}] done — ${tok} output tok, ${formatElapsed(Date.now() - start)}`
+    `      [${p.label}] done — ${tok} output tok, ${res.finishReason}, ${formatElapsed(Date.now() - start)}`
   );
-  return res.text;
+  return { text: res.text, finishReason: res.finishReason, outputTokens: tok };
+}
+
+/** Convenience wrapper: run one generation and return only its text. */
+export async function bookChat(p: BookChatParams): Promise<string> {
+  return (await bookChatMeta(p)).text;
 }

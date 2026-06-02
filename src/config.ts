@@ -127,6 +127,9 @@ export const config = {
       process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5-20251001",
     anthropicDistill:
       process.env.ANTHROPIC_DISTILL_MODEL || "claude-opus-4-8",
+    // Long-form tomo writer + planner (scripts/book/*). Restored after the
+    // 14d29bd rename dropped the old `anthropicChat` key these depended on.
+    bookWriter: process.env.ANTHROPIC_BOOK_MODEL || "claude-opus-4-8",
     openaiVision: process.env.OPENAI_VISION_MODEL || "gpt-4.1",
     openaiTranscribe: process.env.OPENAI_TRANSCRIBE_MODEL || "whisper-1",
     openaiCondense: process.env.OPENAI_CONDENSE_MODEL || "gpt-4o",

@@ -1,8 +1,8 @@
 /**
  * Single parser for the `<!-- BEGIN <NAME> ... --> ... <!-- END <NAME> ... -->`
  * marker blocks that Mitch hand-edits inside `Artifacts/Prompt/Spanish/Tomo.md`
- * (the OPEN QUESTIONS list and the SERIES QUEUE). `open-questions.ts` and
- * `series-queue.ts` both used to carry near-identical copies of this slicer.
+ * (currently just the SERIES QUEUE; the OPEN QUESTIONS block was retired with
+ * the inline-gloss system). `series-queue.ts` uses this slicer.
  */
 import { readFile } from "fs/promises";
 
