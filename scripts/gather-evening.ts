@@ -60,6 +60,9 @@ function madridDate(d: Date): string {
 }
 const TODAY = opt("--date") ?? madridDate(new Date());
 const SEVEN_AGO = madridDate(new Date(new Date(`${TODAY}T12:00:00Z`).getTime() - 7 * 86400_000));
+// Insights (#3) scope to today + yesterday only — the evening review lands a single day,
+// and 7d of full-text insights swamped the digest. Weekly/monthly keep 7d in gather-review.ts.
+const ONE_AGO = madridDate(new Date(new Date(`${TODAY}T12:00:00Z`).getTime() - 1 * 86400_000));
 
 // ── digest + status accumulators ──────────────────────────────────────────────
 type Status = "ok" | "warn" | "error";
@@ -179,14 +182,14 @@ async function main(): Promise<void> {
     return { status: n ? "ok" : "warn", note: `${n} files` };
   });
 
-  // #3 Insights (last 7d) — FULL-TEXT, filesystem frontmatter dates
-  await section("#3 Insights (last 7d)", "FULL-TEXT", async () => {
+  // #3 Insights (today + yesterday) — FULL-TEXT, filesystem frontmatter dates
+  await section("#3 Insights (today + yesterday)", "FULL-TEXT", async () => {
     let n = 0;
     for (const f of listMd("Artifacts/Insight")) {
       const parsed = parseObsidianNote(readFileSync(f, "utf8"), basename(f));
       const c = parsed.createdAt ? madridDate(parsed.createdAt) : "";
       const u = parsed.updatedAt ? madridDate(parsed.updatedAt) : "";
-      if (c < SEVEN_AGO && u < SEVEN_AGO) continue;
+      if (c < ONE_AGO && u < ONE_AGO) continue;
       emit(`### ${basename(f, ".md")}  (created ${c || "?"}, updated ${u || "?"})\n\n${parsed.body}\n`);
       n++;
     }
