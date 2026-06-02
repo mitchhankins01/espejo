@@ -280,7 +280,7 @@ async function weekly(): Promise<void> {
   await section("#3 Tolls (window)", "SHAPE", async () => {
     const rows = await q(
       `SELECT local_date, to_char(occurred_at AT TIME ZONE 'Europe/Madrid', 'HH24:MI') AS hhmm,
-              kind, trigger, body_signal, part_voice, resolution
+              kind, trigger, body_signal, part_voice, resolution, comment
        FROM checkpoints WHERE local_date >= $1 AND local_date <= $2 ORDER BY occurred_at`,
       [START, END]
     );
@@ -446,7 +446,7 @@ async function monthly(): Promise<void> {
   await section("#3 Tolls this month", "SHAPE", async () => {
     const rows = await q(
       `SELECT local_date, to_char(occurred_at AT TIME ZONE 'Europe/Madrid', 'HH24:MI') AS hhmm,
-              kind, trigger, body_signal, part_voice, resolution
+              kind, trigger, body_signal, part_voice, resolution, comment
        FROM checkpoints WHERE local_date >= $1::date AND local_date < $2::date ORDER BY occurred_at`,
       [START, NEXT]
     );

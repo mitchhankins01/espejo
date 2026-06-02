@@ -29,28 +29,51 @@ export interface CheckpointDeps {
   externalMessageId: string | null;
 }
 
-function normalizeResolution(input: string): "pass" | "go" | "unset" {
-  const lower = input.toLowerCase().trim().replace(/[.,!?]+$/, "");
-  if (/^(pass(ed)?|sí pasé|paso|si pase|skipped)$/.test(lower)) return "pass";
-  if (/^(go|went|fui|sí fui|si fui|did|used)$/.test(lower)) return "go";
-  return "unset";
-}
-
-// Substance checkpoints are now always logged as "go" — Mitch handles passes
-// mentally and never triggers the flow for them. An explicit 4th segment can
-// still override (e.g. `/c trigger. body. voice. pass` if you really mean it).
+// Substance checkpoints are always logged as "go" — Mitch handles passes
+// mentally and never triggers the flow for them, so the flow no longer parses a
+// pass/go override out of the message; the 4th+ segment is now the comment.
 const DEFAULT_RESOLUTION = "go" as const;
 
-interface ParsedShortcutArgs {
-  segments: string[];
+export interface ParsedCheckpoint {
+  trigger: string | null;
+  bodySignal: string | null;
+  partVoice: string | null;
+  comment: string | null;
 }
 
-function parseShortcutArgs(argText: string): ParsedShortcutArgs {
-  const segments = argText
-    .split(".")
+// Distribute period/newline-separated pieces into checkpoint slots in order:
+// trigger → body → voice → comment, where comment is the catch-all for any
+// piece past the third (joined by ". "). `prefilled` lets a partial
+// `/c trigger. body` skip already-known slots so the follow-up message fills
+// only what's left. A bare blob (one piece, no separators) lands in trigger.
+export function assignCheckpointSlots(
+  pieces: string[],
+  prefilled: { trigger?: string | null; bodySignal?: string | null } = {}
+): ParsedCheckpoint {
+  const slots: ("trigger" | "body" | "voice" | "comment")[] = [];
+  if (!prefilled.trigger) slots.push("trigger");
+  if (!prefilled.bodySignal) slots.push("body");
+  slots.push("voice", "comment");
+
+  let trigger = prefilled.trigger ?? null;
+  let bodySignal = prefilled.bodySignal ?? null;
+  let partVoice: string | null = null;
+  let comment: string | null = null;
+  pieces.forEach((piece, i) => {
+    const slot = slots[Math.min(i, slots.length - 1)];
+    if (slot === "trigger") trigger = piece;
+    else if (slot === "body") bodySignal = piece;
+    else if (slot === "voice") partVoice = piece;
+    else comment = comment ? `${comment}. ${piece}` : piece;
+  });
+  return { trigger, bodySignal, partVoice, comment };
+}
+
+function splitSegments(text: string): string[] {
+  return text
+    .split(/[.\n]+/)
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
-  return { segments };
 }
 
 async function persistUserTurn(deps: CheckpointDeps, content: string): Promise<void> {
@@ -73,15 +96,18 @@ async function persistAssistantTurn(deps: CheckpointDeps, content: string): Prom
   });
 }
 
+interface CheckpointData {
+  trigger: string;
+  bodySignal: string | null;
+  partVoice: string | null;
+  comment: string | null;
+  resolution: "pass" | "go" | "unset" | null;
+  parserFallback: boolean;
+}
+
 async function logCheckpointRow(
   deps: CheckpointDeps,
-  data: {
-    trigger: string;
-    bodySignal: string | null;
-    partVoice: string | null;
-    resolution: "pass" | "go" | "unset" | null;
-    parserFallback: boolean;
-  }
+  data: CheckpointData
 ): Promise<void> {
   const localDate = todayDateInTimezone(config.timezone);
   const startedAt = Date.now();
@@ -90,6 +116,7 @@ async function logCheckpointRow(
     trigger: data.trigger,
     bodySignal: data.bodySignal,
     partVoice: data.partVoice,
+    comment: data.comment,
     resolution: data.resolution,
     payload: data.parserFallback ? { parser_fallback: true } : {},
     source: "telegram",
@@ -112,13 +139,7 @@ async function logCheckpointRow(
 
 async function finalizeCheckpoint(
   deps: CheckpointDeps,
-  data: {
-    trigger: string;
-    bodySignal: string | null;
-    partVoice: string | null;
-    resolution: "pass" | "go" | "unset" | null;
-    parserFallback: boolean;
-  }
+  data: CheckpointData
 ): Promise<void> {
   const dup = await findRecentDuplicate(deps.pool, {
     kind: "substance",
@@ -141,21 +162,18 @@ export async function startCheckpointFlow(
 ): Promise<void> {
   await persistUserTurn(deps, `/checkpoint${argText ? ` ${argText}` : ""}`);
 
-  const { segments } = parseShortcutArgs(argText);
+  const segments = splitSegments(argText);
 
   // Pre-formed shortcut: 3+ segments → log immediately, skip turns.
-  // 4th segment is an optional override; default resolution is "go".
+  // trigger. body. voice. [comment...] — 4th+ segment is the free-text comment.
   if (segments.length >= 3) {
-    const [trigger, body, partVoice, choice] = segments;
-    const resolution =
-      choice && normalizeResolution(choice) !== "unset"
-        ? normalizeResolution(choice)
-        : DEFAULT_RESOLUTION;
+    const parsed = assignCheckpointSlots(segments);
     await finalizeCheckpoint(deps, {
-      trigger: trigger.trim(),
-      bodySignal: body.trim(),
-      partVoice: partVoice.trim(),
-      resolution,
+      trigger: (parsed.trigger ?? "").trim(),
+      bodySignal: parsed.bodySignal,
+      partVoice: parsed.partVoice,
+      comment: parsed.comment,
+      resolution: DEFAULT_RESOLUTION,
       parserFallback: false,
     });
     return;
@@ -186,38 +204,26 @@ export async function continueCheckpointFlow(
   await persistUserTurn(deps, text);
 
   // Single capture turn. Split the message on periods/newlines and drop each
-  // piece into the still-missing fields, in order: trigger → body → want.
-  // (A button tap pre-fills nothing, so all three come from this message;
-  // a partial `/c trigger. body` pre-fills the rest.) Extra pieces fold into
-  // "want". A blob with no separators logs as the trigger alone — no mirror.
-  const parts = text
-    .split(/[.\n]+/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+  // piece into the still-missing fields, in order: trigger → body → want →
+  // comment. (A button tap pre-fills nothing, so all come from this message; a
+  // partial `/c trigger. body` pre-fills the rest.) The 4th+ piece is the
+  // free-text comment. A blob with no separators logs as the trigger alone.
+  const parts = splitSegments(text);
   const pieces = parts.length > 0 ? parts : [text.trim()];
 
-  const slots: ("trigger" | "body" | "voice")[] = [];
-  if (!state.data.trigger) slots.push("trigger");
-  if (!state.data.body_signal) slots.push("body");
-  slots.push("voice");
-
-  let trigger = state.data.trigger ?? null;
-  let bodySignal = state.data.body_signal ?? null;
-  let partVoice: string | null = null;
-  pieces.forEach((piece, i) => {
-    const slot = slots[Math.min(i, slots.length - 1)];
-    if (slot === "trigger") trigger = piece;
-    else if (slot === "body") bodySignal = piece;
-    else partVoice = partVoice ? `${partVoice}. ${piece}` : piece;
+  const parsed = assignCheckpointSlots(pieces, {
+    trigger: state.data.trigger,
+    bodySignal: state.data.body_signal,
   });
 
   await finalizeCheckpoint(deps, {
-    trigger: trigger ?? text.trim(),
-    bodySignal,
-    partVoice,
+    trigger: parsed.trigger ?? text.trim(),
+    bodySignal: parsed.bodySignal,
+    partVoice: parsed.partVoice,
+    comment: parsed.comment,
     // Default "go" — pass is mental, never logged. parser_fallback marks a
     // bare blob we couldn't structure into body/want (so no mirror line).
     resolution: DEFAULT_RESOLUTION,
-    parserFallback: bodySignal == null && partVoice == null,
+    parserFallback: parsed.bodySignal == null && parsed.partVoice == null,
   });
 }

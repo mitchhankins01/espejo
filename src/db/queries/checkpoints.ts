@@ -7,6 +7,7 @@ export interface CheckpointRow {
   body_signal: string | null;
   part_voice: string | null;
   resolution: string | null;
+  comment: string | null;
   payload: Record<string, unknown>;
   source: string;
   chat_id: string | null;
@@ -21,6 +22,7 @@ export interface InsertCheckpointParams {
   bodySignal?: string | null;
   partVoice?: string | null;
   resolution?: string | null;
+  comment?: string | null;
   payload?: Record<string, unknown>;
   source?: string;
   chatId?: string | null;
@@ -34,8 +36,8 @@ export async function insertCheckpoint(
 ): Promise<CheckpointRow> {
   const result = await pool.query<CheckpointRow>(
     `INSERT INTO checkpoints
-       (kind, trigger, body_signal, part_voice, resolution, payload, source, chat_id, occurred_at, local_date)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, NOW()), $10)
+       (kind, trigger, body_signal, part_voice, resolution, payload, source, chat_id, occurred_at, local_date, comment)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, NOW()), $10, $11)
      RETURNING *`,
     [
       params.kind,
@@ -48,6 +50,7 @@ export async function insertCheckpoint(
       params.chatId ?? null,
       params.occurredAt ?? null,
       params.localDate,
+      params.comment ?? null,
     ]
   );
   return result.rows[0];
@@ -63,8 +66,8 @@ export async function insertCheckpointIdempotent(
 ): Promise<CheckpointRow | null> {
   const result = await pool.query<CheckpointRow>(
     `INSERT INTO checkpoints
-       (kind, trigger, body_signal, part_voice, resolution, payload, source, chat_id, occurred_at, local_date)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, NOW()), $10)
+       (kind, trigger, body_signal, part_voice, resolution, payload, source, chat_id, occurred_at, local_date, comment)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, NOW()), $10, $11)
      ON CONFLICT (kind, trigger, (COALESCE(body_signal, '')), (COALESCE(part_voice, '')), occurred_at) DO NOTHING
      RETURNING *`,
     [
@@ -78,6 +81,7 @@ export async function insertCheckpointIdempotent(
       params.chatId ?? null,
       params.occurredAt ?? null,
       params.localDate,
+      params.comment ?? null,
     ]
   );
   return result.rows[0] ?? null;

@@ -804,6 +804,10 @@ export const toolSpecs = {
       kind: z.string().default("substance").describe(
         "Checkpoint kind. Defaults to 'substance'. Future: 'parts', 'energy', 'decision', 'gratitude'."
       ),
+      comment: z.string().optional().describe(
+        "Optional free-text note that doesn't fit the structured slots — context, dose, qualifier. " +
+          "e.g. 'took 10mg today instead of 30'. The user's words; don't summarize."
+      ),
     }),
     examples: [
       {

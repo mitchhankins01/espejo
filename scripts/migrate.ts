@@ -2102,6 +2102,15 @@ const migrations: Migration[] = [
         CHECK (kind IN ('insight', 'reference', 'note', 'project', 'review', 'tenet'));
     `,
   },
+  // Migration 062: free-text comment on checkpoints. The 4th+ period-segment of
+  // a toll message (e.g. "ritalin. slow brain. start the day. took 10mg not 30")
+  // lands here — context the structured trigger/body/voice slots don't hold.
+  {
+    name: "062-checkpoints-comment",
+    getSql: () => `
+      ALTER TABLE checkpoints ADD COLUMN IF NOT EXISTS comment TEXT;
+    `,
+  },
 ];
 
 async function migrate(): Promise<void> {

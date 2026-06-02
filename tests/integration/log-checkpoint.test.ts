@@ -44,6 +44,24 @@ describe("handleLogCheckpoint", () => {
     expect(second).toMatch(/Already logged/);
   });
 
+  it("persists an optional free-text comment", async () => {
+    const result = await handleLogCheckpoint(pool, {
+      substance: "Ritalin",
+      body: "a slow brain",
+      part_voice: "wants to start the day",
+      comment: "took 10mg today instead of 30",
+    });
+    expect(result).toMatch(/^Toll logged at /);
+    const today = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Europe/Madrid",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+    const rows = await getCheckpointsForDate(pool, today, "substance");
+    expect(rows[0].comment).toBe("took 10mg today instead of 30");
+  });
+
   it("accepts an explicit kind override", async () => {
     const result = await handleLogCheckpoint(pool, {
       substance: "frustration",

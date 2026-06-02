@@ -38,7 +38,8 @@ export async function handleGetRecentCheckpoints(
             day: "2-digit",
           }).format(ld)
         : String(ld);
-    return `${localDate} ${hhmm} | ${r.kind} | ${r.trigger} | ${r.body_signal ?? "—"} | ${r.part_voice ?? "—"} | ${r.resolution ?? "—"}`;
+    const base = `${localDate} ${hhmm} | ${r.kind} | ${r.trigger} | ${r.body_signal ?? "—"} | ${r.part_voice ?? "—"} | ${r.resolution ?? "—"}`;
+    return r.comment ? `${base} | ${r.comment}` : base;
   });
 
   return `${rows.length} checkpoint${rows.length === 1 ? "" : "s"} from ${fromDate} to ${toDate}:\n\n${lines.join("\n")}`;

@@ -34,6 +34,30 @@ describe("checkpoints queries", () => {
     expect(found).toHaveLength(1);
   });
 
+  it("round-trips a free-text comment", async () => {
+    const row = await insertCheckpoint(pool, {
+      kind: "substance",
+      trigger: "Ritalin",
+      bodySignal: "a slow brain",
+      partVoice: "wants to start the day",
+      comment: "took 10mg today instead of 30",
+      localDate: "2026-05-04",
+    });
+    expect(row.comment).toBe("took 10mg today instead of 30");
+
+    const found = await getCheckpointsForDate(pool, "2026-05-04", "substance");
+    expect(found[0].comment).toBe("took 10mg today instead of 30");
+  });
+
+  it("defaults comment to null when omitted", async () => {
+    const row = await insertCheckpoint(pool, {
+      kind: "substance",
+      trigger: "Nic",
+      localDate: "2026-05-04",
+    });
+    expect(row.comment).toBeNull();
+  });
+
   it("findRecentDuplicate matches case-insensitive within window", async () => {
     await insertCheckpoint(pool, {
       kind: "substance",

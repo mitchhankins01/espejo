@@ -290,7 +290,7 @@ async function main(): Promise<void> {
     const rows = await q(
       `SELECT local_date,
               to_char(occurred_at AT TIME ZONE 'Europe/Madrid', 'HH24:MI') AS hhmm,
-              kind, trigger, body_signal, part_voice, resolution
+              kind, trigger, body_signal, part_voice, resolution, comment
        FROM checkpoints WHERE local_date >= $1 ORDER BY occurred_at`,
       [SEVEN_AGO]
     );
@@ -305,7 +305,7 @@ async function main(): Promise<void> {
     if (boundary) {
       const tail = await q(
         `SELECT to_char(occurred_at AT TIME ZONE 'Europe/Madrid', 'MM-DD HH24:MI') AS when_,
-                kind, trigger, body_signal, part_voice
+                kind, trigger, body_signal, part_voice, comment
          FROM checkpoints WHERE occurred_at > $1 ORDER BY occurred_at`,
         [boundary]
       );

@@ -48,6 +48,7 @@ export async function handleLogCheckpoint(
     trigger: params.substance,
     bodySignal: params.body,
     partVoice: params.part_voice,
+    comment: params.comment ?? null,
     resolution: params.choice,
     source: "mcp",
     localDate,
