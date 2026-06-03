@@ -1,6 +1,7 @@
 import type pg from "pg";
 import type { AssembledMessage } from "./updates.js";
 import { processScreenTimePhotos } from "./screen-time.js";
+import { processFoodPhotos } from "./food-screen.js";
 import { sendTelegramMessage } from "./client.js";
 import { transcribeVoiceMessage } from "./voice.js";
 import { extractTextFromDocument, extractTextFromImage } from "./media.js";
@@ -136,6 +137,19 @@ export async function routeMessage(
       },
     });
     if (result.isScreenTime) return;
+
+    // Not a Screen Time screenshot — screen it as possible food (meal, menu,
+    // or ingredient label) against the elimination-diet profile. On a hit we
+    // reply with the verdict and stop; otherwise fall through to OCR → chat.
+    const food = await processFoodPhotos({
+      pool: ctx.pool,
+      chatId,
+      photos: msg.photos,
+      notify: async (toChatId, replyText) => {
+        await sendTelegramMessage(toChatId, replyText);
+      },
+    });
+    if (food.isFood) return;
   }
 
   if (msg.document && isWeightCsvDocument(msg.document)) {
