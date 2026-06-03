@@ -30,19 +30,22 @@ A tomo is a standalone ~${TARGET_WORDS}-word essay. No references to previous to
 
 The reader is a fluent adult who reads full, natural Spanish — and a literal English translation is generated separately and pairs with every sentence. So write the richest, most natural Spanish the subject calls for: real vocabulary, real syntax, idioms, full tenses. Do NOT simplify, do NOT pin to a learner register, do NOT avoid a word because it might be hard. Clarity and precision, not difficulty-avoidance.
 
-The essay teaches a real concept with specificity, anchored to a pattern from the reader's life:
-- Open with a concrete hook — a scene, a question, a moment in his journal. Never an abstract or "En este tomo vamos a..." intro.
+The essay does TWO jobs at once: it teaches a real domain mechanism in genuine depth, AND anchors it to a pattern from the reader's life. The life pattern is the anchor; the mechanism is the lesson. A tomo that only reflects his life back to him — with the science merely name-dropped — is the exact failure the reader has complained about. Teach him something he did not already know.
+- Open with a concrete hook. The hook MUST trace to something actually present in the SOURCE MATERIAL — a moment, a quote, a detail he wrote. If the sources are abstract (distilled insights with no concrete scene), open on the abstract TENSION or on the domain mechanism itself — NOT on an invented scene. Never an "En este tomo vamos a..." intro.
 - Use examples. One specific example beats three generalizations.
 - Direct quotations use straight double quotes: "así".
-- The intersection between life pattern and domain concept must be real — illuminate, don't decorate.
+- The intersection between life pattern and domain mechanism must be real — illuminate, don't decorate.
 - Don't preach or summarize inside the body. Distillation belongs in the takeaways section.
 
 Anchoring and anti-hallucination — this is the failure mode the reader cares most about:
-- Anchor every scene, detail, and quote in the SOURCE MATERIAL provided. Transform it; never invent a scene, a person, a place, or an event that the sources don't support. If the sources don't give you enough concrete texture, develop the IDEA more deeply rather than fabricating biography. A fabricated specific the reader can't recognize as his own breaks the whole point of the series.
-- NAME THE CONCEPT BY ITS ACTUAL NAME. If the angle invokes cognitive science, neuroscience, philosophy, etc., use the specific terms by name — interocepción, default mode network, corteza prefrontal dorsolateral, predictive coding, teoría polivagal, Geworfenheit, fenomenología, anatta, hipocampo, eje HPA, amígdala, ego dissolution, etc. Gloss them once in-prose in Spanish ("la interocepción — la percepción de las señales internas del cuerpo —") and then keep using them. Do NOT soften them into generic phrasing like "el cuerpo dice una cosa y la mente otra". That register is a failure mode.
+- Anchor every scene, detail, and quote in the SOURCE MATERIAL provided. Transform it; never invent a scene, a person, a place, an object (e.g. a specific gift), or an event that the sources don't support — and never invent one just to satisfy the "open with a concrete hook" rule. If the sources don't give you enough concrete texture, open on the abstract tension or the mechanism and develop the IDEA more deeply rather than fabricating biography. A fabricated specific the reader can't recognize as his own breaks the whole point of the series.
+- Preserve the DIRECTION of every action exactly as the sources state it: who did what TO whom, who gave and who received, who reached out and who went silent. Do not swap roles or default to a stereotype (e.g. assuming the other person was the gift-giver). If the sources don't make the direction unambiguous, don't assert one.
+- Treat the "Current state" block (if present in the user message) as authoritative ground truth about who is current vs. past and the live status of each thread. The source insights/entries are snapshots from when they were written and may describe a relationship or situation that has since changed. If a source frames something as live (an ongoing bond, an unmet need from someone) but the Current state block says it has ended, write it in the past — do not portray an ended relationship as a current source of need.
+- TEACH THE NAMED MECHANISM. The user message names a "mechanism_to_teach". That mechanism is the lesson of the tomo — devote substantial, structured space to actually TEACHING it: what it is, how it works, what the research broadly shows, and how it explains the reader's pattern. Don't name-drop it and move on; a passing mention is the failure mode the reader complained about. Name it by its actual name and explain the machinery.
+- NAME CONCEPTS BY THEIR ACTUAL NAMES — this is encouraged, not risky. Established domain concepts (interocepción, default mode network, corteza prefrontal dorsolateral, predictive coding, teoría polivagal, Geworfenheit, fenomenología, anatta, hipocampo, eje HPA, amígdala, ego dissolution, etc.) are general knowledge — naming them is NOT a hallucination risk and the confidence threshold below does NOT apply to them. Gloss each once in-prose in Spanish ("la interocepción — la percepción de las señales internas del cuerpo —") and then keep using it. Do NOT soften a real concept into generic phrasing like "el cuerpo dice una cosa y la mente otra" — that vague register is itself a failure mode. When you are confident of how an established mechanism works, explain it confidently.
 - Don't restate the same insight three times in different metaphors. If you've made the point with one image, MOVE FORWARD to the next mechanism, the next consequence, the next refinement — not the next paraphrase. Metaphor stacking is avoidance dressed as style.
 - Develop one frame linearly and DEEPLY. A tomo that explores one concept with several mechanisms in detail beats one that gestures at five.
-- Confidence threshold for named citations. Cite a named researcher, study, year, anatomical region, or technical term ONLY when you are confident of the exact spelling AND the attribution. If you'd hesitate to bet $20 on it — wrong first name, wrong brain region, wrong author for a coined term — attribute generically instead: "la investigación sobre interocepción sugiere", "el trabajo sobre apego adulto distingue". A wrong proper name survives the reader's verification step and contaminates the tomo's authority. When in doubt, go generic.
+- Confidence threshold — applies to PROPER NOUNS AND PRECISE ATTRIBUTIONS ONLY, not to naming concepts. Give a specific researcher's name, a study, a year, or attribute the coining of a term to a specific person ONLY when you are confident of the exact spelling AND the attribution. If you'd hesitate to bet $20 on it — wrong first name, wrong year, wrong author for a coined term — make the claim generically instead: "la investigación sobre interocepción sugiere", "el trabajo sobre apego adulto distingue". A wrong proper name survives the reader's verification step and contaminates the tomo's authority. This is NOT license to avoid naming the concept itself — name the concept, just don't pin a shaky proper noun to it.
 - If a "Research grounding" block is present in the user message, those are real fetched paper abstracts. You MAY cite them (surname + year) for domain claims — but at most one or two, and ONLY if a paper directly supports the specific point. If none fit the narrative, IGNORE them and stay generic. Never contort the essay to wedge a paper in, and never cite a paper not in that block.
 - The "Planner take" block in the user message contains the editor's deeper reasoning for this angle. USE IT as the spine of the tomo — match its specificity, don't dilute it.
 
@@ -74,7 +77,8 @@ export async function write(
   context: ContextItem[],
   lookupsBlock = "",
   highlightsBlock = "",
-  academicBlock = ""
+  academicBlock = "",
+  currentStateBlock = ""
 ): Promise<string> {
   if (!config.anthropic.apiKey) {
     throw new Error("ANTHROPIC_API_KEY is required for the writer");
@@ -88,21 +92,33 @@ export async function write(
     })
     .join("\n\n---\n\n");
 
+  const stateBlock = currentStateBlock.trim()
+    ? [
+        "# Current state — ground truth (derived from the reader's most recent journal entries)",
+        "Who is current vs. past and the live status of each thread, distilled from the reader's latest entries. Because it is built from newer data than the source material, it OVERRIDES stale framing there: if a source describes a relationship or need as live but this block says it has ended, write it in the past tense.",
+        "",
+        currentStateBlock.trim(),
+        "",
+      ]
+    : [];
+
   const user = [
     ...(lookupsBlock ? [lookupsBlock, ""] : []),
     ...(highlightsBlock ? [highlightsBlock, ""] : []),
     ...(academicBlock ? [academicBlock, ""] : []),
+    ...stateBlock,
     `# Tomo plan`,
     `- Título: ${plan.title}`,
     `- Dominio: ${plan.domain}`,
     `- Tema: ${plan.topic}`,
+    `- Mecanismo a enseñar (the lesson — teach this in depth, don't just name it): ${plan.mechanism_to_teach}`,
     `- Ángulo: ${plan.angle}`,
     "",
     "# Planner take (use as the spine — match its specificity, don't dilute)",
     plan.take,
     "",
-    "# Source material",
-    "Draw from these — transform them into the tomo. Do not quote the reader's entries verbatim. The reader will not see these sources, only the finished tomo.",
+    "# Source material — biographical facts (the reader's own life)",
+    "Draw from these — transform them into the tomo. Do not quote the reader's entries verbatim. The reader will not see these sources, only the finished tomo. These are the ONLY biographical facts you may use: every scene, person, gift, event, and quote must come from here (or be consistent with the Current state block). Preserve the direction of every action exactly as stated.",
     "",
     sourcesBlock,
     "",

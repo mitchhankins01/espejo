@@ -111,6 +111,33 @@ export async function fetchContextByUuid(
   return items;
 }
 
+/**
+ * Recent raw journal entries (all languages), most-recent first, for the
+ * post-draft verifier's ground-truth window. Unlike gatherContext this applies
+ * no exclusion set and no insight join — the verifier wants the unfiltered
+ * recent record so it can catch staleness (e.g. a breakup the source insight
+ * predates) and unsupported specifics.
+ */
+export async function fetchRecentEntries(
+  daysBack = 21
+): Promise<{ date: string; text: string }[]> {
+  const sinceDate = new Date(Date.now() - daysBack * 86400000)
+    .toISOString()
+    .slice(0, 10);
+  const res = await pool.query(
+    `SELECT created_at, text
+       FROM entries
+      WHERE created_at >= $1
+        AND char_length(text) >= $2
+      ORDER BY created_at DESC`,
+    [sinceDate, MIN_ENTRY_CHARS]
+  );
+  return res.rows.map((r) => ({
+    date: (r.created_at as Date).toISOString().slice(0, 10),
+    text: r.text as string,
+  }));
+}
+
 export async function gatherLongArcContext(
   excludeUuids: Set<string>,
   excludeRecentUuids: Set<string>,

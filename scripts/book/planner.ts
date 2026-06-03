@@ -27,13 +27,14 @@ const CANDIDATE_COUNT = 6;
 
 const SYSTEM = `You are the editor of a personalized Spanish-language mini-book series for one reader (Mitch), who lives in Barcelona and reads full, natural Spanish fluently.
 
-Each issue is a "tomo" — a standalone ~4000-word essay: direct, anchored on a long-running pattern from the reader's own life and illuminated by a domain concept (${DOMAINS.join(", ")}). Concrete hook, one specific example, a real teaching beat. No "En este tomo vamos a..." intros. Every tomo is transformed from the reader's real journal entries and approved insights — never invented biography.
+Each issue is a "tomo" — a standalone ~4000-word essay: direct, anchored on a long-running pattern from the reader's own life AND teaching a real domain concept (${DOMAINS.join(", ")}) in genuine depth. The reader's complaint about recent tomos: they elaborated his own life back to him but taught him no new science. Fix that. Every tomo must do BOTH jobs — the life pattern is the anchor, the domain mechanism is the lesson. Concrete hook, one specific example, a real teaching beat. No "En este tomo vamos a..." intros. Every tomo is transformed from the reader's real journal entries and approved insights — never invented biography.
 
 Your job: produce ${CANDIDATE_COUNT} candidate plans for the next tomo. Each candidate is a fully-formed pitch the reader can pick from a menu — he typically writes 2-3 of them.
 
 Hard rules:
 - Exactly ${CANDIDATE_COUNT} candidates.
 - Each candidate is a distinct angle. No two candidates may share the same topic.
+- Each candidate MUST name a "mechanism_to_teach": ONE specific, teachable domain mechanism — not a domain label, not a vague theme. Name it the way the writer will: "predictive coding and interoceptive prediction error", "the default mode network's role in self-referential rumination", "the HPA axis and cortisol's effect on hippocampal consolidation", "Heidegger's Geworfenheit (thrownness)", "polyvagal theory's dorsal-vagal shutdown". "psychology" or "how the mind handles gifts" is NOT acceptable — that is what produced the reader's complaint. The mechanism must be real, established knowledge the writer can teach in depth, and it must genuinely illuminate the life pattern.
 - Do NOT retread topics or domains covered in the last 30 tomos shown below. Variety matters.
 - Pick source UUIDs from the provided pools only. Quote UUIDs exactly as shown in brackets.
 - 2-5 source UUIDs per candidate.
@@ -51,10 +52,11 @@ Output STRICT JSON only — no prose, no markdown, no code fences:
       "format": "essay",
       "domain": "psychology",
       "topic": "short phrase describing what this tomo is about",
+      "mechanism_to_teach": "ONE specific domain mechanism the tomo will teach in depth — not a domain label",
       "angle": "1-2 sentences: the specific take — what makes this tomo worth reading",
       "title": "título en español",
       "source_refs": ["uuid1", "uuid2"],
-      "take": "3-5 sentence paragraph: why these sources, what the tomo teaches or dramatizes, why it matters now."
+      "take": "3-5 sentence paragraph: why these sources, what the tomo teaches or dramatizes, why it matters now. State explicitly how the mechanism_to_teach maps onto the life pattern."
     },
     { "id": 2, "format": "essay", ... },
     ... through id ${CANDIDATE_COUNT}
@@ -66,6 +68,8 @@ export interface Candidate {
   format: TomoFormat;
   domain: Domain;
   topic: string;
+  /** ONE specific domain mechanism the tomo teaches in depth (not a domain label). */
+  mechanism_to_teach: string;
   angle: string;
   title: string;
   source_refs: string[];
@@ -83,7 +87,8 @@ export async function plan(
   longArc: ContextItem[],
   recent: ContextItem[],
   steer?: string,
-  seriesQueueBlock?: string
+  seriesQueueBlock?: string,
+  currentStateBlock?: string
 ): Promise<PlannerOutput> {
   if (!config.anthropic.apiKey) {
     throw new Error("ANTHROPIC_API_KEY is required for the planner");
@@ -127,10 +132,22 @@ export async function plan(
       ? [seriesQueueBlock, ""]
       : [];
 
+  const stateBlock =
+    currentStateBlock && currentStateBlock.trim().length > 0
+      ? [
+          "# Current state — ground truth (derived from the reader's most recent journal entries; overrides stale framing below)",
+          "Who is current vs. past, and the live status of each thread, distilled from the reader's latest entries. The standing themes and source insights below are snapshots from when they were written and may describe relationships or situations that have since changed. Because this block is built from newer data, it wins when the material conflicts with it.",
+          "",
+          currentStateBlock.trim(),
+          "",
+        ]
+      : [];
+
   const user = [
     "# Recent tomos — do not retread these topics/domains",
     recentTomosBlock,
     "",
+    ...stateBlock,
     ...steerBlock,
     ...queueBlock,
     "# Standing themes — anchor on these",
@@ -225,6 +242,20 @@ function validatePlannerOutput(p: PlannerOutput, allUuids: Set<string>): void {
     }
     if (!c.title || !c.topic || !c.angle || !c.take) {
       throw new Error(`Candidate ${c.id} missing title/topic/angle/take`);
+    }
+    if (!c.mechanism_to_teach || c.mechanism_to_teach.trim().length === 0) {
+      throw new Error(`Candidate ${c.id} missing mechanism_to_teach`);
+    }
+    // Reject a mechanism that's just the bare domain label — that's the failure
+    // mode the field exists to prevent (a labelled topic with no real science).
+    if (
+      VALID_DOMAINS.includes(
+        c.mechanism_to_teach.trim().toLowerCase() as Domain
+      )
+    ) {
+      throw new Error(
+        `Candidate ${c.id} mechanism_to_teach "${c.mechanism_to_teach}" is just a domain label — name a specific mechanism`
+      );
     }
   }
 }

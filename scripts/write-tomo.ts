@@ -69,6 +69,8 @@ import {
   fetchRecentSpanishEntries,
   generateReaderLevelParagraph,
 } from "./book/reader-level.js";
+import { deriveCurrentState } from "./book/current-state.js";
+import { verifyTomo, formatVerifyReport } from "./book/verify.js";
 
 const TOMOS_DIR = "books/tomos";
 const PLAN_PATH = "books/next-plan.json";
@@ -193,6 +195,7 @@ function printCandidates(candidates: Candidate[]): void {
     console.log(`\n  [${c.id}] ${c.domain}`);
     console.log(`      "${c.title}"`);
     console.log(`      topic: ${c.topic}`);
+    console.log(`      mechanism: ${c.mechanism_to_teach}`);
     console.log(`      angle: ${c.angle}`);
     console.log(`      sources: ${c.source_refs.length}`);
     console.log(`      take: ${c.take}`);
@@ -236,6 +239,7 @@ async function writeOne(
   lookupsBlock: string,
   highlightsBlock: string,
   hasAcademicCorpus: boolean,
+  currentStateBlock: string,
   dry: boolean
 ): Promise<WrittenTomo> {
   const padded = String(n).padStart(4, "0");
@@ -263,7 +267,8 @@ async function writeOne(
     allContext,
     lookupsBlock,
     highlightsBlock,
-    academicBlock
+    academicBlock,
+    currentStateBlock
   );
   const counts = countWords(markdown);
   console.log(`      [${padded}] ${counts.total} words`);
@@ -280,13 +285,52 @@ async function writeOne(
     );
   }
 
+  // Post-draft fact-check. Advisory — flags surface at the review gate; a
+  // verifier failure must never block the (already-written) tomo, so we degrade
+  // to a warning and a low-severity flag rather than throwing.
+  let verifyReport = "";
+  try {
+    const sources = allContext.filter((c) =>
+      candidate.source_refs.includes(c.uuid)
+    );
+    const result = await verifyTomo(
+      candidate,
+      markdown,
+      sources,
+      currentStateBlock
+    );
+    verifyReport = formatVerifyReport(n, result);
+    const high = result.flags.filter((f) => f.severity === "high").length;
+    console.log(
+      `      [${padded}] verifier: ${result.flags.length} flag(s)${high > 0 ? ` (${high} high)` : ""}`
+    );
+    for (const f of result.flags) {
+      console.warn(
+        `      [${padded}] ⚠ [${f.severity}] ${f.type}/${f.issue}: ${f.detail}`
+      );
+    }
+  } catch (err) {
+    console.warn(
+      `      [${padded}] verifier failed (${(err as Error).message}) — review the draft manually`
+    );
+  }
+
   if (dry) {
     console.log(`\n--- dry run: tomo ${padded} (not saved) ---\n`);
     console.log(markdown);
+    if (verifyReport) console.log(`\n${verifyReport}`);
   } else {
     await mkdir(TOMOS_DIR, { recursive: true });
     await writeFile(join(TOMOS_DIR, `${padded}.md`), markdown, "utf-8");
     console.log(`      [${padded}] saved books/tomos/${padded}.md`);
+    if (verifyReport) {
+      await writeFile(
+        join(TOMOS_DIR, `${padded}.verify.md`),
+        verifyReport,
+        "utf-8"
+      );
+      console.log(`      [${padded}] verifier report books/tomos/${padded}.verify.md`);
+    }
   }
 
   return { n, candidate, words: counts.total };
@@ -322,6 +366,13 @@ async function main(): Promise<void> {
     );
   }
 
+  const currentStateBlock = await deriveCurrentState();
+  console.log(
+    currentStateBlock
+      ? `      current-state: derived from recent entries (${currentStateBlock.length} chars)`
+      : "      current-state: insufficient recent signal — staleness guard relies on verifier only"
+  );
+
   if (args.planOnly) {
     console.log("[3/4] planning 6 candidates + reader-level snapshot");
     if (args.steer) {
@@ -339,7 +390,7 @@ async function main(): Promise<void> {
       );
     }
     const [output, readerLevel] = await Promise.all([
-      plan(recent, longArc, context, args.steer, seriesQueueBlock),
+      plan(recent, longArc, context, args.steer, seriesQueueBlock, currentStateBlock),
       fetchRecentSpanishEntries(90, 5).then(generateReaderLevelParagraph),
     ]);
     await savePlannerOutput(n, output, readerLevel);
@@ -447,6 +498,7 @@ async function main(): Promise<void> {
         lookupsBlock,
         highlightsBlock,
         corpusSize > 0,
+        currentStateBlock,
         args.dry
       )
   );
@@ -494,7 +546,7 @@ async function main(): Promise<void> {
   }
   if (!args.dry && written.length > 0) {
     console.log(
-      "\nReview books/tomos/NNNN.md, fix in place, then deliver each with:\n  NODE_ENV=production pnpm tsx scripts/book/rebuild-tomo.ts NNNN [--no-send]"
+      "\nReview books/tomos/NNNN.md (and NNNN.verify.md for fact-check flags), fix in place, then deliver each with:\n  NODE_ENV=production pnpm tsx scripts/book/rebuild-tomo.ts NNNN [--no-send]"
     );
   }
   console.log("=====================\n");
