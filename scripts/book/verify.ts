@@ -46,7 +46,7 @@ export interface VerifyResult {
 
 const SYSTEM = `You are a fact-checker for a personalized Spanish-language essay ("tomo") written for one reader (Mitch). The essay is anchored to real events from his life and teaches a domain concept. Your ONE job: catch specifics the essay gets WRONG, before he reads it.
 
-You are given the finished draft plus three reference blocks: SOURCE MATERIAL (what the writer was told to draw from), RECENT JOURNAL (the last few weeks of raw entries — broader ground truth), and CURRENT STATE (a snapshot of who is current vs. past, derived from the recent entries).
+You are given the finished draft plus four reference blocks: SOURCE MATERIAL (the specific insights the writer was told to draw from), WRITER CONTEXT (everything ELSE the writer could see — the rest of the recent + long-arc approved insights and recent entries; biographical anchors frequently live HERE, not in the narrow source list, especially therapy-session details), RECENT JOURNAL (the last few weeks of raw entries — broader ground truth), and CURRENT STATE (a snapshot of who is current vs. past, derived from the recent entries). A specific is supported if it appears in ANY of these blocks — check WRITER CONTEXT before concluding something is unsupported.
 
 Flag two classes of problem ONLY:
 
@@ -62,6 +62,7 @@ Flag two classes of problem ONLY:
 
 Rules:
 - Be conservative. If a specific is supported by ANY reference block, do NOT flag it. Transformation/paraphrase of a real source detail is fine — only flag genuine errors.
+- Do NOT emit a flag you then conclude is not an error. If your own reasoning lands on "this is supported" / "no actual error" / "just a note", OMIT it entirely — a flag means a real problem the reader must fix, not a margin note.
 - Prefer precision over volume. A short list of real problems beats a long list of nitpicks. An empty list is the correct and expected output for a clean draft.
 - "quote" must be a SHORT verbatim span copied from the draft (Spanish is fine).
 - Direction errors and stale-state errors are the highest-value catches — weight them "high".
@@ -93,7 +94,7 @@ const VALID_ISSUES: VerifyIssue[] = [
 export async function verifyTomo(
   plan: Candidate,
   markdown: string,
-  sources: ContextItem[],
+  context: ContextItem[],
   currentStateBlock: string
 ): Promise<VerifyResult> {
   if (!config.anthropic.apiKey) {
@@ -102,15 +103,26 @@ export async function verifyTomo(
 
   const recentEntries = await fetchRecentEntries(21);
 
-  const sourcesBlock =
-    sources.length === 0
-      ? "(none)"
-      : sources
-          .map((c) => {
-            const head = `[${c.kind}:${c.uuid}] ${c.date}${c.title ? " — " + c.title : ""}`;
-            return `${head}\n${c.text.slice(0, SOURCE_CHARS)}`;
-          })
-          .join("\n\n---\n\n");
+  // The writer's anchors live across the WHOLE context bundle it was given, not
+  // just the planner-picked source_refs — therapy-session insights in particular
+  // sit in the broader pool. Render the picked sources as primary, but expose the
+  // rest as WRITER CONTEXT so the verifier checks against everything the writer
+  // could see (the gap that caused real anchors to be mis-flagged as fabricated).
+  const refSet = new Set(plan.source_refs);
+  const sources = context.filter((c) => refSet.has(c.uuid));
+  const otherContext = context.filter((c) => !refSet.has(c.uuid));
+
+  const renderItems = (items: ContextItem[]): string =>
+    items
+      .map((c) => {
+        const head = `[${c.kind}:${c.uuid}] ${c.date}${c.title ? " — " + c.title : ""}`;
+        return `${head}\n${c.text.slice(0, SOURCE_CHARS)}`;
+      })
+      .join("\n\n---\n\n");
+
+  const sourcesBlock = sources.length === 0 ? "(none)" : renderItems(sources);
+  const writerContextBlock =
+    otherContext.length === 0 ? "(none)" : renderItems(otherContext);
 
   const recentBlock =
     recentEntries.length === 0
@@ -123,8 +135,11 @@ export async function verifyTomo(
     "# DRAFT (the tomo to check)",
     markdown,
     "",
-    "# SOURCE MATERIAL (what the writer was told to draw from)",
+    "# SOURCE MATERIAL (the specific insights the writer was told to draw from)",
     sourcesBlock,
+    "",
+    "# WRITER CONTEXT (everything else the writer could see — other approved insights + recent entries; anchors often live here)",
+    writerContextBlock,
     "",
     "# RECENT JOURNAL (last 21 days of raw entries — broader ground truth)",
     recentBlock,
@@ -142,7 +157,6 @@ export async function verifyTomo(
     system: SYSTEM,
     messages: [{ role: "user", content: user }],
     maxTokens: 2048,
-    temperature: 0,
     label: "verify",
   });
 

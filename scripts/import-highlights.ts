@@ -83,11 +83,13 @@ function parseClippings(raw: string): ParsedClipping[] {
 async function main(): Promise<void> {
   const { source } = parseArgs();
   if (!existsSync(source)) {
-    console.error(`[import-highlights] My Clippings.txt not found at ${source}`);
-    console.error(
-      "  Plug in the Kindle and mount it, or pass --source=/path/to/My\\ Clippings.txt"
+    console.log(
+      `[import-highlights] skip — My Clippings.txt not found at ${source} (Kindle not mounted).`
     );
-    process.exit(1);
+    console.log(
+      "  Plug in the Kindle and mount it, or pass --source=/path/to/My\\ Clippings.txt. Nothing to import; not an error."
+    );
+    return;
   }
 
   const raw = await readFile(source, "utf-8");

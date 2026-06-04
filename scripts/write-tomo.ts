@@ -14,6 +14,13 @@
  *   --dry              # plan + write, print to stdout, no files/history (requires --pick)
  *   --steer "..."      # nudge the planner with editorial direction (use with --plan-only)
  *   --fresh-plan       # delete books/next-plan.json before reading
+ *   --verify=59,60     # re-run the verifier against already-written tomo(s) and print
+ *                      # the report(s); reads books/tomos/NNNN.md, rebuilds the context
+ *                      # bundle from history, writes NOTHING. A standalone Phase-3 recheck.
+ *
+ * Every run starts with a fail-fast preflight (one 1-token call to the writer
+ * model) so an exhausted credit balance or a rejected param aborts in ~2s
+ * instead of after the expensive fan-out.
  *
  * Plan persistence: `--plan-only` writes books/next-plan.json with all 6 candidates.
  * `--pick` reuses that file; successfully-written candidates are dropped from the
@@ -21,16 +28,19 @@
  * the recent-exclusion filter are fetched directly by UUID so the writer sees them.
  */
 
-import { writeFile, mkdir, readFile, unlink } from "fs/promises";
+import { writeFile, mkdir, readFile, unlink, rename } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
+import { config } from "../src/config.js";
 import { pool } from "../src/db/client.js";
+import { bookChat } from "./book/llm.js";
 import {
   readHistory,
   appendHistory,
   nextTomoNumber,
   recentSourceUuids,
   recentTomoSummaries,
+  type TomoRecord,
 } from "./book/state.js";
 import {
   gatherContext,
@@ -77,6 +87,49 @@ const PLAN_PATH = "books/next-plan.json";
 const FLOOR_WORDS = 3600;
 const CEILING_WORDS = 4400;
 const WRITE_CONCURRENCY = 2;
+
+/**
+ * Write JSON atomically (temp file + rename) so a reader can never observe a
+ * half-written or stale plan. The plan-only/pick race that showed a stale menu
+ * came from reading `next-plan.json` mid-write — rename is atomic on the same fs.
+ */
+async function atomicWriteJson(path: string, data: unknown): Promise<void> {
+  const tmp = `${path}.tmp`;
+  await writeFile(tmp, JSON.stringify(data, null, 2) + "\n", "utf-8");
+  await rename(tmp, path);
+}
+
+/**
+ * Fail-fast pre-flight: one minimal call to the writer model before the
+ * expensive fan-out. Catches an exhausted credit balance and rejected model
+ * params (e.g. a deprecated `temperature`) in ~2s with an actionable message,
+ * instead of losing a whole parallel write/plan cycle to the same error.
+ */
+async function preflight(): Promise<void> {
+  if (!config.anthropic.apiKey) {
+    console.error(
+      "[preflight] ANTHROPIC_API_KEY is missing — set it before running the tomo pipeline."
+    );
+    await pool.end().catch(() => {});
+    process.exit(2);
+  }
+  try {
+    await bookChat({
+      model: config.models.bookWriter,
+      system: "ping",
+      messages: [{ role: "user", content: "ping" }],
+      maxTokens: 1,
+      label: "preflight",
+    });
+  } catch (err) {
+    const msg = (err as Error).message ?? String(err);
+    console.error(
+      `[preflight] writer model (${config.models.bookWriter}) is not callable — aborting before the expensive run.\n  ${msg}\n  Common causes: exhausted credit balance (top up at console.anthropic.com → Plans & Billing) or a rejected request param.`
+    );
+    await pool.end().catch(() => {});
+    process.exit(1);
+  }
+}
 
 interface SavedPlan {
   tomo_n: number;
@@ -126,7 +179,7 @@ async function updatePlanAfterBatch(
     reader_level: saved.reader_level,
     candidates: remaining,
   };
-  await writeFile(PLAN_PATH, JSON.stringify(payload, null, 2) + "\n", "utf-8");
+  await atomicWriteJson(PLAN_PATH, payload);
 }
 
 async function savePlannerOutput(
@@ -140,7 +193,7 @@ async function savePlannerOutput(
     reader_level: readerLevel,
     candidates: p.candidates,
   };
-  await writeFile(PLAN_PATH, JSON.stringify(payload, null, 2) + "\n", "utf-8");
+  await atomicWriteJson(PLAN_PATH, payload);
 }
 
 async function clearSavedPlan(): Promise<void> {
@@ -150,6 +203,8 @@ async function clearSavedPlan(): Promise<void> {
 interface Args {
   planOnly: boolean;
   picks: number[];
+  /** Tomo numbers to re-run the verifier against (read-only; prints, writes nothing). */
+  verify: number[];
   dry: boolean;
   steer?: string;
   freshPlan: boolean;
@@ -175,30 +230,65 @@ function parseArgs(): Args {
   }
   picks.sort((a, b) => a - b);
 
+  const verify: number[] = [];
+  for (const a of argv) {
+    if (a.startsWith("--verify=")) {
+      for (const tok of a.slice("--verify=".length).split(",")) {
+        const v = Number(tok.trim());
+        if (!Number.isInteger(v) || v < 1) {
+          throw new Error(`--verify values must be positive tomo numbers, got "${tok}"`);
+        }
+        if (!verify.includes(v)) verify.push(v);
+      }
+    }
+  }
+  verify.sort((a, b) => a - b);
+
   const planOnly = argv.includes("--plan-only");
   if (planOnly && picks.length > 0) {
     throw new Error("--plan-only and --pick cannot be combined");
+  }
+  if (verify.length > 0 && (planOnly || picks.length > 0)) {
+    throw new Error("--verify cannot be combined with --plan-only or --pick");
   }
 
   return {
     planOnly,
     picks,
+    verify,
     dry: argv.includes("--dry"),
     steer,
     freshPlan: argv.includes("--fresh-plan"),
   };
 }
 
-function printCandidates(candidates: Candidate[]): void {
+/**
+ * Print the candidate menu by DOMAIN + SOURCE MATERIAL — the source insights/
+ * entries each candidate draws from, resolved to title+date. The angle/take
+ * "sell" is intentionally dropped: candidates are presented by what they teach
+ * (domain + mechanism) and what they're anchored to (source material), so the
+ * reader picks on substance rather than on an editor's pitch.
+ */
+function printCandidates(
+  candidates: Candidate[],
+  byUuid: Map<string, ContextItem>
+): void {
   const sorted = [...candidates].sort((a, b) => a.id - b.id);
+  console.log(`\n${sorted.length} candidate(s):`);
   for (const c of sorted) {
-    console.log(`\n  [${c.id}] ${c.domain}`);
-    console.log(`      "${c.title}"`);
+    console.log(`\n  [${c.id}] ${c.domain} — "${c.title}"`);
     console.log(`      topic: ${c.topic}`);
-    console.log(`      mechanism: ${c.mechanism_to_teach}`);
-    console.log(`      angle: ${c.angle}`);
-    console.log(`      sources: ${c.source_refs.length}`);
-    console.log(`      take: ${c.take}`);
+    console.log(`      teaches: ${c.mechanism_to_teach}`);
+    console.log(`      source material (${c.source_refs.length}):`);
+    for (const u of c.source_refs) {
+      const item = byUuid.get(u);
+      if (item) {
+        const label = item.title ?? `${item.kind} entry`;
+        console.log(`        - [${item.kind}] ${item.date} — ${label}`);
+      } else {
+        console.log(`        - ${u} (not in current pool)`);
+      }
+    }
   }
 }
 
@@ -290,13 +380,13 @@ async function writeOne(
   // to a warning and a low-severity flag rather than throwing.
   let verifyReport = "";
   try {
-    const sources = allContext.filter((c) =>
-      candidate.source_refs.includes(c.uuid)
-    );
+    // Feed the verifier the FULL context bundle (not just source_refs) so it
+    // checks anchors against everything the writer could see — therapy-session
+    // insights in the broader pool were the gap that mis-flagged real anchors.
     const result = await verifyTomo(
       candidate,
       markdown,
-      sources,
+      allContext,
       currentStateBlock
     );
     verifyReport = formatVerifyReport(n, result);
@@ -323,6 +413,22 @@ async function writeOne(
     await mkdir(TOMOS_DIR, { recursive: true });
     await writeFile(join(TOMOS_DIR, `${padded}.md`), markdown, "utf-8");
     console.log(`      [${padded}] saved books/tomos/${padded}.md`);
+    // Emit the exact context bundle the writer saw, so Phase-3 review (and a
+    // standalone `--verify`) can check anchors against the real ground truth
+    // instead of re-deriving "where do the anchors live" by hand.
+    await atomicWriteJson(join(TOMOS_DIR, `${padded}.context.json`), {
+      tomo_n: n,
+      plan: candidate,
+      current_state: currentStateBlock,
+      context: allContext.map((c) => ({
+        uuid: c.uuid,
+        kind: c.kind,
+        date: c.date,
+        title: c.title,
+        text: c.text,
+      })),
+    });
+    console.log(`      [${padded}] context bundle books/tomos/${padded}.context.json`);
     if (verifyReport) {
       await writeFile(
         join(TOMOS_DIR, `${padded}.verify.md`),
@@ -343,6 +449,8 @@ async function main(): Promise<void> {
     await clearSavedPlan();
     console.log("[fresh-plan] cleared books/next-plan.json");
   }
+
+  await preflight();
 
   console.log("[1/4] reading history");
   const history = await readHistory();
@@ -373,6 +481,64 @@ async function main(): Promise<void> {
       : "      current-state: insufficient recent signal — staleness guard relies on verifier only"
   );
 
+  if (args.verify.length > 0) {
+    console.log(`[verify] re-checking tomo(s) ${args.verify.join(", ")} against the full context bundle`);
+    const records = await readHistory();
+    const allContext = [...longArc, ...context];
+    const validUuids = new Set(allContext.map((c) => c.uuid));
+    const wanted = args.verify
+      .map((v) => records.find((r) => r.n === v))
+      .filter((r): r is TomoRecord => Boolean(r));
+    const missing = [
+      ...new Set(
+        wanted.flatMap((r) => r.source_uuids).filter((u) => !validUuids.has(u))
+      ),
+    ];
+    if (missing.length > 0) {
+      const rescued = await fetchContextByUuid(missing);
+      if (rescued.length > 0) {
+        console.log(`      rescued ${rescued.length} excluded source UUID(s)`);
+        allContext.push(...rescued);
+      }
+    }
+    for (const v of args.verify) {
+      const padded = String(v).padStart(4, "0");
+      const mdPath = join(TOMOS_DIR, `${padded}.md`);
+      const rec = records.find((r) => r.n === v);
+      if (!existsSync(mdPath)) {
+        console.error(`[verify] ${mdPath} not found — skipping`);
+        continue;
+      }
+      if (!rec) {
+        console.error(
+          `[verify] tomo ${v} not in history — cannot resolve source_refs; skipping`
+        );
+        continue;
+      }
+      const markdown = await readFile(mdPath, "utf-8");
+      const pseudo: Candidate = {
+        id: 0,
+        format: "essay",
+        domain: rec.domain as Candidate["domain"],
+        topic: rec.topic,
+        mechanism_to_teach: rec.topic,
+        angle: "",
+        title: rec.title,
+        source_refs: rec.source_uuids,
+        take: "",
+      };
+      const result = await verifyTomo(
+        pseudo,
+        markdown,
+        allContext,
+        currentStateBlock
+      );
+      console.log(`\n${formatVerifyReport(v, result)}`);
+    }
+    await pool.end();
+    return;
+  }
+
   if (args.planOnly) {
     console.log("[3/4] planning 6 candidates + reader-level snapshot");
     if (args.steer) {
@@ -394,9 +560,14 @@ async function main(): Promise<void> {
       fetchRecentSpanishEntries(90, 5).then(generateReaderLevelParagraph),
     ]);
     await savePlannerOutput(n, output, readerLevel);
-    console.log(`      saved 6 candidates to ${PLAN_PATH}`);
+    console.log(
+      `      saved ${output.candidates.length} candidate(s) for tomo #${n} to ${PLAN_PATH}`
+    );
+    const byUuid = new Map<string, ContextItem>(
+      [...longArc, ...context].map((c) => [c.uuid, c])
+    );
     console.log("\n--- candidates ---");
-    printCandidates(output.candidates);
+    printCandidates(output.candidates, byUuid);
     console.log(`\nPick with: pnpm tsx scripts/write-tomo.ts --pick=<ids,comma,separated>`);
     await pool.end();
     return;

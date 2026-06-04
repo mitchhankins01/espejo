@@ -48,11 +48,13 @@ interface Row {
 async function main(): Promise<void> {
   const { source } = parseArgs();
   if (!existsSync(source)) {
-    console.error(`[import-lookups] vocab.db not found at ${source}`);
-    console.error(
-      "  Plug in the Kindle and mount it, or pass --source=/path/to/vocab.db"
+    console.log(
+      `[import-lookups] skip — vocab.db not found at ${source} (Kindle not mounted).`
     );
-    process.exit(1);
+    console.log(
+      "  Plug in the Kindle and mount it, or pass --source=/path/to/vocab.db. Nothing to import; not an error."
+    );
+    return;
   }
 
   const tmp = join(tmpdir(), `kindle-vocab-${Date.now()}.db`);
