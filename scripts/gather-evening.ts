@@ -118,6 +118,12 @@ async function q(sql: string, params: unknown[] = []): Promise<Record<string, un
   return res.rows as Record<string, unknown>[];
 }
 
+// Strip a trailing `## Tags` block (the hashtag soup that exists for DB search,
+// not for reading) from a review/insight body. Cuts from the heading to EOF.
+function stripTagsBlock(body: string): string {
+  return body.replace(/\n#{1,6}\s*Tags\s*\n[\s\S]*$/i, "\n").trimEnd();
+}
+
 // ── vault helpers ─────────────────────────────────────────────────────────────
 function listMd(dir: string): string[] {
   const abs = join(process.cwd(), dir);
@@ -176,7 +182,7 @@ async function main(): Promise<void> {
       const m = basename(f).match(/^(\d{4}-\d{2}-\d{2})/);
       if (!m || m[1] < SEVEN_AGO) continue;
       const parsed = parseObsidianNote(readFileSync(f, "utf8"), basename(f));
-      emit(`### ${basename(f, ".md")}\n\n${parsed.body}\n`);
+      emit(`### ${basename(f, ".md")}\n\n${stripTagsBlock(parsed.body)}\n`);
       n++;
     }
     return { status: n ? "ok" : "warn", note: `${n} files` };
@@ -213,6 +219,8 @@ async function main(): Promise<void> {
 
   // #5 Oura sleep/readiness/stages — SHAPE (long_sleep only; day_summary intentionally unused)
   await section("#5 Oura sleep/readiness/stages (7d)", "SHAPE", async () => {
+    // s_delta/r_delta dropped 2026-06-03 (deprecated, all-zero per project_oura_score_deltas_zero);
+    // v_age + bdi dropped same pass (rarely tie to a daily theme — see digest-bloat audit).
     const rows = await q(
       `SELECT d.day, d.score AS sleep, r.score AS readiness,
               ROUND(ss.total_sleep_duration_seconds/3600.0, 1) AS hours,
@@ -225,25 +233,19 @@ async function main(): Promise<void> {
               ROUND(ss.average_hrv::numeric, 0)    AS hrv,
               ss.lowest_heart_rate                 AS rhr,
               ROUND(ss.average_breath::numeric, 1) AS breath,
-              ss.sleep_score_delta                 AS s_delta,
-              ss.readiness_score_delta             AS r_delta,
               sp.average_spo2::numeric(4,1)        AS spo2,
-              sp.breathing_disturbance_index       AS bdi,
-              rs.level                             AS resilience,
-              cv.vascular_age                      AS v_age
+              rs.level                             AS resilience
        FROM oura_daily_sleep d
        LEFT JOIN oura_daily_readiness r ON r.day=d.day
        LEFT JOIN LATERAL (
          SELECT total_sleep_duration_seconds, rem_sleep_seconds, deep_sleep_seconds,
                 light_sleep_seconds, awake_seconds, latency_seconds, efficiency,
-                average_hrv, average_heart_rate, lowest_heart_rate, average_breath,
-                sleep_score_delta, readiness_score_delta
+                average_hrv, average_heart_rate, lowest_heart_rate, average_breath
          FROM oura_sleep_sessions
          WHERE day=d.day AND sleep_type='long_sleep' LIMIT 1
        ) ss ON TRUE
        LEFT JOIN oura_daily_spo2 sp ON sp.day=d.day
        LEFT JOIN oura_daily_resilience rs ON rs.day=d.day
-       LEFT JOIN oura_daily_cardiovascular_age cv ON cv.day=d.day
        WHERE d.day >= $1 ORDER BY d.day DESC`,
       [SEVEN_AGO]
     );
@@ -352,6 +354,10 @@ async function main(): Promise<void> {
        WHERE (started_at AT TIME ZONE 'Europe/Madrid')::date = $1
          AND p->>'text' NOT LIKE '<local-command-caveat>%'
          AND p->>'text' NOT LIKE '<command-name>%'
+         AND p->>'text' NOT LIKE '<task-notification>%'
+         AND p->>'text' NOT LIKE '<environment_context>%'
+         AND p->>'text' NOT LIKE '# AGENTS.md instructions%'
+         AND p->>'text' NOT LIKE 'You are reviewing the following approach as part of a multi-model council%'
        ORDER BY started_at, (p->>'index')::int`,
       [TODAY]
     );
@@ -476,7 +482,9 @@ async function main(): Promise<void> {
         .prepare(
           `SELECT mi.ZMEDIALOCALPATH AS path FROM ZWAMESSAGE m
            JOIN ZWAMEDIAITEM mi ON mi.ZMESSAGE = m.Z_PK
-           WHERE m.ZMESSAGETYPE = 3 AND m.ZMESSAGEDATE > ?`
+           JOIN ZWACHATSESSION cs ON cs.Z_PK = m.ZCHATSESSION
+           WHERE m.ZMESSAGETYPE = 3 AND m.ZMESSAGEDATE > ?
+             AND cs.ZCONTACTJID NOT LIKE '%@g.us'`
         )
         .all(waSince) as { path: string | null }[];
       voiceTotal = voiceRows.length;
@@ -503,14 +511,14 @@ async function main(): Promise<void> {
       }
     }
 
-    // #15b — threads since the boundary, grouped by partner, chronological.
-    // ZPUSHNAME / group-member name fields are base64-encoded junk in the current
-    // WhatsApp schema (a privacy change scrambled them), so per-participant sender
-    // names are NOT recoverable. Use ZPARTNERNAME (clean for 1:1); group senders
-    // collapse to a neutral marker, detected via the @g.us JID.
+    // #15b — 1:1 threads since the boundary, grouped by partner, chronological.
+    // Group chats (@g.us) are excluded entirely (2026-06-03): they're ticket-resale /
+    // logistics noise with no relational signal, and per-participant sender names are
+    // base64-scrambled junk in the current WhatsApp schema anyway. Only 1:1 threads
+    // (Dayana, Miguel, family, friends) carry signal, and ZPARTNERNAME is clean for those.
     const msgs = db
       .prepare(
-        `SELECT cs.ZPARTNERNAME AS partner, cs.ZCONTACTJID AS jid,
+        `SELECT cs.ZPARTNERNAME AS partner,
                 strftime('%m-%d %H:%M', datetime(m.ZMESSAGEDATE + 978307200, 'unixepoch', 'localtime')) AS ts,
                 m.ZISFROMME AS fromme, m.ZMESSAGETYPE AS mtype,
                 COALESCE(m.ZTEXT,'') AS text, COALESCE(mi.ZMEDIALOCALPATH,'') AS media
@@ -518,11 +526,11 @@ async function main(): Promise<void> {
          JOIN ZWACHATSESSION cs ON cs.Z_PK = m.ZCHATSESSION
          LEFT JOIN ZWAMEDIAITEM mi ON mi.ZMESSAGE = m.Z_PK
          WHERE m.ZMESSAGEDATE > ?
+           AND cs.ZCONTACTJID NOT LIKE '%@g.us'
          ORDER BY cs.ZPARTNERNAME, m.ZMESSAGEDATE`
       )
       .all(waSince) as {
       partner: string | null;
-      jid: string | null;
       ts: string;
       fromme: number;
       mtype: number;
@@ -531,21 +539,16 @@ async function main(): Promise<void> {
     }[];
     db.close();
 
-    emit(
-      `_Group participant names are unavailable (encoded in the current WhatsApp schema); ` +
-        `in group threads non-Mitch senders show as \`(member)\`. 1:1 threads (Dayana, Miguel, ` +
-        `family, friends) — the primary relational signal — are fully named._\n`
-    );
+    emit(`_1:1 threads only (group chats excluded as noise). Fully-named partners — the primary relational signal._\n`);
     const typeMap: Record<number, string> = { 0: "", 1: "[photo]", 8: "[HEIC]", 15: "[sticker]" };
     let cur = "";
     for (const m of msgs) {
       const partner = m.partner ?? "(unknown)";
-      const isGroup = (m.jid ?? "").endsWith("@g.us");
       if (partner !== cur) {
-        emit(`\n### ${partner}${isGroup ? " (group)" : ""}\n`);
+        emit(`\n### ${partner}\n`);
         cur = partner;
       }
-      const sender = m.fromme === 1 ? "Mitch" : isGroup ? "(member)" : partner;
+      const sender = m.fromme === 1 ? "Mitch" : partner;
       let content = m.text;
       if (m.mtype === 3) {
         const uuid = m.media ? basename(m.media, extname(m.media)) : "";
