@@ -7,8 +7,8 @@
 //   - insight: LLM-paraphrased English about Mitch's life ("Mitch has gone
 //     three days without weed…") trivially matches `has`/`es`/`son` and
 //     trains the user against English with a Spanish quiz attached.
-//   - note: structurally heavy (YAML, bullets, headings) — Español Vivo
-//     dumped its `common_traps:` YAML as a clue body.
+//   - note: structurally heavy (YAML, bullets, headings) — a structured
+//     Spanish-learning note can dump its `common_traps:` YAML as a clue body.
 //   - review/project: contain Mitch's own Spanish errors verbatim.
 //
 // Even within `reference` we post-filter: looksSpanish + not-structured +
@@ -98,7 +98,7 @@ export function looksSpanish(sentence: string): boolean {
  * Reject segments that aren't prose: YAML mapping rows, bullet lists, table
  * pipes, headings, all-caps banners, code fences, blockquote panels with
  * attributed journal quotes. These leak through when an artifact body is
- * structured rather than narrative (e.g. Español Vivo's `common_traps:` YAML
+ * structured rather than narrative (e.g. a structured note's `common_traps:` YAML
  * block, or the `Thyroid History` reference's three-blockquote panel of dated
  * Day One quotes — see 2026-05-18 incident).
  */

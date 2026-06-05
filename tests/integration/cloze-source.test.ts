@@ -181,7 +181,7 @@ describe("findClozeSentence", () => {
     expect(hit).toBeNull();
   });
 
-  it("kind='note' artifacts are NOT a cloze source (regression: Español Vivo YAML body matched on 'estoy')", async () => {
+  it("kind='note' artifacts are NOT a cloze source (regression: structured YAML note body matched on 'estoy')", async () => {
     await pool.query(
       `INSERT INTO knowledge_artifacts (kind, title, body)
        VALUES ('note', 'note-skip', 'Cuando estoy cansado en la oficina hablamos de descansar.')`
