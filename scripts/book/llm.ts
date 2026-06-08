@@ -11,11 +11,43 @@
  *     printed only for the long calls (writer, bilingual) via `progress: true`
  */
 import type { ModelMessage } from "ai";
-import { chat } from "../../src/llm/index.js";
+import { chat, type LlmProvider } from "../../src/llm/index.js";
+import { config } from "../../src/config.js";
 
 const CHARS_PER_TOK = 4;
 const TOK_INTERVAL = 500;
 const CHARS_INTERVAL = TOK_INTERVAL * CHARS_PER_TOK;
+
+/**
+ * Provider override for the book pipeline. Default "anthropic" (unchanged).
+ * Set BOOK_LLM_PROVIDER=openai to route every tomo call through the OpenAI
+ * API instead — e.g. when the Anthropic balance is exhausted. The two model
+ * tiers the book modules pass (config.models.bookWriter for writer/planner/
+ * verify, config.models.anthropicFast for mechanical calls) are mapped to
+ * OPENAI_BOOK_MODEL / OPENAI_BOOK_FAST_MODEL respectively.
+ */
+const BOOK_PROVIDER: LlmProvider =
+  process.env.BOOK_LLM_PROVIDER?.toLowerCase() === "openai"
+    ? "openai"
+    : "anthropic";
+const OPENAI_WRITER_MODEL = process.env.OPENAI_BOOK_MODEL || "gpt-5.5";
+const OPENAI_FAST_MODEL = process.env.OPENAI_BOOK_FAST_MODEL || "gpt-5-mini";
+
+/**
+ * Resolve the (provider, model) pair for a given anthropic-tier model id.
+ * On the anthropic path this is a pass-through. On the openai path the
+ * incoming claude model id is translated to the matching OpenAI tier — the
+ * fast tier (anthropicFast) maps to the mini model, everything else (the
+ * writer/planner/verify tier) maps to the writer model.
+ */
+function resolveModel(model: string): { provider: LlmProvider; model: string } {
+  if (BOOK_PROVIDER !== "openai") return { provider: "anthropic", model };
+  const isFast = model === config.models.anthropicFast;
+  return {
+    provider: "openai",
+    model: isFast ? OPENAI_FAST_MODEL : OPENAI_WRITER_MODEL,
+  };
+}
 
 function formatElapsed(ms: number): string {
   const s = Math.round(ms / 1000);
@@ -55,13 +87,20 @@ export async function bookChatMeta(p: BookChatParams): Promise<BookChatResult> {
   const start = Date.now();
   let reported = 0;
 
+  const { provider, model } = resolveModel(p.model);
+  // GPT-5 family reasoning models reject any non-default temperature, so drop
+  // it entirely on the openai path (the only callers that set it — sensitivity
+  // and current-state — want determinism, not a specific value; default temp
+  // is acceptable for those one-offs).
+  const temperature = provider === "openai" ? undefined : p.temperature;
+
   const res = await chat({
-    provider: "anthropic",
-    model: p.model,
+    provider,
+    model,
     system: p.system,
     messages: p.messages,
     maxTokens: p.maxTokens,
-    temperature: p.temperature,
+    temperature,
     cacheSystem: p.cacheSystem ?? true,
     onTextDelta: p.progress
       ? (snapshot: string): void => {

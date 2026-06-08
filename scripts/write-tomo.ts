@@ -106,7 +106,15 @@ async function atomicWriteJson(path: string, data: unknown): Promise<void> {
  * instead of losing a whole parallel write/plan cycle to the same error.
  */
 async function preflight(): Promise<void> {
-  if (!config.anthropic.apiKey) {
+  const useOpenai = process.env.BOOK_LLM_PROVIDER?.toLowerCase() === "openai";
+  if (useOpenai && !config.openai.apiKey) {
+    console.error(
+      "[preflight] BOOK_LLM_PROVIDER=openai but OPENAI_API_KEY is missing — set it before running the tomo pipeline."
+    );
+    await pool.end().catch(() => {});
+    process.exit(2);
+  }
+  if (!useOpenai && !config.anthropic.apiKey) {
     console.error(
       "[preflight] ANTHROPIC_API_KEY is missing — set it before running the tomo pipeline."
     );
@@ -118,13 +126,19 @@ async function preflight(): Promise<void> {
       model: config.models.bookWriter,
       system: "ping",
       messages: [{ role: "user", content: "ping" }],
-      maxTokens: 1,
+      // GPT-5 reasoning models spend the budget on reasoning tokens; a 1-token
+      // ceiling yields an empty/length-truncated reply (or an API error), which
+      // would falsely fail the preflight. 32 is still negligible.
+      maxTokens: useOpenai ? 32 : 1,
       label: "preflight",
     });
   } catch (err) {
     const msg = (err as Error).message ?? String(err);
+    const topup = useOpenai
+      ? "exhausted credit balance (top up at platform.openai.com → Billing) or a rejected request param."
+      : "exhausted credit balance (top up at console.anthropic.com → Plans & Billing) or a rejected request param.";
     console.error(
-      `[preflight] writer model (${config.models.bookWriter}) is not callable — aborting before the expensive run.\n  ${msg}\n  Common causes: exhausted credit balance (top up at console.anthropic.com → Plans & Billing) or a rejected request param.`
+      `[preflight] writer model is not callable — aborting before the expensive run.\n  ${msg}\n  Common causes: ${topup}`
     );
     await pool.end().catch(() => {});
     process.exit(1);
