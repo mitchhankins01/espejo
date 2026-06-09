@@ -51,6 +51,19 @@ while ((oi = args.indexOf("--override", oi + 1)) >= 0) {
 const synth = JSON.parse(readFileSync(`${outDir}/synthesis.json`, "utf8"));
 const log = (...a) => console.log((dryRun ? "[DRY] " : "") + a.join(" "));
 
+// Defensive DEFER resolver (synth normally promotes true ties, so this is a
+// safety net for old/hand-edited plans): among legs that wrote a merge_body for
+// the resolved final_target, return the highest signal-recall one (score_breakdown
+// is pre-sorted best-first), else null. Never an arbitrary hard-coded leg.
+function bestLegWithBodyForTarget(s) {
+  const ordered = (s.score_breakdown || []).map(x => x.leg);
+  const pool = ordered.length ? ordered : Object.keys(s.merge_bodies || {});
+  for (const leg of pool) {
+    if (s.merge_bodies?.[leg] && s.classifications?.[leg]?.target === s.final_target) return leg;
+  }
+  return null;
+}
+
 const fp = (rel) => join(VAULT, rel);
 const baseNoExt = (p) => basename(p, ".md");
 
@@ -237,10 +250,24 @@ for (const s of merges) {
   const mergeNum = previewMergeNum.get(s.source_path);
   let pick = overrides[mergeNum] || s.recommended_pick;
   if (pick === "DEFER") {
-    const overrideUsed = !!overrides[mergeNum];
-    pick = overrides[mergeNum] || "gemini";
-    log(`  ⚠️ Was DEFER — falling back to ${pick}${overrideUsed ? " (override)" : ""}`);
-    if (!overrideUsed) deferFallbacks.push({ num: mergeNum, source: s.source_path, target: s.final_target, pick });
+    // Plurality/tie resolution now lives in synth: a genuine tie is promoted to
+    // Distinct, so a Merge should never carry DEFER. If one slips through (an
+    // older synthesis.json, or a hand-edit), do NOT pick an arbitrary leg.
+    // Honor an explicit override; otherwise choose the highest-recall leg that
+    // actually wrote a body for the resolved target, and skip loudly if none.
+    if (overrides[mergeNum]) {
+      pick = overrides[mergeNum];
+      log(`  ⚠️ Was DEFER — using override ${pick}`);
+    } else {
+      pick = bestLegWithBodyForTarget(s);
+      if (!pick) {
+        console.error(`  ⚠️ DEFER with no leg body for target ${s.final_target} — SKIPPING merge #${mergeNum}: ${s.source_path}. Re-run synth, or pass --override ${mergeNum}=<leg>.`);
+        deferFallbacks.push({ num: mergeNum, source: s.source_path, target: s.final_target, pick: "(skipped — no body)" });
+        continue;
+      }
+      log(`  ⚠️ Was DEFER — recall-picked ${pick} (has a body for ${s.final_target})`);
+      deferFallbacks.push({ num: mergeNum, source: s.source_path, target: s.final_target, pick });
+    }
   }
   let target = s.final_target;
   // If picked leg routed to a different target, use that

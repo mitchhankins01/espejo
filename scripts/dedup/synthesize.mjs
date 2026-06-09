@@ -181,18 +181,60 @@ const synth = allPaths.map(p => {
   const sorted = Object.entries(tally).sort((a, b) => b[1] - a[1]);
   const [topClass, topCount] = sorted[0] || [null, 0];
 
-  // Target tally among voters who chose the top class
+  // ── Recall-weighted plurality target resolution ────────────────────────────
+  // (replaces strict unanimity, which deferred on ANY single dissenting target.)
+  // Among voters who chose the top class (Merge/Duplicate), tally their target
+  // picks — but discount a leg whose own merge_body barely preserves the
+  // source∪(its-target) signal. A near-zero-recall pick is a weak/hallucinated
+  // target and must not be able to split a real plurality. A unique plurality
+  // resolves to "plurality"; DEFER ("disagree") is reserved for a genuine tie
+  // among well-supported targets.
+  const MIN_TARGET_SUPPORT = 0.5; // below this, a leg's target vote is discounted
+  const TIE_MARGIN = 0.5;         // weighted-count gap that separates a plurality from a tie
+  const isMergeClass = topClass === "Merge" || topClass === "Duplicate";
+
+  const legVote = {};
+  for (const l of activeLegs) if (idx[l][p]) legVote[l] = idx[l][p];
+
+  const srcBgForTally = bigrams(bodyCore(
+    planFull.plan.find(e => e.source?.source_path === p)?.source?.body || ""
+  ));
+
+  // Per-leg support for its OWN chosen target: bigram recall of the leg's
+  // merge_body (or, lacking one, the target body itself) over source∪target.
+  const legTargetSupport = {};
+  for (const l of activeLegs) {
+    const v = legVote[l];
+    if (!v || v.classification !== topClass || !v.target_path) continue;
+    const tgtBg = bigrams(bodyCore(readMd(v.target_path)));
+    const unionBg = new Set([...srcBgForTally, ...tgtBg]);
+    const probe = v.merge_body ? bigrams(bodyCore(v.merge_body)) : tgtBg;
+    legTargetSupport[l] = recall(unionBg, probe) ?? 0;
+  }
+  // If every pick is weak, fall back to unweighted counts so we don't zero the
+  // whole tally and force a spurious tie.
+  const supportVals = Object.values(legTargetSupport);
+  const allWeak = supportVals.length > 0 && supportVals.every(s => s < MIN_TARGET_SUPPORT);
+
   const targetTally = {};
-  for (const v of votes) {
-    if (v.classification === topClass && v.target_path) {
-      targetTally[v.target_path] = (targetTally[v.target_path] || 0) + 1;
+  for (const l of activeLegs) {
+    const v = legVote[l];
+    if (!v || v.classification !== topClass || !v.target_path) continue;
+    const w = allWeak ? 1 : (legTargetSupport[l] >= MIN_TARGET_SUPPORT ? 1 : 0.01);
+    targetTally[v.target_path] = (targetTally[v.target_path] || 0) + w;
+  }
+
+  const targetRanked = Object.entries(targetTally).sort((a, b) => b[1] - a[1]);
+  const consensusTarget = targetRanked[0]?.[0] || null;
+  let targetAgreement = null;
+  if (isMergeClass && targetRanked.length > 0) {
+    if (targetRanked.length === 1) {
+      targetAgreement = "agree";
+    } else {
+      const gap = targetRanked[0][1] - targetRanked[1][1];
+      targetAgreement = gap > TIE_MARGIN ? "plurality" : "disagree";
     }
   }
-  const consensusTarget = Object.entries(targetTally).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
-
-  const targetAgreement = (topClass === "Merge" || topClass === "Duplicate")
-    ? (Object.keys(targetTally).length === 1 ? "agree" : "disagree")
-    : null;
 
   // Consensus bucket. auto_safe requires a full unanimous panel (n≥3); 2/2-agree
   // and single-vote rows are downgraded to likely_safe so the missing-leg case
@@ -216,6 +258,17 @@ const synth = allPaths.map(p => {
     finalAction = "Distinct";
   }
 
+  // Genuine target tie (legs split evenly across well-supported targets, no
+  // plurality): there is no principled single target to merge into. Promote to
+  // Distinct (a new Insight/ file — reversible, and a later mode-B sweep
+  // re-merges it) rather than DEFER + an arbitrary-leg fallback in apply.
+  let tiePromotedFrom = null;
+  if (finalAction === "Merge" && targetAgreement === "disagree") {
+    tiePromotedFrom = targetRanked.slice(0, 2).map(([t]) => t);
+    finalAction = "Distinct";
+    finalTarget = null;
+  }
+
   // Merge body recommended pick + supersede detection
   let recommendedPick = null;
   let recommendationRationale = null;
@@ -235,7 +288,8 @@ const synth = allPaths.map(p => {
     const unionLinks = new Set([...wikilinks(sourceBodyRaw), ...wikilinks(targetBodyRaw)]);
 
     const candidates = activeLegs
-      .filter(l => votes.find(v => v.source_path === p && v === idx[l][p])?.classification === "Merge")
+      .filter(l => idx[l][p]?.classification === "Merge")
+      .filter(l => idx[l][p]?.target_path === finalTarget) // only bodies written for the chosen target
       .filter(l => idx[l][p]?.merge_body)
       .map(l => ({ leg: l, body: idx[l][p].merge_body }));
     if (candidates.length === 0) {
@@ -263,8 +317,6 @@ const synth = allPaths.map(p => {
       const summary = scored.map(s => `${s.leg}=${(s.composite * 100).toFixed(0)}% (bg ${(s.bgRecall * 100).toFixed(0)}, sp ${(s.spanRecall * 100).toFixed(0)}, lk ${(s.linkRecall * 100).toFixed(0)})`).join(" · ");
       recommendationRationale = `signal recall: ${summary}`;
     }
-    if (targetAgreement === "disagree") recommendedPick = "DEFER";
-
     // Supersede detection: winning leg's body is itself near-identical to source.
     // Means LLM(s) decided there was nothing to synthesize — the source supersedes
     // the target wholesale. Skip the alternates view and write source verbatim.
@@ -288,6 +340,7 @@ const synth = allPaths.map(p => {
     final_target: finalTarget,
     consensus,
     target_agreement: targetAgreement,
+    tie_promoted_from: tiePromotedFrom,
     tally,
     votes_n: n,
     recommended_pick: recommendedPick,
@@ -401,6 +454,7 @@ const summary = {
   buckets: synth.reduce((acc, s) => { acc[s.consensus] = (acc[s.consensus] || 0) + 1; return acc; }, {}),
   by_final_action: synth.reduce((acc, s) => { acc[s.final_action] = (acc[s.final_action] || 0) + 1; return acc; }, {}),
   coalesce_demotions: synth.filter(s => s.coalesce_demoted_from).length,
+  tie_promotions: synth.filter(s => s.tie_promoted_from).length,
   cycle_skips: synth.filter(s => s.coalesce_cycle_paired_with).length,
   intra_batch_dups: intraBatchDups.length,
   active_legs: activeLegs,
@@ -499,12 +553,18 @@ if (modeIsB) {
   if (demotions.length) {
     md += `⚠️ **${demotions.length} coalesce-demotion${demotions.length === 1 ? "" : "s"}**: row(s) below were originally classified Merge but co-targeted the same destination as another source. To prevent sequential-write data loss, the highest-signal source kept the Merge classification and the rest were demoted here. Rerun \`pnpm dedup:full\` (or another retrieve→council→synth cycle) afterwards to merge them properly against the now-updated target.\n\n`;
   }
+  const tiePromos = distActions.filter(s => s.tie_promoted_from);
+  if (tiePromos.length) {
+    md += `ℹ️ **${tiePromos.length} tie-promotion${tiePromos.length === 1 ? "" : "s"}**: the council voted Merge but split evenly across two well-supported targets with no plurality. Rather than guess a target, these promote to \`Insight/\` as standalone files; a later mode-B sweep re-merges if warranted.\n\n`;
+  }
   i = 0;
   for (const s of distActions) {
     i++;
     const tag = s.coalesce_demoted_from
       ? ` — **coalesce-demoted** (was Merge → \`${shortSrc(s.coalesce_demoted_from.final_target)}\`, primary: \`${shortSrc(s.coalesce_primary)}\`)`
-      : "";
+      : s.tie_promoted_from
+        ? ` — **tie-promoted** (Merge split evenly across \`${shortSrc(s.tie_promoted_from[0])}\` vs \`${shortSrc(s.tie_promoted_from[1])}\`)`
+        : "";
     md += `### ${i}. \`${shortSrc(s.source_path)}\` — ${s.consensus}${tag}\n\n`;
     md += `\`\`\`md\n${stripFrontmatter(readMd(s.source_path))}\n\`\`\`\n\n`;
   }
@@ -533,8 +593,12 @@ for (const s of trueMergeActions) {
   i++;
   const pick = s.recommended_pick;
   const isDefer = pick === "DEFER";
-  const disagreeMark = s.target_agreement === "disagree" ? " ⚠️ TARGET DISAGREEMENT" : "";
-  md += `### ${i}. \`${shortSrc(s.source_path)}\` → \`${shortSrc(s.final_target)}\`${disagreeMark}\n\n`;
+  const tgtMark = s.target_agreement === "disagree"
+    ? " ⚠️ TARGET DISAGREEMENT"
+    : s.target_agreement === "plurality"
+      ? " · plurality target (legs split, majority won)"
+      : "";
+  md += `### ${i}. \`${shortSrc(s.source_path)}\` → \`${shortSrc(s.final_target)}\`${tgtMark}\n\n`;
   md += `**⭐ Recommended:** \`${pick}\` — _${s.recommendation_rationale || "(no rationale)"}_\n\n`;
 
   md += `**Source body (deleted after merge):**\n\n\`\`\`md\n${stripFrontmatter(readMd(s.source_path))}\n\`\`\`\n\n`;
