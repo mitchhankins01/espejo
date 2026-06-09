@@ -5,7 +5,7 @@
  * Usage:
  *   pnpm dedup:synth /tmp/council/dedup/<stamp>
  *
- * Reads {claude,gemini,gpt[,ollama]}.parsed.json from <outDir>, plus the
+ * Reads {claude,gemini,gpt[,deepseek][,ollama]}.parsed.json from <outDir>, plus the
  * original plan referenced by manifest.json. Emits:
  *
  *   <outDir>/synthesis.json   — machine-readable plan with consensus + picks
@@ -132,7 +132,7 @@ function recallByInclusion(needles, haystackText) {
 }
 
 // Load each leg (skip if file missing)
-const LEGS = ["claude", "gemini", "gpt", "ollama"];
+const LEGS = ["claude", "gemini", "gpt", "deepseek", "ollama"];
 const legArrays = {};
 for (const leg of LEGS) {
   const f = `${outDir}/${leg}.parsed.json`;

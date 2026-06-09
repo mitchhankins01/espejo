@@ -133,11 +133,9 @@ export const config = {
     openaiVision: process.env.OPENAI_VISION_MODEL || "gpt-4.1",
     openaiTranscribe: process.env.OPENAI_TRANSCRIBE_MODEL || "whisper-1",
     openaiCondense: process.env.OPENAI_CONDENSE_MODEL || "gpt-4o",
-    dedupCouncilClaude:
-      process.env.DEDUP_COUNCIL_CLAUDE_MODEL || "claude-opus-4-8",
-    dedupCouncilGemini:
-      process.env.DEDUP_COUNCIL_GEMINI_MODEL || "gemini-3.1-pro-preview",
-    dedupCouncilGpt: process.env.DEDUP_COUNCIL_GPT_MODEL || "gpt-5.5",
+    // Dedup-council leg models live in scripts/dedup/council-models.json — the
+    // council runs as a plain-node .mjs that can't import this TS config, so
+    // that JSON is their single source of truth. Don't re-declare them here.
   },
   oura: {
     accessToken: process.env.OURA_ACCESS_TOKEN || "",

@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
- * Dedup Stage 2 — council fan-out. Runs Claude Opus, Gemini 2.5 Pro, and
- * GPT-5.5 (codex) in parallel on /tmp/dedup-plan.json, writes per-leg JSON
- * arrays to /tmp/council/dedup/<stamp>/.
+ * Dedup Stage 2 — council fan-out. Runs Claude Opus, Gemini Pro, GPT-5.5
+ * (codex), and DeepSeek (when DEEPSEEK_API_KEY is set) in parallel on
+ * /tmp/dedup-plan.json, writes per-leg JSON arrays to /tmp/council/dedup/<stamp>/.
  *
  * Usage:
  *   pnpm dedup:council [--plan /tmp/dedup-plan.json] [--include-ollama]
  *
  * Output:
- *   /tmp/council/dedup/<stamp>/{claude,gemini,gpt}.parsed.json
+ *   /tmp/council/dedup/<stamp>/{claude,gemini,gpt,deepseek}.parsed.json
  *   /tmp/council/dedup/<stamp>/manifest.json   (paths + leg statuses)
  *   stdout: the manifest path (used by dedup:synth)
  *
@@ -60,10 +60,21 @@ function readEnvFile(path) {
 }
 const env = { ...readEnvFile(".env"), ...readEnvFile(".env.production.local"), ...process.env };
 
-// Model ids — overridable via env, mirrors defaults in src/config.ts (config.models.dedupCouncil*)
-const CLAUDE_MODEL = env.DEDUP_COUNCIL_CLAUDE_MODEL || "claude-opus-4-8";
-const GEMINI_MODEL = env.DEDUP_COUNCIL_GEMINI_MODEL || "gemini-3.1-pro-preview";
-const GPT_MODEL = env.DEDUP_COUNCIL_GPT_MODEL || "gpt-5.5";
+// Council leg models — SINGLE SOURCE OF TRUTH is ./council-models.json (sibling
+// file). Swap any leg by editing one line in that file: no env vars, no
+// duplicate defaults elsewhere. This script is plain node and can't import the
+// TS src/config.ts at runtime, so the shared config lives as JSON that both this
+// script and a human edit directly.
+//   - deepseek-v4-pro is the V4 flagship (chat/reasoner aliases retired); it's a
+//     reasoning model, so the DeepSeek leg's max_tokens must cover CoT + answer.
+//   - Rate-limited? Point "deepseek" → "deepseek-v4-flash" or "gemini" → a Flash.
+const COUNCIL_MODELS = JSON.parse(
+  readFileSync(new URL("./council-models.json", import.meta.url), "utf8"),
+);
+const CLAUDE_MODEL = COUNCIL_MODELS.claude;
+const GEMINI_MODEL = COUNCIL_MODELS.gemini;
+const GPT_MODEL = COUNCIL_MODELS.gpt;
+const DEEPSEEK_MODEL = COUNCIL_MODELS.deepseek;
 
 // ─── wrapper prompt ─────────────────────────────────────────────────────────
 
@@ -261,6 +272,46 @@ async function legGpt(items = plan.plan, rawSuffix = "") {
   return { ok: true, parsed: all };
 }
 
+// DeepSeek leg — OpenAI-compatible chat/completions endpoint, modeled on the
+// Gemini leg (single call, big output cap). `deepseek-reasoner` exposes its CoT
+// in a separate `reasoning_content` field; we read only `.message.content` for
+// the JSON array. 4th VOTING leg (not shadow) — once DEEPSEEK_API_KEY is set it
+// counts in the synth tally, so auto_safe now requires 4/4 unanimity. Until the
+// key is set it returns ok:false and the run proceeds on the original trio.
+async function legDeepseek(items = plan.plan, rawSuffix = "") {
+  if (!env.DEEPSEEK_API_KEY) {
+    return { ok: false, error: "DEEPSEEK_API_KEY not set — add it to .env.production.local to enable the 4th vote" };
+  }
+  const input = buildInput(items);
+  console.error(`[council] deepseek: launching (${DEEPSEEK_MODEL}, ${items.length} items${rawSuffix ? ` ${rawSuffix}` : ""})`);
+  const body = JSON.stringify({
+    model: DEEPSEEK_MODEL,
+    messages: [{ role: "user", content: input }],
+    // max_tokens caps reasoning + answer combined (v4-pro emits CoT into the
+    // completion budget). 16384 leaves room for CoT plus a large classification
+    // array. Bump if a big plan truncates mid-array.
+    max_tokens: 16384,
+    stream: false,
+  });
+  const r = await runProc("curl", [
+    "-sS",
+    "https://api.deepseek.com/chat/completions",
+    "-H", "Content-Type: application/json",
+    "-H", `Authorization: Bearer ${env.DEEPSEEK_API_KEY}`,
+    "-d", "@-",
+  ], body);
+  writeFileSync(`${outDir}/deepseek${rawSuffix}.raw.json`, r.stdout);
+  let json;
+  try { json = JSON.parse(r.stdout); } catch { return { ok: false, error: "Invalid JSON from API" }; }
+  if (json.error) return { ok: false, error: json.error.message };
+  const text = json.choices?.[0]?.message?.content;
+  if (!text) return { ok: false, error: "No content in DeepSeek response" };
+  const arr = extractJsonArray(text);
+  if (!arr) return { ok: false, error: "JSON parse failed" };
+  console.error(`[council] deepseek${rawSuffix}: ${arr.length} items`);
+  return { ok: true, parsed: arr };
+}
+
 async function legOllama(items = plan.plan, rawSuffix = "") {
   const input = buildInput(items);
   console.error(`[council] ollama: launching (qwen2.5:32b, ${items.length} items${rawSuffix ? ` ${rawSuffix}` : ""}, expect 5-15min)`);
@@ -275,14 +326,15 @@ async function legOllama(items = plan.plan, rawSuffix = "") {
   return { ok: true, parsed: arr };
 }
 
-const legFns = { claude: legClaude, gemini: legGemini, gpt: legGpt, ollama: legOllama };
+const legFns = { claude: legClaude, gemini: legGemini, gpt: legGpt, deepseek: legDeepseek, ollama: legOllama };
 
 // ─── run all in parallel ────────────────────────────────────────────────────
 
 const legs = [
-  ["claude", legClaude],
-  ["gemini", legGemini],
-  ["gpt",    legGpt],
+  ["claude",   legClaude],
+  ["gemini",   legGemini],
+  ["gpt",      legGpt],
+  ["deepseek", legDeepseek],  // votes when DEEPSEEK_API_KEY is set; no-ops otherwise
 ];
 if (INCLUDE_OLLAMA) legs.push(["ollama", legOllama]);
 
@@ -343,7 +395,10 @@ for (const [name, r] of results) {
 // Fail loud: a dead required leg means synth silently runs on a partial panel,
 // which collapses every row to likely_safe (auto_safe needs a full unanimous panel).
 // Abort unless --allow-degraded so the operator consciously accepts the degraded run.
-const REQUIRED_LEGS = ["claude", "gemini", "gpt"];
+// deepseek joins the required set only once its key exists: no-key runs proceed
+// on the trio, but a key-present transient failure must abort rather than
+// silently revert the consensus bar from 4/4 back to 3/3.
+const REQUIRED_LEGS = ["claude", "gemini", "gpt", ...(env.DEEPSEEK_API_KEY ? ["deepseek"] : [])];
 const deadLegs = results
   .filter(([name, r]) => REQUIRED_LEGS.includes(name) && !r.ok)
   .map(([name]) => name);
