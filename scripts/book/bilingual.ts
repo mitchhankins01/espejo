@@ -50,6 +50,21 @@ Example bullet:
 - El cerebro no percibe la realidad directamente.
   *The brain does not perceive reality directly.*`;
 
+// The "## Para llevarte" takeaways are rendered English-only (renamed
+// "## Takeaways") so the reader can confirm they understood the book without the
+// Spanish carrying them. Natural, idiomatic English here — NOT the structural
+// literal style used for the body.
+const TAKEAWAYS_SYSTEM = `You translate the takeaways section of a Spanish essay into natural English so a learner can check their comprehension.
+
+Input is a "## Para llevarte" heading followed by Spanish bullet points.
+
+Output:
+- First line: exactly "## Takeaways" (translate the heading to this).
+- Then a blank line.
+- Then one English bullet per input bullet, each starting with "- ".
+- Natural, idiomatic, fluent English — convey the meaning clearly. This is a comprehension check, NOT a literal/structural gloss. Do not include the Spanish, do not add asterisks/italics.
+- Preserve the order and count of the bullets. No preamble, no commentary.`;
+
 const CHUNK_WORD_BUDGET = 800;
 const CHUNK_CONCURRENCY = 4;
 
@@ -97,11 +112,65 @@ async function mapWithConcurrency<T, R>(
   return out;
 }
 
+/**
+ * Guarantee every English translation line is wrapped in `*...*` italics. The
+ * bilingual model occasionally drops the asterisks for a whole chunk (observed
+ * in tomos 0064 and 0066), which renders the English as plain text on the
+ * Kindle. The output format is strict ES/EN pairs separated by blank lines, so
+ * within each non-heading block the English lines sit at odd indices (line 2, 4,
+ * …). We re-wrap any that the model left bare. Deterministic — no extra LLM call.
+ */
+export function ensureItalics(bilingualBody: string): string {
+  return bilingualBody
+    .split(/\n{2,}/)
+    .map((block) => {
+      const lines = block.split("\n");
+      // Headings stay verbatim, no English line beneath them.
+      if (/^#{1,6}\s/.test(lines[0].trim())) return block;
+      // Only normalize clean ES/EN pair blocks (even line count). Odd-length
+      // blocks don't pair cleanly, so leave them rather than mis-wrap a line.
+      if (lines.length === 0 || lines.length % 2 !== 0) return block;
+      return lines.map((line, i) => (i % 2 === 1 ? wrapItalic(line) : line)).join("\n");
+    })
+    .join("\n\n");
+}
+
+/** Wrap a single English line in `*...*`, preserving indent; no-op if already italic or empty. */
+function wrapItalic(line: string): string {
+  const trailing = line.match(/\s*$/)?.[0] ?? "";
+  const trimmed = line.replace(/\s+$/, "");
+  const indentMatch = trimmed.match(/^(\s*)(.*)$/);
+  const indent = indentMatch?.[1] ?? "";
+  const content = indentMatch?.[2] ?? "";
+  if (content === "") return line;
+  if (content.startsWith("*") && content.endsWith("*") && content.length >= 2) return line;
+  return `${indent}*${content}*${trailing}`;
+}
+
+async function translateTakeaways(takeawaysMarkdown: string): Promise<string> {
+  const text = await bookChat({
+    model: config.models.anthropicFast,
+    system: TAKEAWAYS_SYSTEM,
+    messages: [{ role: "user", content: takeawaysMarkdown }],
+    maxTokens: 2000,
+    label: "bilingual.takeaways",
+  });
+  return text.trim();
+}
+
 export async function interleave(markdown: string): Promise<string> {
   if (!config.anthropic.apiKey) {
     throw new Error("ANTHROPIC_API_KEY is required for the bilingual pass");
   }
-  const chunks = chunkMarkdown(markdown);
+  // Split the Spanish "## Para llevarte" takeaways off the body: the body gets
+  // the structural ES/EN interleave; the takeaways become English-only.
+  const takeawaysIdx = markdown.search(/^##\s+Para llevarte\s*$/m);
+  const bodyMarkdown =
+    takeawaysIdx === -1 ? markdown : markdown.slice(0, takeawaysIdx).trimEnd();
+  const takeawaysMarkdown =
+    takeawaysIdx === -1 ? "" : markdown.slice(takeawaysIdx).trim();
+
+  const chunks = chunkMarkdown(bodyMarkdown);
   console.log(
     `      [bilingual] ${chunks.length} chunk(s), up to ${CHUNK_CONCURRENCY} in parallel`
   );
@@ -119,5 +188,9 @@ export async function interleave(markdown: string): Promise<string> {
       return text.trim();
     }
   );
-  return translated.join("\n\n") + "\n";
+  const body = ensureItalics(translated.join("\n\n"));
+
+  if (!takeawaysMarkdown) return body + "\n";
+  const takeaways = await translateTakeaways(takeawaysMarkdown);
+  return `${body}\n\n${takeaways}\n`;
 }

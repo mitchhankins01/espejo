@@ -5,12 +5,14 @@ import type { ContextItem } from "./context.js";
 import { bookChat, bookChatMeta } from "./llm.js";
 
 // Length band for a tomo body (Spanish words, excluding "## Para llevarte").
-// The reader doubled the target length; these replace the old ~2000-word band.
-const TARGET_WORDS = 4000;
-const FLOOR_WORDS = 3600;
-const CEILING_WORDS = 4400;
+// Halved from the old ~4000-word band: at 4000 words the tomos turned
+// repetitive (the same point restated in fresh metaphors). 2000 forces one
+// frame developed deeply instead of padded.
+export const TARGET_WORDS = 2000;
+export const FLOOR_WORDS = 1700;
+export const CEILING_WORDS = 2300;
 
-// Max output tokens for the writer. ~4000 Spanish words ≈ 5300 tokens; the
+// Max output tokens for the writer. ~2000 Spanish words ≈ 2700 tokens; the
 // ceiling leaves ample headroom so a complete book never hits `length`.
 const WRITER_MAX_TOKENS = 16000;
 
@@ -234,7 +236,9 @@ export function splitTomo(markdown: string): TomoParts {
   const title = titleMatch ? titleMatch[1].trim() : "";
   const withoutTitle = markdown.replace(/^#\s+.+\n?/, "");
 
-  const takeawaysIdx = withoutTitle.search(/^##\s+Para llevarte\s*$/m);
+  // Raw Spanish source uses "## Para llevarte"; the bilingual pass renames the
+  // section to English-only "## Takeaways". splitTomo runs on both, so match either.
+  const takeawaysIdx = withoutTitle.search(/^##\s+(?:Para llevarte|Takeaways)\s*$/m);
   const notaIdx = withoutTitle.search(/^##\s+Reader notes\s*$/m);
 
   if (takeawaysIdx === -1 && notaIdx === -1) {

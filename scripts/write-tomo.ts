@@ -49,7 +49,7 @@ import {
   type ContextItem,
 } from "./book/context.js";
 import { plan, type Candidate, type PlannerOutput } from "./book/planner.js";
-import { write, countWords } from "./book/writer.js";
+import { write, countWords, FLOOR_WORDS, CEILING_WORDS } from "./book/writer.js";
 import { checkTildes } from "./book/coverage-checks.js";
 import {
   formatLookupsForWriter,
@@ -84,8 +84,6 @@ import { verifyTomo, formatVerifyReport } from "./book/verify.js";
 
 const TOMOS_DIR = "books/tomos";
 const PLAN_PATH = "books/next-plan.json";
-const FLOOR_WORDS = 3600;
-const CEILING_WORDS = 4400;
 const WRITE_CONCURRENCY = 2;
 
 /**

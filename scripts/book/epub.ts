@@ -21,8 +21,12 @@ export async function buildEpub(opts: EpubOptions): Promise<void> {
   // Kindle instead of collapsing into one run-on paragraph.
   const bodyHtml = await marked.parse(body, { breaks: true });
 
-  // Strip the section heading line — the chapter title supplies it.
-  const takeawaysBody = takeaways.replace(/^##\s+Para llevarte\s*\n?/m, "").trim();
+  // Strip the section heading line — the chapter title supplies it. The
+  // bilingual pass renames "## Para llevarte" to English "## Takeaways"; match
+  // either so direct (non-bilingual) builds still work.
+  const takeawaysBody = takeaways
+    .replace(/^##\s+(?:Para llevarte|Takeaways)\s*\n?/m, "")
+    .trim();
   const takeawaysHtml = takeawaysBody
     ? await marked.parse(takeawaysBody, { breaks: true })
     : "";
@@ -38,7 +42,7 @@ export async function buildEpub(opts: EpubOptions): Promise<void> {
   ];
   if (takeawaysHtml) {
     chapters.push({
-      title: "Para llevarte",
+      title: "Takeaways",
       content: takeawaysHtml,
     });
   }
