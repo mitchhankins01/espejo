@@ -31,7 +31,6 @@
 import { writeFile, mkdir, readFile, unlink, rename } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
-import { config } from "../src/config.js";
 import { pool } from "../src/db/client.js";
 import { bookChat } from "./book/llm.js";
 import {
@@ -48,7 +47,13 @@ import {
   fetchContextByUuid,
   type ContextItem,
 } from "./book/context.js";
-import { plan, type Candidate, type PlannerOutput } from "./book/planner.js";
+import {
+  plan,
+  CANDIDATE_COUNT,
+  type Candidate,
+  type PlannerOutput,
+} from "./book/planner.js";
+import { PLANNER_LEGS, legByline } from "./book/models.js";
 import { write, countWords, FLOOR_WORDS, CEILING_WORDS } from "./book/writer.js";
 import { checkTildes } from "./book/coverage-checks.js";
 import {
@@ -104,43 +109,50 @@ async function atomicWriteJson(path: string, data: unknown): Promise<void> {
  * instead of losing a whole parallel write/plan cycle to the same error.
  */
 async function preflight(): Promise<void> {
-  const useOpenai = process.env.BOOK_LLM_PROVIDER?.toLowerCase() === "openai";
-  if (useOpenai && !config.openai.apiKey) {
+  // Model-comparison flow: every author leg (DeepSeek / Claude / GPT) must be
+  // live before the expensive fan-out, since the menu is 2 candidates per leg
+  // and each --pick is written by its originating model. Preflight all three in
+  // parallel and abort — naming any that can't be called — rather than producing
+  // a lopsided menu. (Per the reader's "abort if any leg is down" policy.)
+  const results = await Promise.allSettled(
+    PLANNER_LEGS.map((leg) =>
+      bookChat({
+        provider: leg.provider,
+        model: leg.model,
+        system: "ping",
+        messages: [{ role: "user", content: "ping" }],
+        // Reasoning models (GPT-5, DeepSeek) spend the budget on reasoning
+        // tokens; a 1-token ceiling yields an empty/length reply or an error
+        // that would falsely fail the preflight. 32 is still negligible.
+        maxTokens: 32,
+        label: `preflight:${leg.label}`,
+      })
+    )
+  );
+  const down = results
+    .map((r, i) => ({ r, leg: PLANNER_LEGS[i] }))
+    .filter((x) => x.r.status === "rejected");
+  if (down.length > 0) {
     console.error(
-      "[preflight] BOOK_LLM_PROVIDER=openai but OPENAI_API_KEY is missing — set it before running the tomo pipeline."
+      `[preflight] aborting — ${down.length}/${PLANNER_LEGS.length} author leg(s) not callable:`
     );
-    await pool.end().catch(() => {});
-    process.exit(2);
-  }
-  if (!useOpenai && !config.anthropic.apiKey) {
+    for (const { r, leg } of down) {
+      const reason = (r as PromiseRejectedResult).reason;
+      const msg = (reason as Error)?.message ?? String(reason);
+      console.error(`  ✗ ${legByline(leg)} — ${msg.split("\n")[0]}`);
+    }
     console.error(
-      "[preflight] ANTHROPIC_API_KEY is missing — set it before running the tomo pipeline."
-    );
-    await pool.end().catch(() => {});
-    process.exit(2);
-  }
-  try {
-    await bookChat({
-      model: config.models.bookWriter,
-      system: "ping",
-      messages: [{ role: "user", content: "ping" }],
-      // GPT-5 reasoning models spend the budget on reasoning tokens; a 1-token
-      // ceiling yields an empty/length-truncated reply (or an API error), which
-      // would falsely fail the preflight. 32 is still negligible.
-      maxTokens: useOpenai ? 32 : 1,
-      label: "preflight",
-    });
-  } catch (err) {
-    const msg = (err as Error).message ?? String(err);
-    const topup = useOpenai
-      ? "exhausted credit balance (top up at platform.openai.com → Billing) or a rejected request param."
-      : "exhausted credit balance (top up at console.anthropic.com → Plans & Billing) or a rejected request param.";
-    console.error(
-      `[preflight] writer model is not callable — aborting before the expensive run.\n  ${msg}\n  Common causes: ${topup}`
+      "  Top up the dead provider(s) and re-run. " +
+        "Anthropic: console.anthropic.com → Plans & Billing · " +
+        "OpenAI: platform.openai.com → Billing · " +
+        "DeepSeek: platform.deepseek.com → Top up."
     );
     await pool.end().catch(() => {});
     process.exit(1);
   }
+  console.log(
+    `[preflight] all ${PLANNER_LEGS.length} author legs live: ${PLANNER_LEGS.map((l) => l.label).join(", ")}`
+  );
 }
 
 interface SavedPlan {
@@ -288,7 +300,8 @@ function printCandidates(
   const sorted = [...candidates].sort((a, b) => a.id - b.id);
   console.log(`\n${sorted.length} candidate(s):`);
   for (const c of sorted) {
-    console.log(`\n  [${c.id}] ${c.domain} — "${c.title}"`);
+    const byline = c.leg ? ` — ✍ ${c.leg}` : "";
+    console.log(`\n  [${c.id}] ${c.domain} — "${c.title}"${byline}`);
     console.log(`      topic: ${c.topic}`);
     console.log(`      teaches: ${c.mechanism_to_teach}`);
     console.log(`      source material (${c.source_refs.length}):`);
@@ -346,7 +359,7 @@ async function writeOne(
 ): Promise<WrittenTomo> {
   const padded = String(n).padStart(4, "0");
   console.log(
-    `\n[tomo ${padded}] "${candidate.title}" (${candidate.domain})`
+    `\n[tomo ${padded}] "${candidate.title}" (${candidate.domain})${candidate.leg ? ` ✍ ${candidate.leg}` : ""}`
   );
 
   let academicBlock = "";
@@ -552,7 +565,9 @@ async function main(): Promise<void> {
   }
 
   if (args.planOnly) {
-    console.log("[3/4] planning 6 candidates + reader-level snapshot");
+    console.log(
+      `[3/4] planning ${CANDIDATE_COUNT} candidates (${PLANNER_LEGS.length} legs × 2) + reader-level snapshot`
+    );
     if (args.steer) {
       const preview = args.steer.slice(0, 120);
       console.log(`      steering planner with: ${preview}${args.steer.length > 120 ? "..." : ""}`);
@@ -711,6 +726,9 @@ async function main(): Promise<void> {
         date: new Date().toISOString().slice(0, 10),
         word_count: w.words,
         bilingual: true,
+        leg: w.candidate.leg,
+        provider: w.candidate.provider,
+        model: w.candidate.model,
       });
     }
     const afterHistory = await readHistory();

@@ -28,6 +28,10 @@ export interface TomoRecord {
   bilingual?: boolean;
   myth_name?: string;
   shared_with_julia?: string;
+  /** Author leg of the model-comparison flow: display label, provider, model id. */
+  leg?: string;
+  provider?: string;
+  model?: string;
 }
 
 export async function readHistory(): Promise<TomoRecord[]> {

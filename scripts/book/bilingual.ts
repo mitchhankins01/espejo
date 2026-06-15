@@ -1,5 +1,5 @@
 import { config } from "../../src/config.js";
-import { bookChat } from "./llm.js";
+import { bookChat, bookChatMeta } from "./llm.js";
 
 /**
  * Faithful/structural bilingual interleave. For every Spanish sentence we emit
@@ -178,13 +178,25 @@ export async function interleave(markdown: string): Promise<string> {
     chunks,
     CHUNK_CONCURRENCY,
     async (chunk, i) => {
-      const text = await bookChat({
+      // The bilingual output is ~2x the input (ES + EN per sentence). On the
+      // OpenAI fallback route the fast tier is a gpt-5 reasoning model whose
+      // reasoning tokens are billed against this same ceiling, so a 4000 cap
+      // truncated 800-word chunks mid-body (tomos 0068-0071, 2026-06-14) — and
+      // because the call ignored finishReason, the dropped tail shipped
+      // silently. Give generous headroom AND fail loud on truncation.
+      const { text, finishReason } = await bookChatMeta({
         model: config.models.anthropicFast,
         system: SYSTEM,
         messages: [{ role: "user", content: chunk }],
-        maxTokens: 4000,
+        maxTokens: 8000,
         label: `bilingual.${i + 1}/${chunks.length}`,
       });
+      if (finishReason === "length") {
+        throw new Error(
+          `bilingual chunk ${i + 1}/${chunks.length} hit the token ceiling (truncated). ` +
+            `Lower CHUNK_WORD_BUDGET or raise maxTokens — refusing to ship a partial interleave.`
+        );
+      }
       return text.trim();
     }
   );

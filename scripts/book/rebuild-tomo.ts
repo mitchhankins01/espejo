@@ -16,6 +16,8 @@ import { sendToKindle } from "./send.js";
 import { interleave } from "./bilingual.js";
 import { offerJuliaShare, type ShareJuliaMode } from "./share.js";
 import { splitTomo } from "./writer.js";
+import { readHistory } from "./state.js";
+import { legByline } from "./models.js";
 import { existsSync } from "fs";
 import { readFile, writeFile } from "fs/promises";
 
@@ -52,10 +54,26 @@ async function main(): Promise<void> {
     console.log(`[bilingual] wrote ${biPath}`);
   }
 
+  // First-page author stamp (model-comparison flow). Read from history; absent
+  // for tomos written before model tagging, in which case no byline is shown.
+  const record = (await readHistory()).find((r) => r.n === n);
+  const modelByline =
+    record?.leg && record?.model
+      ? legByline({ label: record.leg, model: record.model })
+      : undefined;
+
   const filename = tomoFilename(n, title).replace(/\.epub$/, " (bilingual).epub");
   const epubPath = `books/build/${filename}`;
-  await buildEpub({ tomoNum: n, title, markdown: bilingualMd, outPath: epubPath });
-  console.log(`[epub] built ${epubPath}`);
+  await buildEpub({
+    tomoNum: n,
+    title,
+    markdown: bilingualMd,
+    outPath: epubPath,
+    model: modelByline,
+  });
+  console.log(
+    `[epub] built ${epubPath}${modelByline ? ` (✍ ${modelByline})` : ""}`
+  );
 
   if (!send) {
     console.log(

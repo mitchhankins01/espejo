@@ -5,9 +5,27 @@ import {
   type ToolSet,
 } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { openai } from "@ai-sdk/openai";
+import { openai, createOpenAI } from "@ai-sdk/openai";
 
-export type LlmProvider = "anthropic" | "openai";
+export type LlmProvider = "anthropic" | "openai" | "deepseek";
+
+// DeepSeek exposes an OpenAI-compatible Chat Completions API. We reach it
+// through the AI SDK's OpenAI provider pointed at DeepSeek's base URL, forcing
+// the `.chat()` (chat-completions) endpoint since DeepSeek does not implement
+// OpenAI's newer Responses API. Created lazily so a missing key only matters
+// when a deepseek-tier call is actually made (the dedup council reaches the same
+// API via raw curl — this is the typed path for the book pipeline).
+let deepseekProvider: ReturnType<typeof createOpenAI> | undefined;
+function deepseek(modelId: string) {
+  if (!deepseekProvider) {
+    deepseekProvider = createOpenAI({
+      name: "deepseek",
+      baseURL: "https://api.deepseek.com",
+      apiKey: process.env.DEEPSEEK_API_KEY ?? "",
+    });
+  }
+  return deepseekProvider.chat(modelId);
+}
 
 export interface ToolCallEvent {
   toolCallId: string;
@@ -50,6 +68,7 @@ export interface ChatResponse {
 
 function selectModel(provider: LlmProvider, modelId: string) {
   if (provider === "openai") return openai(modelId);
+  if (provider === "deepseek") return deepseek(modelId);
   return anthropic(modelId);
 }
 

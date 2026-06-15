@@ -57,6 +57,13 @@ function formatElapsed(ms: number): string {
 export interface BookChatParams {
   /** Model id — e.g. config.models.bookWriter (writer/planner) or anthropicFast (mechanical). */
   model: string;
+  /**
+   * Explicit provider override. When set, the (provider, model) pair is used
+   * verbatim and the BOOK_LLM_PROVIDER tier-mapping is bypassed — this is how
+   * the model-comparison planner/writer target a specific author leg
+   * (deepseek/anthropic/openai) regardless of the global route.
+   */
+  provider?: LlmProvider;
   system: string;
   messages: ModelMessage[];
   maxTokens: number;
@@ -87,12 +94,14 @@ export async function bookChatMeta(p: BookChatParams): Promise<BookChatResult> {
   const start = Date.now();
   let reported = 0;
 
-  const { provider, model } = resolveModel(p.model);
-  // GPT-5 family reasoning models reject any non-default temperature, so drop
-  // it entirely on the openai path (the only callers that set it — sensitivity
-  // and current-state — want determinism, not a specific value; default temp
-  // is acceptable for those one-offs).
-  const temperature = provider === "openai" ? undefined : p.temperature;
+  const { provider, model } = p.provider
+    ? { provider: p.provider, model: p.model }
+    : resolveModel(p.model);
+  // GPT-5 and DeepSeek reasoning models reject any non-default temperature, so
+  // drop it on every non-anthropic path (the only callers that set it —
+  // sensitivity and current-state — want determinism, not a specific value;
+  // default temp is acceptable for those one-offs).
+  const temperature = provider === "anthropic" ? p.temperature : undefined;
 
   const res = await chat({
     provider,

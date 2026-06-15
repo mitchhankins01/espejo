@@ -8,18 +8,26 @@ export interface EpubOptions {
   title: string;
   markdown: string;
   outPath: string;
+  /** Author byline for the model-comparison flow, e.g. "DeepSeek (deepseek-v4-pro)". */
+  model?: string;
 }
 
 const SERIES_NAME = "Espejo";
 
 export async function buildEpub(opts: EpubOptions): Promise<void> {
-  const { tomoNum, title, markdown, outPath } = opts;
+  const { tomoNum, title, markdown, outPath, model } = opts;
 
   const { body, takeaways } = splitTomo(markdown);
   // `breaks: true` turns a single newline into a <br>, so each bilingual pair
   // (Spanish line + literal English line) renders as two visible lines on the
   // Kindle instead of collapsing into one run-on paragraph.
-  const bodyHtml = await marked.parse(body, { breaks: true });
+  const parsedBody = await marked.parse(body, { breaks: true });
+  // Stamp the author model on the first page (model-comparison flow). Sits above
+  // the body in the first chapter so it's the first thing the reader sees.
+  const bylineHtml = model
+    ? `<p style="font-style:italic;opacity:0.7">Escrito por ${escapeHtml(model)}</p>\n`
+    : "";
+  const bodyHtml = bylineHtml + parsedBody;
 
   // Strip the section heading line — the chapter title supplies it. The
   // bilingual pass renames "## Para llevarte" to English "## Takeaways"; match
@@ -78,10 +86,7 @@ export function tomoFilename(tomoNum: number, title: string): string {
 
 function colophonHtml(tomoNum: number, title: string): string {
   const padded = String(tomoNum).padStart(4, "0");
-  const safeTitle = title
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  const safeTitle = escapeHtml(title);
   return [
     `<div style="text-align: center; margin-top: 40%;">`,
     `<p style="font-size: 1.4em; letter-spacing: 0.2em;">~ Fin ~</p>`,
@@ -89,6 +94,10 @@ function colophonHtml(tomoNum: number, title: string): string {
     `<p style="font-style: italic;">${safeTitle}</p>`,
     `</div>`,
   ].join("\n");
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function slugify(s: string): string {

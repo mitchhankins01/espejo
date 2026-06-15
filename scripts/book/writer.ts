@@ -86,6 +86,12 @@ export async function write(
     throw new Error("ANTHROPIC_API_KEY is required for the writer");
   }
 
+  // Author leg: a candidate carries the provider+model that pitched it, so the
+  // finished tomo is written by the same model (the model-comparison flow).
+  // Falls back to the default route for legacy plans that predate model tagging.
+  const authorProvider = plan.provider;
+  const authorModel = plan.model ?? config.models.bookWriter;
+
   const sources = context.filter((c) => plan.source_refs.includes(c.uuid));
   const sourcesBlock = sources
     .map((c) => {
@@ -130,7 +136,8 @@ export async function write(
   const messages: ModelMessage[] = [{ role: "user", content: user }];
 
   const first = await bookChatMeta({
-    model: config.models.bookWriter,
+    provider: authorProvider,
+    model: authorModel,
     system: ESSAY_SYSTEM,
     messages,
     maxTokens: WRITER_MAX_TOKENS,
@@ -148,7 +155,8 @@ export async function write(
       `      [writer] incomplete draft (finishReason=${first.finishReason}, hasParaLlevarte=${hasTakeaways(markdown)}) — regenerating once`
     );
     const retry = await bookChatMeta({
-      model: config.models.bookWriter,
+      provider: authorProvider,
+      model: authorModel,
       system: ESSAY_SYSTEM,
       messages: [
         { role: "user", content: user },
@@ -189,7 +197,8 @@ Current draft (without takeaways):
 
 ${stripped}`;
     const extended = await bookChat({
-      model: config.models.bookWriter,
+      provider: authorProvider,
+      model: authorModel,
       system: ESSAY_SYSTEM,
       messages: [
         { role: "user", content: user },
@@ -206,6 +215,51 @@ ${stripped}`;
       `      [writer] extend produced ${extendedWords} words${extendedWords >= FLOOR_WORDS ? " ✓" : " (still under floor)"}`
     );
     if (hasTakeaways(extendedMd) && extendedWords > bodyWords) markdown = extendedMd;
+  }
+
+  // Gate 3 — length ceiling. The mirror of Gate 2: a complete book that ran past
+  // the ceiling gets ONE condense pass that tightens to the band by cutting
+  // restatement and over-elaboration WITHOUT dropping any distinct beat. Fires
+  // only above the ceiling — important on the gpt-5.5 route, which writes long
+  // (2026-06-14 batch: tomos 68-72 all came in 2346-3017, over the 2300 ceiling,
+  // and shipped on a bare WARN because no ceiling gate existed).
+  const ceilingWords = countWords(markdown).total;
+  if (hasTakeaways(markdown) && ceilingWords > CEILING_WORDS) {
+    console.warn(
+      `      [writer] body ${ceilingWords} words — over the ${CEILING_WORDS} ceiling; one condense pass`
+    );
+    const condensePrompt = `The body came in at ${ceilingWords} words — over the ${CEILING_WORDS}-word ceiling. Tighten it to about ${TARGET_WORDS} body words. Cut restatement, redundant transitions, and second metaphors that re-make a point you already landed — NOT distinct scenes, mechanisms, or beats. Every concrete biographical detail, person, and quote must survive; preserve the opening and the ending. Sharpen prose; do not summarize away content.
+
+Re-emit the WHOLE tomo from "# <title>" through "## Para llevarte" with its bullets.`;
+    const condensed = await bookChat({
+      provider: authorProvider,
+      model: authorModel,
+      system: ESSAY_SYSTEM,
+      messages: [
+        { role: "user", content: user },
+        { role: "assistant", content: markdown },
+        { role: "user", content: condensePrompt },
+      ],
+      maxTokens: WRITER_MAX_TOKENS,
+      label: "writer/condense",
+      progress: true,
+    });
+    const condensedMd = condensed.trim() + "\n";
+    const condensedWords = countWords(condensedMd).total;
+    const inBand = condensedWords >= FLOOR_WORDS && condensedWords <= CEILING_WORDS;
+    console.warn(
+      `      [writer] condense produced ${condensedWords} words${inBand ? " ✓" : " (still outside band)"}`
+    );
+    // Keep the condensed draft only if it is complete, genuinely shorter, and did
+    // not overshoot down past the floor — never trade a long-but-whole book for a
+    // gutted one.
+    if (
+      hasTakeaways(condensedMd) &&
+      condensedWords < ceilingWords &&
+      condensedWords >= FLOOR_WORDS
+    ) {
+      markdown = condensedMd;
+    }
   }
 
   return markdown;
