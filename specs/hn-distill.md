@@ -59,16 +59,14 @@ runHnDistillWorkflow()
 
 ## Output format
 
-The distillation system prompt asks for:
+The distillation system prompt asks for a neutral signal overview — grasp the subject and every take at a glance — in four substantive sections, not a dozen fragments:
 
-1. **Headline facts** — what the article actually says, 3-6 sentences, no marketing language
-2. **Where it wins / Where it loses** (or equivalent structural framing)
-3. **The hidden number** — buried fact that matters most (omitted if none)
-4. **Comments by angle** — practitioner reports, contrarian takes, structural/cynical takes, anecdotes
-5. **Useful resources** — links/tools mentioned in passing (omitted if none)
-6. **The actual signal** — numbered takeaways
+1. **TL;DR** — one or two sentences; the whole subject from this alone
+2. **What it is** — plain facts, 1-3 short paragraphs, with the buried key number woven in (numbers/benchmarks kept inline)
+3. **The takes** — the heart: every distinct angle grouped by stance (bullish/practitioner, skeptical/contrarian, cynical/structural, anecdote)
+4. **Bottom line** — optional sharp synthesis + any "worth saving" resources folded in
 
-Quote sparingly, paraphrase by default. Skip generic agreement, jokes-without-info, pile-ons, marketing copy.
+Quote sparingly, paraphrase by default. Skip generic agreement, jokes-without-info, pile-ons, marketing copy. No personal "why this matters to you" hooks and no downstream adjacency tags — this is a neutral overview, not an essay (those sections were retired 2026-06-18).
 
 ## Email layout
 
