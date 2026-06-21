@@ -98,7 +98,7 @@ Input: a JSON file embedded below (the "INPUT DATA" section). Each entry under \
 For EACH source × top-candidate pair, classify the relationship:
 
 - **Duplicate** — candidate already says what source says (paraphrase or restatement); source adds no meaningful new detail, evidence, attribution, framing, or precision. Action: delete source, keep candidate.
-- **Merge** — candidate covers the same core idea, but source genuinely adds detail, evidence, attribution, fresh angle, or precision the candidate lacks. Action: rewrite the candidate to integrate source's unique content while preserving its atomic shape, union the source wikilinks, delete source. **The vault is years old; insights should accrete, not multiply.**
+- **Merge** — candidate covers the same core idea, but source genuinely adds detail, evidence, attribution, fresh angle, or precision the candidate lacks. Action: APPEND source's unique content to the candidate body — preserve the candidate's existing paragraphs and full \`## Sources\` block verbatim, union the source wikilinks, delete source. Never rewrite or condense the candidate. **The vault is years old; insights should accrete, not multiply.**
 - **Distinct** — genuinely orthogonal idea: different core claim, different mechanism, or different domain with no shared anchor. Action: leave both. Promote the source to Insight/ as-is.
 
 Only consider the TOP candidate per source unless multiple candidates have RRF scores within 10% of the top.
@@ -119,7 +119,7 @@ Output ONE JSON array, one object per source. Schema:
     "classification": "Duplicate" | "Merge" | "Distinct",
     "target_path": "Insight/Y.md" | "Pending/Y.md" | null,
     "rationale": "<1-3 sentences citing specific overlap or distinction>",
-    "merge_body": "<full proposed canonical body if Merge, else null>",
+    "merge_body": "<full proposed canonical body if Merge, else null. When merging, APPEND the new material to the existing target body — never rewrite or condense it. Preserve the target's existing paragraphs verbatim and reproduce its full \`## Sources\` block (all [[wikilinks]]) unchanged, adding the new source's wikilink(s). Do not drop quotes or links from the target.>",
     "confidence": "low" | "medium" | "high"
   }
 ]
@@ -288,9 +288,10 @@ async function legDeepseek(items = plan.plan, rawSuffix = "") {
     model: DEEPSEEK_MODEL,
     messages: [{ role: "user", content: input }],
     // max_tokens caps reasoning + answer combined (v4-pro emits CoT into the
-    // completion budget). 16384 leaves room for CoT plus a large classification
-    // array. Bump if a big plan truncates mid-array.
-    max_tokens: 16384,
+    // completion budget). 16384 truncated mid-array on a 48-source plan
+    // (reasoning_tokens 8666 + ~7700 answer tokens hit the cap); 65536 matches
+    // the Gemini leg's output budget and clears a full-batch classification.
+    max_tokens: 65536,
     stream: false,
   });
   const r = await runProc("curl", [
