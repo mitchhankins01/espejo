@@ -15,7 +15,7 @@
  *   pnpm gather:evening                 # today (Europe/Madrid), full run
  *   pnpm gather:evening --date 2026-05-30
  *   pnpm gather:evening --no-whatsapp   # skip the Mac WhatsApp pull entirely
- *   pnpm gather:evening --no-transcribe # pull WhatsApp text but don't Whisper voice notes
+ *   pnpm gather:evening --no-transcribe # pull WhatsApp text but don't Whisper voice/video notes
  *
  * DIGEST CONTRACT (the prompt depends on this):
  *   - FULL-TEXT sections (verbatim, never truncated): #1 Journal, #2 Reviews,
@@ -28,8 +28,8 @@
  *     both the digest and stdout, and the run continues. Never fail silently.
  */
 import "../src/config.js"; // side-effect: loads .env.production.local when NODE_ENV=production
-import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, copyFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, copyFileSync, statSync, rmSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join, basename, extname } from "node:path";
 import { execFileSync } from "node:child_process";
 import Database from "better-sqlite3";
@@ -63,6 +63,26 @@ const SEVEN_AGO = madridDate(new Date(new Date(`${TODAY}T12:00:00Z`).getTime() -
 // Insights (#3) scope to today + yesterday only — the evening review lands a single day,
 // and 7d of full-text insights swamped the digest. Weekly/monthly keep 7d in gather-review.ts.
 const ONE_AGO = madridDate(new Date(new Date(`${TODAY}T12:00:00Z`).getTime() - 1 * 86400_000));
+
+// ── ffmpeg (for extracting the audio track out of WhatsApp video notes) ───────
+// WhatsApp video messages (ZMESSAGETYPE 2 = regular video, 54 = round "instant
+// video" note) carry an AAC audio track that voice-note transcription ignores.
+// ffmpeg strips that track to ogg so the same Whisper path can pick it up.
+// No ffmpeg → video transcription quietly no-ops; voice notes still work.
+const FFMPEG = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"].find(existsSync) ?? null;
+
+/** Extract a video's audio track to `outOgg`. Returns false if there's no usable audio. */
+function extractAudioTrack(srcVideo: string, outOgg: string): boolean {
+  if (!FFMPEG) return false;
+  try {
+    execFileSync(FFMPEG, ["-y", "-v", "error", "-i", srcVideo, "-vn", "-c:a", "libopus", outOgg], {
+      stdio: "pipe",
+    });
+    return existsSync(outOgg) && statSync(outOgg).size > 0;
+  } catch {
+    return false; // typically: input has no audio stream
+  }
+}
 
 // ── digest + status accumulators ──────────────────────────────────────────────
 type Status = "ok" | "warn" | "error";
@@ -472,42 +492,68 @@ async function main(): Promise<void> {
     const lastUnix = boundary ? Math.floor(boundary.getTime() / 1000) : Math.floor(new Date(`${TODAY}T00:00:00`).getTime() / 1000);
     const waSince = lastUnix - 978307200;
 
-    // #15a — transcribe NEW voice notes only (cache by media UUID)
+    // #15a — transcribe NEW voice + video notes only (cache by media UUID).
+    // Type 3 = voice note (.opus, transcribe directly). Types 2 (video) and 54
+    // (round "instant video" note) are .mp4 — strip the audio track via ffmpeg
+    // first, then run the same Whisper path. Mitch sends video notes to partners
+    // often and they carry real relational signal, so they must not be dropped.
     const cacheDir = join(process.cwd(), "Artifacts", "Attachment", "WATranscripts");
     mkdirSync(cacheDir, { recursive: true });
     let transcribed = 0;
-    let voiceTotal = 0;
+    let mediaTotal = 0;
+    let videoNoFfmpeg = 0;
     if (!SKIP_TRANSCRIBE) {
-      const voiceRows = db
+      const mediaRows = db
         .prepare(
-          `SELECT mi.ZMEDIALOCALPATH AS path FROM ZWAMESSAGE m
+          `SELECT m.ZMESSAGETYPE AS mtype, mi.ZMEDIALOCALPATH AS path FROM ZWAMESSAGE m
            JOIN ZWAMEDIAITEM mi ON mi.ZMESSAGE = m.Z_PK
            JOIN ZWACHATSESSION cs ON cs.Z_PK = m.ZCHATSESSION
-           WHERE m.ZMESSAGETYPE = 3 AND m.ZMESSAGEDATE > ?
+           WHERE m.ZMESSAGETYPE IN (2, 3, 54) AND m.ZMESSAGEDATE > ?
              AND cs.ZCONTACTJID NOT LIKE '%@g.us'`
         )
-        .all(waSince) as { path: string | null }[];
-      voiceTotal = voiceRows.length;
-      for (const v of voiceRows) {
+        .all(waSince) as { mtype: number; path: string | null }[];
+      mediaTotal = mediaRows.length;
+      for (const v of mediaRows) {
         if (!v.path) continue;
         const uuid = basename(v.path, extname(v.path));
         const cacheFile = join(cacheDir, `${uuid}.txt`);
-        if (existsSync(cacheFile)) continue;
-        const srcAudio = join(waDir, "Message", v.path);
-        if (!existsSync(srcAudio)) continue;
+        if (existsSync(cacheFile)) continue; // includes empty sentinels for no-audio videos
+        const srcMedia = join(waDir, "Message", v.path);
+        if (!existsSync(srcMedia)) continue;
+
+        // Voice note → transcribe in place. Video → extract audio track to a temp ogg.
+        let audioPath = srcMedia;
+        let tmpOgg: string | null = null;
+        if (v.mtype !== 3) {
+          if (!FFMPEG) {
+            videoNoFfmpeg++;
+            continue; // leave uncached so it's retried once ffmpeg is installed
+          }
+          tmpOgg = join(tmpdir(), `espejo-wa-${uuid}.ogg`);
+          if (!extractAudioTrack(srcMedia, tmpOgg)) {
+            writeFileSync(cacheFile, ""); // sentinel: video with no usable audio, don't retry
+            continue;
+          }
+          audioPath = tmpOgg;
+        }
         try {
           // Whisper rejects .opus by extension though the codec is OGG — pass an .ogg filename.
           const text = await transcribeAudio({
-            buffer: readFileSync(srcAudio), // no encoding → Buffer
+            buffer: readFileSync(audioPath), // no encoding → Buffer
             filename: `${uuid}.ogg`,
             mimeType: "audio/ogg",
           });
           writeFileSync(cacheFile, text);
           transcribed++;
         } catch (e) {
-          // one bad voice note shouldn't sink the section
-          emit(`> ⚠ voice note ${uuid} failed to transcribe: ${e instanceof Error ? e.message : String(e)}\n`);
+          // one bad clip shouldn't sink the section
+          emit(`> ⚠ ${v.mtype === 3 ? "voice" : "video"} note ${uuid} failed to transcribe: ${e instanceof Error ? e.message : String(e)}\n`);
+        } finally {
+          if (tmpOgg && existsSync(tmpOgg)) rmSync(tmpOgg, { force: true });
         }
+      }
+      if (videoNoFfmpeg > 0) {
+        emit(`> ⚠ ${videoNoFfmpeg} video note(s) not transcribed — ffmpeg not found (install: \`brew install ffmpeg\`).\n`);
       }
     }
 
@@ -541,6 +587,12 @@ async function main(): Promise<void> {
 
     emit(`_1:1 threads only (group chats excluded as noise). Fully-named partners — the primary relational signal._\n`);
     const typeMap: Record<number, string> = { 0: "", 1: "[photo]", 8: "[HEIC]", 15: "[sticker]" };
+    // Voice (3) + video (2, 54) notes render their cached transcript when present.
+    const transcribable: Record<number, { icon: string; label: string }> = {
+      3: { icon: "🎙", label: "voice note" },
+      2: { icon: "🎥", label: "video" },
+      54: { icon: "🎥", label: "video note" },
+    };
     let cur = "";
     for (const m of msgs) {
       const partner = m.partner ?? "(unknown)";
@@ -550,10 +602,12 @@ async function main(): Promise<void> {
       }
       const sender = m.fromme === 1 ? "Mitch" : partner;
       let content = m.text;
-      if (m.mtype === 3) {
+      const tr = transcribable[m.mtype];
+      if (tr) {
         const uuid = m.media ? basename(m.media, extname(m.media)) : "";
         const cf = uuid ? join(cacheDir, `${uuid}.txt`) : "";
-        content = cf && existsSync(cf) ? `🎙 ${readFileSync(cf, "utf8").trim()}` : "[voice note]";
+        const text = cf && existsSync(cf) ? readFileSync(cf, "utf8").trim() : "";
+        content = text ? `${tr.icon} ${text}` : `[${tr.label}]`;
       } else if (m.mtype !== 0) {
         content = typeMap[m.mtype] ?? `[type ${m.mtype}]`;
         if (m.text) content += ` ${m.text}`;
@@ -564,7 +618,7 @@ async function main(): Promise<void> {
     if (msgs.length === 0) emit("_(no messages since last review)_\n");
     return {
       status: "ok",
-      note: `${partners} partners, ${msgs.length} msgs, ${transcribed}/${voiceTotal} voice notes transcribed`,
+      note: `${partners} partners, ${msgs.length} msgs, ${transcribed}/${mediaTotal} voice+video notes transcribed`,
     };
   });
 
