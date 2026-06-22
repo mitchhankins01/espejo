@@ -115,7 +115,7 @@ export const config = {
     llmProvider: telegramLlmProvider,
     // Model backing the conversational chat flow (src/telegram/flows/chat.ts).
     // Chat-only — distinct from the fast/distill tiers in config.models.
-    chatModel: process.env.TELEGRAM_CHAT_MODEL || "claude-opus-4-8",
+    chatModel: process.env.TELEGRAM_CHAT_MODEL || "deepseek-v4-pro",
     voiceModel: process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts",
     voiceName: process.env.OPENAI_TTS_VOICE || "alloy",
   },
