@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import type { LlmProvider } from "./llm/index.js";
 if (process.env.NODE_ENV === "production") {
   dotenv.config({ path: ".env" });
   dotenv.config({ path: ".env.local", override: true });
@@ -11,14 +12,15 @@ if (process.env.NODE_ENV === "production") {
 }
 
 const env = process.env.NODE_ENV || "development";
-const telegramLlmProvider =
-  process.env.TELEGRAM_LLM_PROVIDER?.toLowerCase() || "anthropic";
+const telegramLlmProvider = (process.env.TELEGRAM_LLM_PROVIDER?.toLowerCase() ||
+  "anthropic") as LlmProvider;
 if (
   telegramLlmProvider !== "anthropic" &&
-  telegramLlmProvider !== "openai"
+  telegramLlmProvider !== "openai" &&
+  telegramLlmProvider !== "deepseek"
 ) {
   throw new Error(
-    `Invalid TELEGRAM_LLM_PROVIDER "${telegramLlmProvider}". Use "anthropic" or "openai".`
+    `Invalid TELEGRAM_LLM_PROVIDER "${telegramLlmProvider}". Use "anthropic", "openai", or "deepseek".`
   );
 }
 
@@ -68,6 +70,8 @@ if (env === "production" && process.env.TELEGRAM_BOT_TOKEN) {
   };
   if (telegramLlmProvider === "anthropic") {
     required.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+  } else if (telegramLlmProvider === "deepseek") {
+    required.DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
   }
   const missing = Object.entries(required)
     .filter(([, v]) => !v)
@@ -125,8 +129,12 @@ export const config = {
   models: {
     anthropicFast:
       process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5-20251001",
-    anthropicDistill:
-      process.env.ANTHROPIC_DISTILL_MODEL || "claude-opus-4-8",
+    // HN distillation (src/hn/distill.ts). Routed through the cross-provider
+    // chat() helper, so provider is configurable. Defaults to DeepSeek for
+    // cost — Opus-quality distills are not worth Opus pricing on a daily cron.
+    distillProvider: (process.env.HN_DISTILL_PROVIDER ||
+      "deepseek") as LlmProvider,
+    distillModel: process.env.HN_DISTILL_MODEL || "deepseek-v4-pro",
     // Long-form tomo writer + planner (scripts/book/*). Restored after the
     // 14d29bd rename dropped the old `anthropicChat` key these depended on.
     bookWriter: process.env.ANTHROPIC_BOOK_MODEL || "claude-opus-4-8",

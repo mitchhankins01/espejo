@@ -19,6 +19,13 @@ describe("MODEL_PRICING", () => {
       outputPerMTok: 25,
     });
   });
+
+  it("includes deepseek-v4-pro at $0.435/$0.87 per MTok", () => {
+    expect(MODEL_PRICING["deepseek-v4-pro"]).toEqual({
+      inputPerMTok: 0.435,
+      outputPerMTok: 0.87,
+    });
+  });
 });
 
 describe("computeCost", () => {

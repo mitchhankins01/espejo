@@ -156,7 +156,7 @@ export async function runChatFlow(params: {
   let response: { text: string; finishReason: string } | null = null;
   try {
     response = await chat({
-      provider: "anthropic",
+      provider: config.telegram.llmProvider,
       model: config.telegram.chatModel,
       system: buildSystemPrompt(),
       messages,

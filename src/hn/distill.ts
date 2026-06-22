@@ -1,16 +1,12 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../config.js";
+import { chat } from "../llm/index.js";
 import { computeCost, type CostBreakdown, type TokenUsage } from "./pricing.js";
 
-const MAX_OUTPUT_TOKENS = 4096;
-
-let cachedClient: Anthropic | null = null;
-function getAnthropic(): Anthropic {
-  if (!cachedClient) {
-    cachedClient = new Anthropic({ apiKey: config.anthropic.apiKey });
-  }
-  return cachedClient;
-}
+// Headroom for reasoning-model output: deepseek-v4-pro emits hidden reasoning
+// tokens that count toward the output budget, and a TL;DR distill on a long
+// thread can still run a few thousand visible tokens. 4096 truncated under
+// DeepSeek; 8192 leaves margin without inviting runaway cost.
+const MAX_OUTPUT_TOKENS = 8192;
 
 export interface DistillInput {
   hnUrl: string;
@@ -140,26 +136,22 @@ function buildUserMessage(input: DistillInput): string {
 }
 
 export async function distillThread(input: DistillInput): Promise<DistillResult> {
-  const anthropic = getAnthropic();
   const userMessage = buildUserMessage(input);
-  const model = config.models.anthropicDistill;
+  const model = config.models.distillModel;
 
-  const response = await anthropic.messages.create({
+  const response = await chat({
+    provider: config.models.distillProvider,
     model,
-    max_tokens: MAX_OUTPUT_TOKENS,
+    maxTokens: MAX_OUTPUT_TOKENS,
     system: SYSTEM_PROMPT,
     messages: [{ role: "user", content: userMessage }],
   });
 
-  const markdown = response.content
-    .filter((block): block is Anthropic.TextBlock => block.type === "text")
-    .map((block) => block.text)
-    .join("\n")
-    .trim();
+  const markdown = response.text.trim();
 
   const usage: TokenUsage = {
-    inputTokens: response.usage.input_tokens,
-    outputTokens: response.usage.output_tokens,
+    inputTokens: response.usage.inputTokens ?? 0,
+    outputTokens: response.usage.outputTokens ?? 0,
   };
   const cost = computeCost(model, usage);
 
