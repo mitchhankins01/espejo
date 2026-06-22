@@ -499,8 +499,10 @@ async function main(): Promise<void> {
     // often and they carry real relational signal, so they must not be dropped.
     const cacheDir = join(process.cwd(), "Artifacts", "Attachment", "WATranscripts");
     mkdirSync(cacheDir, { recursive: true });
-    let transcribed = 0;
-    let mediaTotal = 0;
+    let transcribed = 0; // newly transcribed THIS run (warm cache → 0, which is fine, not a failure)
+    let available = 0; // notes with a usable transcript on hand (cache hit + new) — what actually renders
+    let mediaTotal = 0; // candidate voice+video notes in the window
+    let missingMedia = 0; // media never downloaded to the Mac (null path or file absent) — can't transcribe
     let videoNoFfmpeg = 0;
     if (!SKIP_TRANSCRIBE) {
       const mediaRows = db
@@ -514,12 +516,21 @@ async function main(): Promise<void> {
         .all(waSince) as { mtype: number; path: string | null }[];
       mediaTotal = mediaRows.length;
       for (const v of mediaRows) {
-        if (!v.path) continue;
+        if (!v.path) {
+          missingMedia++; // no local path — never downloaded to this Mac
+          continue;
+        }
         const uuid = basename(v.path, extname(v.path));
         const cacheFile = join(cacheDir, `${uuid}.txt`);
-        if (existsSync(cacheFile)) continue; // includes empty sentinels for no-audio videos
+        if (existsSync(cacheFile)) {
+          if (statSync(cacheFile).size > 0) available++; // non-empty = real transcript; empty = no-audio sentinel
+          continue;
+        }
         const srcMedia = join(waDir, "Message", v.path);
-        if (!existsSync(srcMedia)) continue;
+        if (!existsSync(srcMedia)) {
+          missingMedia++; // path recorded but file not on disk (iCloud-only / not downloaded)
+          continue;
+        }
 
         // Voice note → transcribe in place. Video → extract audio track to a temp ogg.
         let audioPath = srcMedia;
@@ -543,8 +554,13 @@ async function main(): Promise<void> {
             filename: `${uuid}.ogg`,
             mimeType: "audio/ogg",
           });
-          writeFileSync(cacheFile, text);
-          transcribed++;
+          if (text.trim()) {
+            writeFileSync(cacheFile, text);
+            transcribed++;
+            available++;
+          } else {
+            writeFileSync(cacheFile, ""); // empty transcript → sentinel so we don't retry; renders as placeholder
+          }
         } catch (e) {
           // one bad clip shouldn't sink the section
           emit(`> ⚠ ${v.mtype === 3 ? "voice" : "video"} note ${uuid} failed to transcribe: ${e instanceof Error ? e.message : String(e)}\n`);
@@ -554,6 +570,11 @@ async function main(): Promise<void> {
       }
       if (videoNoFfmpeg > 0) {
         emit(`> ⚠ ${videoNoFfmpeg} video note(s) not transcribed — ffmpeg not found (install: \`brew install ffmpeg\`).\n`);
+      }
+      if (missingMedia > 0) {
+        emit(
+          `> ⚠ ${missingMedia} voice/video note(s) not on disk (never downloaded to the Mac WhatsApp) — can't transcribe.\n`
+        );
       }
     }
 
@@ -618,7 +639,11 @@ async function main(): Promise<void> {
     if (msgs.length === 0) emit("_(no messages since last review)_\n");
     return {
       status: "ok",
-      note: `${partners} partners, ${msgs.length} msgs, ${transcribed}/${mediaTotal} voice+video notes transcribed`,
+      note:
+        `${partners} partners, ${msgs.length} msgs, ` +
+        `${available}/${mediaTotal} voice+video notes transcribed` +
+        (transcribed ? ` (${transcribed} new)` : ``) +
+        (missingMedia ? `, ${missingMedia} not on disk` : ``),
     };
   });
 
