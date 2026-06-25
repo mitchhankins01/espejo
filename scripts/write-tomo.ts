@@ -47,13 +47,13 @@ import {
   fetchContextByUuid,
   type ContextItem,
 } from "./book/context.js";
+import { plan, type Candidate, type PlannerOutput } from "./book/planner.js";
 import {
-  plan,
-  CANDIDATE_COUNT,
-  type Candidate,
-  type PlannerOutput,
-} from "./book/planner.js";
-import { PLANNER_LEGS, legByline } from "./book/models.js";
+  PLANNER_LEGS,
+  CANDIDATES_PER_LEG,
+  legByline,
+  type BookLeg,
+} from "./book/models.js";
 import { write, countWords, FLOOR_WORDS, CEILING_WORDS } from "./book/writer.js";
 import { checkTildes } from "./book/coverage-checks.js";
 import {
@@ -108,12 +108,12 @@ async function atomicWriteJson(path: string, data: unknown): Promise<void> {
  * params (e.g. a deprecated `temperature`) in ~2s with an actionable message,
  * instead of losing a whole parallel write/plan cycle to the same error.
  */
-async function preflight(): Promise<void> {
-  // Model-comparison flow: every author leg (DeepSeek / Claude / GPT) must be
-  // live before the expensive fan-out, since the menu is 2 candidates per leg
-  // and each --pick is written by its originating model. Preflight all three in
-  // parallel and abort — naming any that can't be called — rather than producing
-  // a lopsided menu. (Per the reader's "abort if any leg is down" policy.)
+async function preflight(): Promise<BookLeg[]> {
+  // Model-comparison flow: each author leg writes its own candidates, so confirm
+  // every provider is callable before the expensive fan-out. HARD legs that are
+  // down abort the run (the reader's "abort if any leg is down" policy); SOFT
+  // legs (newcomers like GLM/OpenRouter) are skipped with a warning so a flaky
+  // 4th provider can't block the proven core. Returns the legs that are live.
   const results = await Promise.allSettled(
     PLANNER_LEGS.map((leg) =>
       bookChat({
@@ -121,38 +121,54 @@ async function preflight(): Promise<void> {
         model: leg.model,
         system: "ping",
         messages: [{ role: "user", content: "ping" }],
-        // Reasoning models (GPT-5, DeepSeek) spend the budget on reasoning
-        // tokens; a 1-token ceiling yields an empty/length reply or an error
-        // that would falsely fail the preflight. 32 is still negligible.
+        // Reasoning models (GPT-5, DeepSeek, GLM) spend the budget on reasoning
+        // tokens; a 1-token ceiling yields an empty/length reply that still
+        // returns 200 (callable). 32 is enough to confirm reachability.
         maxTokens: 32,
         label: `preflight:${leg.label}`,
       })
     )
   );
-  const down = results
-    .map((r, i) => ({ r, leg: PLANNER_LEGS[i] }))
-    .filter((x) => x.r.status === "rejected");
-  if (down.length > 0) {
-    console.error(
-      `[preflight] aborting — ${down.length}/${PLANNER_LEGS.length} author leg(s) not callable:`
+
+  const live: BookLeg[] = [];
+  const hardDown: { leg: BookLeg; msg: string }[] = [];
+  const softDown: { leg: BookLeg; msg: string }[] = [];
+  results.forEach((r, i) => {
+    const leg = PLANNER_LEGS[i];
+    if (r.status === "fulfilled") {
+      live.push(leg);
+      return;
+    }
+    const msg = ((r.reason as Error)?.message ?? String(r.reason)).split("\n")[0];
+    (leg.soft ? softDown : hardDown).push({ leg, msg });
+  });
+
+  for (const { leg, msg } of softDown) {
+    console.warn(
+      `[preflight] soft leg ${legByline(leg)} unavailable — skipping it this run (${msg})`
     );
-    for (const { r, leg } of down) {
-      const reason = (r as PromiseRejectedResult).reason;
-      const msg = (reason as Error)?.message ?? String(reason);
-      console.error(`  ✗ ${legByline(leg)} — ${msg.split("\n")[0]}`);
+  }
+  if (hardDown.length > 0) {
+    console.error(
+      `[preflight] aborting — ${hardDown.length} required author leg(s) not callable:`
+    );
+    for (const { leg, msg } of hardDown) {
+      console.error(`  ✗ ${legByline(leg)} — ${msg}`);
     }
     console.error(
       "  Top up the dead provider(s) and re-run. " +
         "Anthropic: console.anthropic.com → Plans & Billing · " +
         "OpenAI: platform.openai.com → Billing · " +
-        "DeepSeek: platform.deepseek.com → Top up."
+        "DeepSeek: platform.deepseek.com → Top up · " +
+        "OpenRouter: openrouter.ai → Credits."
     );
     await pool.end().catch(() => {});
     process.exit(1);
   }
   console.log(
-    `[preflight] all ${PLANNER_LEGS.length} author legs live: ${PLANNER_LEGS.map((l) => l.label).join(", ")}`
+    `[preflight] live author legs: ${live.map((l) => l.label).join(", ")}`
   );
+  return live;
 }
 
 interface SavedPlan {
@@ -475,7 +491,7 @@ async function main(): Promise<void> {
     console.log("[fresh-plan] cleared books/next-plan.json");
   }
 
-  await preflight();
+  const liveLegs = await preflight();
 
   console.log("[1/4] reading history");
   const history = await readHistory();
@@ -566,7 +582,7 @@ async function main(): Promise<void> {
 
   if (args.planOnly) {
     console.log(
-      `[3/4] planning ${CANDIDATE_COUNT} candidates (${PLANNER_LEGS.length} legs × 2) + reader-level snapshot`
+      `[3/4] planning ${liveLegs.length * CANDIDATES_PER_LEG} candidates (${liveLegs.length} legs × ${CANDIDATES_PER_LEG}) + reader-level snapshot`
     );
     if (args.steer) {
       const preview = args.steer.slice(0, 120);
@@ -583,7 +599,7 @@ async function main(): Promise<void> {
       );
     }
     const [output, readerLevel] = await Promise.all([
-      plan(recent, longArc, context, args.steer, seriesQueueBlock, currentStateBlock),
+      plan(recent, longArc, context, args.steer, seriesQueueBlock, currentStateBlock, liveLegs),
       fetchRecentSpanishEntries(90, 5).then(generateReaderLevelParagraph),
     ]);
     await savePlannerOutput(n, output, readerLevel);

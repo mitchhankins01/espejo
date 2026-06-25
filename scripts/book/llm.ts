@@ -69,6 +69,13 @@ export interface BookChatParams {
   maxTokens: number;
   /** 0 for deterministic classifiers (sensitivity); omit otherwise. */
   temperature?: number;
+  /**
+   * gpt-5 family output-length dial (low|medium|high). Applied ONLY on the
+   * openai provider — it's the first-class length control (gpt-5.5 defaults to
+   * ~high and runs long; the right level tracks the writer's TARGET_WORDS).
+   * DeepSeek reaches the same SDK but doesn't honor it, so it's scoped to openai.
+   */
+  verbosity?: "low" | "medium" | "high";
   /** Ephemeral system caching. Default true (no-op below the provider's cache minimum). */
   cacheSystem?: boolean;
   /** Label for the progress/done log line. */
@@ -102,6 +109,12 @@ export async function bookChatMeta(p: BookChatParams): Promise<BookChatResult> {
   // sensitivity and current-state — want determinism, not a specific value;
   // default temp is acceptable for those one-offs).
   const temperature = provider === "anthropic" ? p.temperature : undefined;
+  // textVerbosity is an OpenAI-only output-length control. Scope it to the
+  // openai provider so it never reaches DeepSeek (same SDK, rejects the param).
+  const providerOptions =
+    provider === "openai" && p.verbosity
+      ? { openai: { textVerbosity: p.verbosity } }
+      : undefined;
 
   const res = await chat({
     provider,
@@ -110,6 +123,7 @@ export async function bookChatMeta(p: BookChatParams): Promise<BookChatResult> {
     messages: p.messages,
     maxTokens: p.maxTokens,
     temperature,
+    providerOptions,
     cacheSystem: p.cacheSystem ?? true,
     onTextDelta: p.progress
       ? (snapshot: string): void => {

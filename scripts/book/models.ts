@@ -6,6 +6,12 @@ export interface BookLeg {
   model: string;
   /** Human display name — shown on the plan menu and stamped on the EPUB first page. */
   label: string;
+  /**
+   * Soft legs are skipped (with a warning) when their provider is unavailable at
+   * preflight, instead of aborting the whole run. Use for newer/experimental
+   * providers so a flaky dependency can't block the proven core legs.
+   */
+  soft?: boolean;
 }
 
 /**
@@ -33,6 +39,15 @@ export const PLANNER_LEGS: BookLeg[] = [
     provider: "openai",
     model: process.env.OPENAI_BOOK_MODEL || "gpt-5.5",
     label: "GPT",
+  },
+  {
+    // GLM-5.2 via OpenRouter (OpenAI-compatible). Soft leg: a newcomer on a 4th
+    // provider, so a GLM/OpenRouter outage skips it rather than aborting the run.
+    // No textVerbosity dial (not OpenAI) → length is prompt + condense-loop only.
+    provider: "openrouter",
+    model: process.env.OPENROUTER_BOOK_MODEL || "z-ai/glm-5.2",
+    label: "GLM",
+    soft: true,
   },
 ];
 

@@ -25,16 +25,13 @@ const VALID_DOMAINS: Domain[] = [...DOMAINS];
 // essay. Kept as a field for downstream history/epub compatibility.
 export type TomoFormat = "essay";
 
-// Total menu size = one fan-out call per author leg, CANDIDATES_PER_LEG each.
-export const CANDIDATE_COUNT = PLANNER_LEGS.length * CANDIDATES_PER_LEG;
-
-// The planner runs as a 3-leg fan-out (DeepSeek / Claude / GPT), each leg
-// producing `count` candidates of the menu so the reader can compare models.
+// The planner runs as a multi-leg fan-out (DeepSeek / Claude / GPT / GLM), each
+// leg producing `count` candidates of the menu so the reader can compare models.
 // The prompt is therefore parametrized on the per-leg count, not the menu total.
 function buildSystem(count: number): string {
   return `You are the editor of a personalized Spanish-language mini-book series for one reader (Mitch), who lives in Barcelona and reads full, natural Spanish fluently.
 
-Each issue is a "tomo" — a standalone ~2000-word essay: direct, anchored on a long-running pattern from the reader's own life AND teaching a real domain concept (${DOMAINS.join(", ")}) in genuine depth. The reader's complaint about recent tomos: they elaborated his own life back to him but taught him no new science. Fix that. Every tomo must do BOTH jobs — the life pattern is the anchor, the domain mechanism is the lesson. Concrete hook, one specific example, a real teaching beat. No "En este tomo vamos a..." intros. Every tomo is transformed from the reader's real journal entries and approved insights — never invented biography.
+Each issue is a "tomo" — a standalone ~1400-word essay: direct, anchored on a long-running pattern from the reader's own life AND teaching a real domain concept (${DOMAINS.join(", ")}) in genuine depth. The reader's complaint about recent tomos: they elaborated his own life back to him but taught him no new science. Fix that. Every tomo must do BOTH jobs — the life pattern is the anchor, the domain mechanism is the lesson. Concrete hook, one specific example, a real teaching beat. No "En este tomo vamos a..." intros. Every tomo is transformed from the reader's real journal entries and approved insights — never invented biography.
 
 Your job: produce ${count} candidate plan(s) for the next tomo. Each candidate is a fully-formed pitch — your ${count} will be merged with other editors' into a single menu the reader picks from.
 
@@ -100,7 +97,8 @@ export async function plan(
   recent: ContextItem[],
   steer?: string,
   seriesQueueBlock?: string,
-  currentStateBlock?: string
+  currentStateBlock?: string,
+  legs: BookLeg[] = PLANNER_LEGS
 ): Promise<PlannerOutput> {
   if (!config.anthropic.apiKey) {
     throw new Error("ANTHROPIC_API_KEY is required for the planner");
@@ -189,7 +187,7 @@ export async function plan(
   // preflight upstream, so a leg that still fails here (after its bounded
   // JSON-repair retries) throws and aborts rather than silently shrinking the menu.
   const perLeg = await Promise.all(
-    PLANNER_LEGS.map((leg) => generateLeg(leg, user, allUuids))
+    legs.map((leg) => generateLeg(leg, user, allUuids))
   );
 
   // Merge in leg order (DeepSeek first, then Claude, then GPT) and re-id globally

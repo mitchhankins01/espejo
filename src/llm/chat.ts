@@ -7,24 +7,48 @@ import {
 import { anthropic } from "@ai-sdk/anthropic";
 import { openai, createOpenAI } from "@ai-sdk/openai";
 
-export type LlmProvider = "anthropic" | "openai" | "deepseek";
+/**
+ * Providers that speak the OpenAI Chat Completions API at a custom base URL.
+ * They're reached through the AI SDK's OpenAI provider (forcing `.chat()`, since
+ * these don't implement OpenAI's newer Responses API). To onboard another such
+ * provider, add a row here — the book pipeline's model-comparison legs that use
+ * them live in `scripts/book/models.ts`.
+ */
+type OpenAiCompatibleProvider = "deepseek" | "openrouter";
+const OPENAI_COMPATIBLE: Record<
+  OpenAiCompatibleProvider,
+  { baseURL: string; apiKeyEnv: string }
+> = {
+  // DeepSeek direct API (the dedup council reaches the same host via raw curl).
+  deepseek: { baseURL: "https://api.deepseek.com", apiKeyEnv: "DEEPSEEK_API_KEY" },
+  // OpenRouter: one endpoint fronting many models (GLM, etc.); model id is the
+  // OpenRouter slug, e.g. "z-ai/glm-5.2".
+  openrouter: {
+    baseURL: "https://openrouter.ai/api/v1",
+    apiKeyEnv: "OPENROUTER_API_KEY",
+  },
+};
 
-// DeepSeek exposes an OpenAI-compatible Chat Completions API. We reach it
-// through the AI SDK's OpenAI provider pointed at DeepSeek's base URL, forcing
-// the `.chat()` (chat-completions) endpoint since DeepSeek does not implement
-// OpenAI's newer Responses API. Created lazily so a missing key only matters
-// when a deepseek-tier call is actually made (the dedup council reaches the same
-// API via raw curl — this is the typed path for the book pipeline).
-let deepseekProvider: ReturnType<typeof createOpenAI> | undefined;
-function deepseek(modelId: string) {
-  if (!deepseekProvider) {
-    deepseekProvider = createOpenAI({
-      name: "deepseek",
-      baseURL: "https://api.deepseek.com",
-      apiKey: process.env.DEEPSEEK_API_KEY ?? "",
+export type LlmProvider = "anthropic" | "openai" | OpenAiCompatibleProvider;
+
+// Lazily-built, cached clients — the API key is read at first use (after dotenv
+// has loaded), so a missing key only bites when that provider is actually called.
+const compatClients = new Map<
+  OpenAiCompatibleProvider,
+  ReturnType<typeof createOpenAI>
+>();
+function openaiCompatible(provider: OpenAiCompatibleProvider, modelId: string) {
+  let client = compatClients.get(provider);
+  if (!client) {
+    const cfg = OPENAI_COMPATIBLE[provider];
+    client = createOpenAI({
+      name: provider,
+      baseURL: cfg.baseURL,
+      apiKey: process.env[cfg.apiKeyEnv] ?? "",
     });
+    compatClients.set(provider, client);
   }
-  return deepseekProvider.chat(modelId);
+  return client.chat(modelId);
 }
 
 export interface ToolCallEvent {
@@ -47,6 +71,8 @@ export interface ChatRequest {
   maxTokens?: number;
   /** Sampling temperature. Omitted → provider default. Set 0 for deterministic classifiers. */
   temperature?: number;
+  /** Per-provider options (e.g. { openai: { textVerbosity: "medium" } }). Merged into the call. */
+  providerOptions?: Parameters<typeof streamText>[0]["providerOptions"];
   /** Tool-loop step cap. Default 15. */
   maxSteps?: number;
   onTextDelta?: (snapshot: string) => void;
@@ -67,9 +93,10 @@ export interface ChatResponse {
 }
 
 function selectModel(provider: LlmProvider, modelId: string) {
+  if (provider === "anthropic") return anthropic(modelId);
   if (provider === "openai") return openai(modelId);
-  if (provider === "deepseek") return deepseek(modelId);
-  return anthropic(modelId);
+  // Narrowed to OpenAiCompatibleProvider (deepseek | openrouter | …).
+  return openaiCompatible(provider, modelId);
 }
 
 export async function chat(req: ChatRequest): Promise<ChatResponse> {
@@ -98,6 +125,7 @@ export async function chat(req: ChatRequest): Promise<ChatResponse> {
     messages,
     ...(req.tools ? { tools: req.tools } : {}),
     ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
+    ...(req.providerOptions ? { providerOptions: req.providerOptions } : {}),
     ...(req.maxTokens !== undefined ? { maxOutputTokens: req.maxTokens } : {}),
     stopWhen: stepCountIs(req.maxSteps ?? 15),
     onStepFinish: async ({ toolCalls, toolResults }) => {

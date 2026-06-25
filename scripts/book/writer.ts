@@ -5,16 +5,24 @@ import type { ContextItem } from "./context.js";
 import { bookChat, bookChatMeta } from "./llm.js";
 
 // Length band for a tomo body (Spanish words, excluding "## Para llevarte").
-// Halved from the old ~4000-word band: at 4000 words the tomos turned
-// repetitive (the same point restated in fresh metaphors). 2000 forces one
-// frame developed deeply instead of padded.
-export const TARGET_WORDS = 2000;
-export const FLOOR_WORDS = 1700;
-export const CEILING_WORDS = 2300;
+// Tightened to ~1400 (was 2000, itself halved from an original ~4000): shorter
+// forces a single frame developed cleanly with no room to restate a point in
+// fresh metaphors. Floor/ceiling track the target at ~±15% so the gates stay
+// coherent (a target below the floor would make the extend gate fire forever).
+export const TARGET_WORDS = 1400;
+export const FLOOR_WORDS = 1200;
+export const CEILING_WORDS = 1600;
 
-// Max output tokens for the writer. ~2000 Spanish words ≈ 2700 tokens; the
+// Max output tokens for the writer. ~1400 Spanish words ≈ 1900 tokens; the
 // ceiling leaves ample headroom so a complete book never hits `length`.
 const WRITER_MAX_TOKENS = 16000;
+
+// gpt-5 output-length dial for the GPT author leg. gpt-5.5 defaults to ~"high"
+// and overshoots; the right level tracks TARGET_WORDS. Live test at the 1400
+// target (with the length instruction in the prompt): "low" → ~1448 body words
+// (in band), "medium" → ~1876 (over the 1600 ceiling). Re-test if TARGET_WORDS
+// changes. Scoped to openai in llm.ts, so Claude/DeepSeek ignore it.
+const WRITER_VERBOSITY = "low" as const;
 
 const GRAMMAR_GUARDRAILS = `Spanish grammar guardrails — recurring writer-model errors to avoid:
 
@@ -138,6 +146,7 @@ export async function write(
   const first = await bookChatMeta({
     provider: authorProvider,
     model: authorModel,
+    verbosity: WRITER_VERBOSITY,
     system: ESSAY_SYSTEM,
     messages,
     maxTokens: WRITER_MAX_TOKENS,
@@ -157,6 +166,7 @@ export async function write(
     const retry = await bookChatMeta({
       provider: authorProvider,
       model: authorModel,
+      verbosity: WRITER_VERBOSITY,
       system: ESSAY_SYSTEM,
       messages: [
         { role: "user", content: user },
@@ -199,6 +209,7 @@ ${stripped}`;
     const extended = await bookChat({
       provider: authorProvider,
       model: authorModel,
+      verbosity: WRITER_VERBOSITY,
       system: ESSAY_SYSTEM,
       messages: [
         { role: "user", content: user },
@@ -217,23 +228,27 @@ ${stripped}`;
     if (hasTakeaways(extendedMd) && extendedWords > bodyWords) markdown = extendedMd;
   }
 
-  // Gate 3 — length ceiling. The mirror of Gate 2: a complete book that ran past
-  // the ceiling gets ONE condense pass that tightens to the band by cutting
-  // restatement and over-elaboration WITHOUT dropping any distinct beat. Fires
-  // only above the ceiling — important on the gpt-5.5 route, which writes long
-  // (2026-06-14 batch: tomos 68-72 all came in 2346-3017, over the 2300 ceiling,
-  // and shipped on a bare WARN because no ceiling gate existed).
-  const ceilingWords = countWords(markdown).total;
-  if (hasTakeaways(markdown) && ceilingWords > CEILING_WORDS) {
+  // Gate 3 — length ceiling. The mirror of Gate 2: a complete book over the
+  // ceiling gets condense passes that tighten to the band by cutting restatement
+  // and over-elaboration WITHOUT dropping any distinct beat. The gpt-5 leg now
+  // sets textVerbosity=medium so it usually lands in band on the first pass; this
+  // is the model-agnostic backstop (and the only length brake for DeepSeek, which
+  // has no verbosity dial). Bounded loop: re-condense while still over the ceiling,
+  // keeping the shortest complete draft that stays at/above the floor.
+  const MAX_CONDENSE_PASSES = 2;
+  for (let pass = 1; pass <= MAX_CONDENSE_PASSES; pass++) {
+    const overWords = countWords(markdown).total;
+    if (!hasTakeaways(markdown) || overWords <= CEILING_WORDS) break;
     console.warn(
-      `      [writer] body ${ceilingWords} words — over the ${CEILING_WORDS} ceiling; one condense pass`
+      `      [writer] body ${overWords} words — over the ${CEILING_WORDS} ceiling; condense pass ${pass}/${MAX_CONDENSE_PASSES}`
     );
-    const condensePrompt = `The body came in at ${ceilingWords} words — over the ${CEILING_WORDS}-word ceiling. Tighten it to about ${TARGET_WORDS} body words. Cut restatement, redundant transitions, and second metaphors that re-make a point you already landed — NOT distinct scenes, mechanisms, or beats. Every concrete biographical detail, person, and quote must survive; preserve the opening and the ending. Sharpen prose; do not summarize away content.
+    const condensePrompt = `The body came in at ${overWords} words — over the ${CEILING_WORDS}-word ceiling. Tighten it to about ${TARGET_WORDS} body words. Cut restatement, redundant transitions, and second metaphors that re-make a point you already landed — NOT distinct scenes, mechanisms, or beats. Every concrete biographical detail, person, and quote must survive; preserve the opening and the ending. Sharpen prose; do not summarize away content.
 
 Re-emit the WHOLE tomo from "# <title>" through "## Para llevarte" with its bullets.`;
     const condensed = await bookChat({
       provider: authorProvider,
       model: authorModel,
+      verbosity: WRITER_VERBOSITY,
       system: ESSAY_SYSTEM,
       messages: [
         { role: "user", content: user },
@@ -241,24 +256,26 @@ Re-emit the WHOLE tomo from "# <title>" through "## Para llevarte" with its bull
         { role: "user", content: condensePrompt },
       ],
       maxTokens: WRITER_MAX_TOKENS,
-      label: "writer/condense",
+      label: `writer/condense ${pass}`,
       progress: true,
     });
     const condensedMd = condensed.trim() + "\n";
     const condensedWords = countWords(condensedMd).total;
     const inBand = condensedWords >= FLOOR_WORDS && condensedWords <= CEILING_WORDS;
     console.warn(
-      `      [writer] condense produced ${condensedWords} words${inBand ? " ✓" : " (still outside band)"}`
+      `      [writer] condense ${pass} produced ${condensedWords} words${inBand ? " ✓" : " (still outside band)"}`
     );
-    // Keep the condensed draft only if it is complete, genuinely shorter, and did
+    // Keep a condensed draft only if it is complete, genuinely shorter, and did
     // not overshoot down past the floor — never trade a long-but-whole book for a
-    // gutted one.
+    // gutted one. If a pass doesn't improve, stop (avoid burning a second call).
     if (
       hasTakeaways(condensedMd) &&
-      condensedWords < ceilingWords &&
+      condensedWords < overWords &&
       condensedWords >= FLOOR_WORDS
     ) {
       markdown = condensedMd;
+    } else {
+      break;
     }
   }
 
