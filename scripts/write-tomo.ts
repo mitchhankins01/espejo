@@ -261,8 +261,10 @@ function parseArgs(): Args {
       const list = a.slice("--pick=".length).split(",");
       for (const tok of list) {
         const v = Number(tok.trim());
-        if (!Number.isInteger(v) || v < 1 || v > 6) {
-          throw new Error(`--pick values must be integers 1-6, got "${tok}"`);
+        // Upper bound is the plan's candidate count (now 2 per author leg, up to
+        // 8 when all four legs are live), validated downstream against actual ids.
+        if (!Number.isInteger(v) || v < 1) {
+          throw new Error(`--pick values must be positive integers, got "${tok}"`);
         }
         if (!picks.includes(v)) picks.push(v);
       }
