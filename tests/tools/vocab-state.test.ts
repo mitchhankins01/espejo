@@ -1,57 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  formatLookupsForWriter,
-  type Lookup,
-  type LookupStateTag,
-} from "../../scripts/book/lookups.js";
 import { classifyVocabState } from "../../src/db/queries/vocab-reviews.js";
-
-const SAMPLE: Lookup = {
-  word: "peldaño",
-  stem: "peldaño",
-  lang: "es",
-  usage: "El primer peldaño es duro",
-  book_title: "Tomo 0001",
-  tomo_n: 1,
-  category: 0,
-  looked_up_at: "2026-05-01T00:00:00Z",
-  imported_at: "2026-05-01T00:00:00Z",
-};
-
-const SAMPLE_2: Lookup = {
-  ...SAMPLE,
-  word: "umbral",
-  stem: "umbral",
-};
-
-describe("formatLookupsForWriter (state-tagged)", () => {
-  it("returns empty string for no input", () => {
-    expect(formatLookupsForWriter([])).toBe("");
-  });
-
-  it("produces unannotated bullets when no state map is given", () => {
-    const out = formatLookupsForWriter([SAMPLE, SAMPLE_2]);
-    expect(out).toContain("- peldaño — tomo 1");
-    expect(out).toContain("- umbral — tomo 1");
-    expect(out).not.toContain("[stalling");
-    expect(out).not.toContain("[mastered");
-  });
-
-  it("appends [stalling] / [mastered] tags from the state map", () => {
-    const map = new Map<string, LookupStateTag | null>();
-    map.set("peldaño", { tag: "stalling", detail: "lapses=2" });
-    map.set("umbral", { tag: "mastered", detail: "stable" });
-    const out = formatLookupsForWriter([SAMPLE, SAMPLE_2], map);
-    expect(out).toContain("- peldaño — tomo 1 [stalling: lapses=2]");
-    expect(out).toContain("- umbral — tomo 1 [mastered: stable]");
-  });
-
-  it("shows inflected form when word ≠ stem", () => {
-    const infl: Lookup = { ...SAMPLE, word: "diseñó", stem: "diseño" };
-    const out = formatLookupsForWriter([infl]);
-    expect(out).toContain("- diseño (diseñó) — tomo 1");
-  });
-});
 
 describe("classifyVocabState", () => {
   const NOW = new Date("2026-05-14T00:00:00Z");

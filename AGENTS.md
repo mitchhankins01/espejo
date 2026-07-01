@@ -122,7 +122,7 @@ For the live inventory: `find Artifacts/Prompt -name '*.md'`. The major prompts:
 | `Therapy/Processing.md` | Distill a therapy session transcript into `Artifacts/Review/YYYY-MM-DD — Therapy.md`. |
 | `Therapy/Parts Check-in.md` | IFS midday parts check-in protocol. |
 | `Therapy/Checkpoint.md` | Body-meeting / Checkpoint Protocol (3-turn). |
-| `Spanish/Tomo.md` | Generate the next Tomo (Phase 0 imports Kindle lookups). |
+| `Spanish/Tomo.md` | Generate the next Tomo (plan → write → review → publish). |
 | `Spanish/Hilo.md` | Spanish thread / tutor prompt. |
 | `Madriguera.md` | Research rabbit-hole: AI interviews Mitch on a curiosity while pulling live papers from OpenAlex + Europe PMC. CLI-only. Every fetched paper is persisted to `Reference/Academic/` (one file per paper, deduped by DOI) as the interim store for a future `research_papers` embedding table. |
 | `Council Review.md` | Multi-model deliberation wrapper used by `Insights/Dedup.md` and other workflows. |
@@ -218,7 +218,7 @@ scripts/
   gather-evening.ts                    — Evening-review data gatherer (`pnpm gather:evening`). Reads DB + vault + Mac WhatsApp into one digest at `/tmp/espejo-evening-gather/<date>.md`; the deterministic half of `Artifacts/Prompt/Review/Evening.md` (the prompt is now just persona + synthesis). Per-section error surfacing; `--date` / `--no-whatsapp` / `--no-transcribe` flags.
   gather-review.ts                     — Weekly/Monthly review gatherer (`pnpm gather:weekly --end <date>` / `pnpm gather:monthly --month <YYYY-MM>`). Windowed sibling of gather-evening (no WhatsApp); digest at `/tmp/espejo-review-gather/<window>-<label>.md`. Deterministic half of Weekly.md / Monthly.md. **Always pass `--month` for monthly** — it defaults to the current calendar month via `now()`, so a review written a day into the next month would otherwise gather the wrong month.
   embed-entries.ts                     — Batch embed; run after sync to populate vector column.
-  write-tomo.ts                        — Tomo writer: `--plan-only` → 6 anchored-essay candidates (flow format retired); `--pick=2,3,5` writes several IN PARALLEL (cap 2, allSettled). Writes Spanish only — bilingual interleave + EPUB + Kindle send are Phase 4 (`scripts/book/rebuild-tomo.ts`). Inline glosses / open-questions retired; ~4000-word body; faithful/structural bilingual carries the teaching. Model = `config.models.bookWriter`. See `Artifacts/Prompt/Spanish/Tomo.md`.
+  book/                                — Tomo pipeline, 3 phase scripts + 1 lib (2026-07 consolidation). `plan-tomo.ts` = 4-leg planner menu with plan-time anti-repetition (repetition report + embedding overlap scores); `write-tomo.ts --pick=2,3,5` = draft → verify → bilingual → EPUB in one pass (parallel, cap 2; ~1400-word body, rotated structural molds); `publish-tomo.ts NNNN` = rebuild-if-edited + Kindle send; `lib.ts` = model registry (`BOOK_MODELS`/`PLANNER_LEGS`), state, context, bilingual, EPUB. See `Artifacts/Prompt/Spanish/Tomo.md`.
   import-conjugations.ts               — Idempotent re-import of Spanish corpus into the read-only `conjugations` table.
   migrate.ts, deploy-smoke.ts          — Schema migration + post-deploy check.
   dedup/{retrieve,council,synthesize,apply,check-faithfulness}.{ts,mjs}
