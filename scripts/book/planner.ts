@@ -182,13 +182,26 @@ export async function plan(
   ]);
 
   // Fan out: each author leg (DeepSeek / Claude / GPT) independently drafts its
-  // share of the menu so the reader can compare models. Legs run in parallel;
-  // per the "abort if any leg is down" policy the run is gated by an all-legs
-  // preflight upstream, so a leg that still fails here (after its bounded
-  // JSON-repair retries) throws and aborts rather than silently shrinking the menu.
-  const perLeg = await Promise.all(
+  // share of the menu so the reader can compare models. Hard legs that exhaust
+  // retries throw and abort the run. Soft legs (GLM) that exhaust retries emit a
+  // warning and are dropped — the same tolerance as a preflight failure.
+  const settled = await Promise.allSettled(
     legs.map((leg) => generateLeg(leg, user, allUuids))
   );
+  const perLeg: Candidate[][] = [];
+  for (let i = 0; i < legs.length; i++) {
+    const leg = legs[i];
+    const result = settled[i];
+    if (result.status === "fulfilled") {
+      perLeg.push(result.value);
+    } else if (leg.soft) {
+      console.warn(
+        `      [planner:${leg.label}] soft leg failed during planning — skipping (${(result.reason as Error)?.message?.split("\n")[0] ?? result.reason})`
+      );
+    } else {
+      throw result.reason;
+    }
+  }
 
   // Merge in leg order (DeepSeek first, then Claude, then GPT) and re-id globally
   // so the menu stays grouped by model.

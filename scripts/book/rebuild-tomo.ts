@@ -2,7 +2,7 @@
  * Phase 4 — build the bilingual EPUB from the reviewed Spanish markdown and
  * deliver it to the Kindle.
  *
- * Every tomo is now bilingual (faithful/structural ES↔EN). The flow:
+ * Every tomo is now bilingual (faithful, readable ES↔EN). The flow:
  *   pnpm tsx scripts/book/rebuild-tomo.ts NNNN --no-send   # build + write NNNN-bilingual.md for review
  *   pnpm tsx scripts/book/rebuild-tomo.ts NNNN             # reuse the reviewed bilingual md, build EPUB, send
  *
@@ -48,7 +48,7 @@ async function main(): Promise<void> {
     bilingualMd = await readFile(biPath, "utf-8");
     console.log(`[bilingual] reusing reviewed ${biPath}`);
   } else {
-    console.log("[bilingual] interleaving ES + literal EN");
+    console.log("[bilingual] interleaving ES + faithful EN");
     bilingualMd = await interleave(md);
     await writeFile(biPath, bilingualMd, "utf-8");
     console.log(`[bilingual] wrote ${biPath}`);

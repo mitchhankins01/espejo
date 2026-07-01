@@ -34,6 +34,9 @@ export const PLANNER_LEGS: BookLeg[] = [
     provider: "anthropic",
     model: config.models.bookWriter,
     label: "Claude",
+    // TEMP 2026-06-29: Anthropic key out of credits; soft so the run skips this
+    // leg instead of aborting. Revert to a hard leg once topped up.
+    soft: true,
   },
   {
     provider: "openai",

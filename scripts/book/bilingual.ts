@@ -2,29 +2,31 @@ import { config } from "../../src/config.js";
 import { bookChat, bookChatMeta } from "./llm.js";
 
 /**
- * Faithful/structural bilingual interleave. For every Spanish sentence we emit
- * the sentence, then on the NEXT line a deliberately literal English rendering
- * in italics — the point is to show the reader HOW Spanish maps to English
- * (clause order, function words, tense/aspect), not a smooth idiomatic gloss.
+ * Faithful, readable bilingual interleave. For every Spanish sentence we emit
+ * the sentence, then on the NEXT line a meaning-faithful English rendering in
+ * italics — close to the Spanish so the reader can map it back, but written as
+ * careful, natural English. NOT a mechanical structural gloss: no bracket-glosses,
+ * no word-order contortions, no forced-literal idioms.
  *
  * Done in chunks: the output is ~2x the input (ES + EN for every sentence), so a
  * single 4000-word book would blow the token ceiling and truncate mid-book.
  * Chunks are order-independent → translated in parallel and reassembled in order.
  */
 
-const SYSTEM = `You are producing a FAITHFUL, STRUCTURAL bilingual study version of a Spanish text for a fluent reader who wants to see exactly how the Spanish maps to English.
+const SYSTEM = `You are producing a FAITHFUL, READABLE bilingual study version of a Spanish text for a fluent reader. Each Spanish sentence is paired with an English line that stays close to the Spanish — so the reader can map one to the other — but reads like careful, natural English a person would actually write.
 
 For every Spanish sentence, output the Spanish sentence on its own line, then on the NEXT line its English translation wrapped in single asterisks for italics. The two lines form one pair; separate pairs with a blank line.
 
-The English is FAITHFUL/STRUCTURAL, not idiomatic:
-- Keep the Spanish clause order wherever English grammar tolerates it. Do not restructure for smoothness.
-- Render each content word with its direct counterpart; surface function words and grammatical mechanics rather than hiding them. Examples:
-  - "por ti" → "because of you"; "para ti" → "for you" (keep por/para distinct in English).
-  - "Quiero que vengas" → "I want [that] you come" (show the subjunctive complement).
-  - "Se me cayó" → "It fell on me" rendered structurally, e.g. "[itself] to-me it-fell" only where that stays readable; otherwise the closest structural English that preserves the reflexive/dative.
-  - "Llevo años haciéndolo" → "I carry years doing it" before "I've been doing it for years".
-- Translate idioms literally but keep the line parseable English. The goal is transparency of mechanics, never natural-sounding prose.
-- It must still be grammatical English a reader can parse — faithful, not word-salad. When a maximally literal rendering would be unreadable, step back to the closest structural version that stays readable, and stop there. Never smooth all the way to idiomatic.
+The English is FAITHFUL but READABLE — close to the source, never mechanical:
+- Track the Spanish closely: keep its clause order, emphasis, and register where natural English tolerates it. But when literal order would be awkward, reorder for readable English. Readability wins over mirroring word order.
+- Translate meaning, not tokens. Do NOT surface grammatical mechanics with bracket-glosses or hyphenated word-for-word renderings. Examples:
+  - "Llevo años haciéndolo" → "I've been doing it for years" (NOT "I carry years doing it").
+  - "Quiero que vengas" → "I want you to come" (NOT "I want [that] you come").
+  - "Se me cayó el vaso" → "I dropped the glass" / "The glass slipped from my hands" (NOT "[itself] to-me it-fell").
+  - "No lo hice por miedo, sino por amor" → "I didn't do it out of fear, but out of love".
+- Keep por/para and similar distinctions only when they change the meaning and natural English would carry the distinction anyway ("because of you" vs "for you") — don't contort the sentence to flag grammar.
+- Render idioms with their natural English equivalent, not a literal calque.
+- The result must read as fluent, faithful English: no brackets, no hyphenated literal compounds, no salad. Smooth to natural English while keeping the meaning and feel of the Spanish.
 
 Rules:
 - Headings ("# ..." and "## ...") are kept EXACTLY as written, Spanish only, on their own line. Do NOT translate them, do NOT add an English line after them. (In particular "## Para llevarte" must survive verbatim.)
@@ -39,7 +41,7 @@ El mapa vive en tu cabeza.
 *The map lives in your head.*
 
 No lo hice por miedo, sino por amor.
-*I did not do it because of fear, but because of love.*
+*I didn't do it out of fear, but out of love.*
 
 Example heading (unchanged, no English line):
 
@@ -178,17 +180,19 @@ export async function interleave(markdown: string): Promise<string> {
     chunks,
     CHUNK_CONCURRENCY,
     async (chunk, i) => {
-      // The bilingual output is ~2x the input (ES + EN per sentence). On the
-      // OpenAI fallback route the fast tier is a gpt-5 reasoning model whose
-      // reasoning tokens are billed against this same ceiling, so a 4000 cap
-      // truncated 800-word chunks mid-body (tomos 0068-0071, 2026-06-14) — and
-      // because the call ignored finishReason, the dropped tail shipped
-      // silently. Give generous headroom AND fail loud on truncation.
+      // The bilingual output is ~2x the input (ES + EN per sentence). Reasoning
+      // models bill their reasoning tokens against this same ceiling: the gpt-5
+      // fast tier truncated 800-word chunks at a 4000 cap (tomos 0068-0071,
+      // 2026-06-14), and the deepseek-v4-pro default (a reasoning model) tipped
+      // an 800-word chunk over an 8000 cap on a denser tomo (0082, 2026-06-27).
+      // Since the cap now backstops a reasoning model by default, give it the
+      // same headroom as the writer (16000) AND fail loud on truncation — a
+      // dropped tail used to ship silently because finishReason was ignored.
       const { text, finishReason } = await bookChatMeta({
         model: config.models.anthropicFast,
         system: SYSTEM,
         messages: [{ role: "user", content: chunk }],
-        maxTokens: 8000,
+        maxTokens: 16000,
         label: `bilingual.${i + 1}/${chunks.length}`,
       });
       if (finishReason === "length") {

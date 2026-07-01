@@ -19,29 +19,46 @@ const TOK_INTERVAL = 500;
 const CHARS_INTERVAL = TOK_INTERVAL * CHARS_PER_TOK;
 
 /**
- * Provider override for the book pipeline. Default "anthropic" (unchanged).
- * Set BOOK_LLM_PROVIDER=openai to route every tomo call through the OpenAI
- * API instead — e.g. when the Anthropic balance is exhausted. The two model
- * tiers the book modules pass (config.models.bookWriter for writer/planner/
- * verify, config.models.anthropicFast for mechanical calls) are mapped to
- * OPENAI_BOOK_MODEL / OPENAI_BOOK_FAST_MODEL respectively.
+ * Provider for the book pipeline's mechanical calls — verify, bilingual
+ * interleave, current-state, condense. Default "deepseek": the Anthropic
+ * balance is no longer assumed available, and DeepSeek (deepseek-v4-pro) is the
+ * cost-effective default that keeps these calls running. Override with
+ * BOOK_LLM_PROVIDER=anthropic (Claude, highest quality) or =openai (GPT).
+ *
+ * This does NOT change who authors candidates — the planner/writer author legs
+ * are pinned per-leg in models.ts (PLANNER_LEGS). It only routes the model id
+ * the book modules pass through bookChat: config.models.bookWriter for the
+ * writer/planner/verify tier, config.models.anthropicFast for mechanical calls.
  */
-const BOOK_PROVIDER: LlmProvider =
-  process.env.BOOK_LLM_PROVIDER?.toLowerCase() === "openai"
-    ? "openai"
-    : "anthropic";
+const BOOK_PROVIDER: LlmProvider = ((): LlmProvider => {
+  switch (process.env.BOOK_LLM_PROVIDER?.toLowerCase()) {
+    case "openai":
+      return "openai";
+    case "anthropic":
+      return "anthropic";
+    case "deepseek":
+      return "deepseek";
+    default:
+      return "deepseek";
+  }
+})();
 const OPENAI_WRITER_MODEL = process.env.OPENAI_BOOK_MODEL || "gpt-5.5";
 const OPENAI_FAST_MODEL = process.env.OPENAI_BOOK_FAST_MODEL || "gpt-5-mini";
+const DEEPSEEK_BOOK_MODEL = process.env.DEEPSEEK_BOOK_MODEL || "deepseek-v4-pro";
 
 /**
  * Resolve the (provider, model) pair for a given anthropic-tier model id.
- * On the anthropic path this is a pass-through. On the openai path the
- * incoming claude model id is translated to the matching OpenAI tier — the
- * fast tier (anthropicFast) maps to the mini model, everything else (the
+ * On the anthropic path this is a pass-through. On the deepseek path both tiers
+ * collapse to the single DeepSeek model (no cheap mini tier). On the openai
+ * path the incoming claude model id is translated to the matching OpenAI tier —
+ * the fast tier (anthropicFast) maps to the mini model, everything else (the
  * writer/planner/verify tier) maps to the writer model.
  */
 function resolveModel(model: string): { provider: LlmProvider; model: string } {
-  if (BOOK_PROVIDER !== "openai") return { provider: "anthropic", model };
+  if (BOOK_PROVIDER === "anthropic") return { provider: "anthropic", model };
+  if (BOOK_PROVIDER === "deepseek") {
+    return { provider: "deepseek", model: DEEPSEEK_BOOK_MODEL };
+  }
   const isFast = model === config.models.anthropicFast;
   return {
     provider: "openai",
