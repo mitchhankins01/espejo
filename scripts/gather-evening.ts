@@ -195,17 +195,28 @@ async function main(): Promise<void> {
     return { status: rows.length ? "ok" : "warn", note: `${rows.length} entries` };
   });
 
-  // #2 Reviews (last 7d) — FULL-TEXT, filesystem (DB updated_at = sync time, not work time)
-  await section("#2 Reviews (last 7d)", "FULL-TEXT", async () => {
+  // #2 Reviews — FULL-TEXT, filesystem (DB updated_at = sync time, not work time).
+  // Evening Checkins chain (each synthesizes the prior day), so only the latest 2
+  // are included; other reviews (Weekly/Monthly/Therapy) keep the full 7d window.
+  // The latest Weekly is always included even if a Sunday was skipped — its Forward
+  // block is the operative lens the prompt grades the day against.
+  await section("#2 Reviews (recent)", "FULL-TEXT", async () => {
+    const files = listMd("Artifacts/Review").sort().reverse();
+    const latestWeekly = files.find((f) => basename(f).includes("Weekly Review"));
+    let checkins = 0;
     let n = 0;
-    for (const f of listMd("Artifacts/Review").sort().reverse()) {
+    for (const f of files) {
       const m = basename(f).match(/^(\d{4}-\d{2}-\d{2})/);
-      if (!m || m[1] < SEVEN_AGO) continue;
+      if (!m) continue;
+      const isCheckin = basename(f).includes("Evening Checkin");
+      const keep = isCheckin ? checkins < 2 : m[1] >= SEVEN_AGO || f === latestWeekly;
+      if (!keep) continue;
+      if (isCheckin) checkins++;
       const parsed = parseObsidianNote(readFileSync(f, "utf8"), basename(f));
       emit(`### ${basename(f, ".md")}\n\n${stripTagsBlock(parsed.body)}\n`);
       n++;
     }
-    return { status: n ? "ok" : "warn", note: `${n} files` };
+    return { status: n ? "ok" : "warn", note: `${n} files (checkins capped at 2)` };
   });
 
   // #3 Insights (today + yesterday) — FULL-TEXT, filesystem frontmatter dates
@@ -452,7 +463,9 @@ async function main(): Promise<void> {
     return { status: apps.length ? "ok" : "warn", note };
   });
 
-  // #14 iPhone screen time — SHAPE
+  // #14 iPhone screen time — SHAPE. The upload practice lapsed 2026-06: an empty
+  // window means the practice is idle, not that tonight's upload failed — report
+  // the last upload date instead of warning every night.
   await section("#14 iPhone screen time (7d)", "SHAPE", async () => {
     const rows = await q(
       `SELECT date, total_minutes, pickups, first_pickup,
@@ -461,6 +474,12 @@ async function main(): Promise<void> {
        FROM daily_screen_time WHERE date >= $1 ORDER BY date DESC`,
       [SEVEN_AGO]
     );
+    if (rows.length === 0) {
+      const last = await q(`SELECT MAX(date) AS d FROM daily_screen_time`);
+      const lastStr = last[0]?.d ? fmtCell(last[0].d) : "never";
+      emit(`_(no uploads in window — last was ${lastStr}; practice idle, not tonight's failure)_\n`);
+      return { status: "ok", note: `idle since ${lastStr}` };
+    }
     emit(mdTable(rows));
     const hasToday = rows.some((r) => fmtCell(r.date) === TODAY);
     return {
