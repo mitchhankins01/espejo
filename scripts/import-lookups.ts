@@ -15,7 +15,7 @@ import {
   appendLookups,
   readLookups,
   type Lookup,
-} from "./book/lookups.js";
+} from "./kindle-vocab.js";
 import { pool } from "../src/db/client.js";
 import { upsertLookup } from "../src/db/queries/vocab-reviews.js";
 import { fillMissingGlosses } from "../src/fsrs/gloss.js";

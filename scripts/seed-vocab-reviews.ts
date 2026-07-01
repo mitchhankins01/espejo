@@ -9,7 +9,7 @@
 
 import { pool } from "../src/db/client.js";
 import { upsertLookup } from "../src/db/queries/vocab-reviews.js";
-import { readLookups } from "./book/lookups.js";
+import { readLookups } from "./kindle-vocab.js";
 
 async function main(): Promise<void> {
   const rows = await readLookups();
