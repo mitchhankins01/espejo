@@ -155,7 +155,10 @@ async function generateLeg(
       model: leg.model,
       system,
       messages: [{ role: "user", content: user }],
-      maxTokens: 8192,
+      // Reasoning legs (GLM 5.2 on Fireworks especially) bill CoT against this
+      // cap; at 8192 GLM burned the whole budget reasoning and truncated its
+      // JSON on every attempt (2026-07-02 run). 16384 leaves answer headroom.
+      maxTokens: 16384,
       label:
         attempt === 1
           ? `planner:${leg.label}`
