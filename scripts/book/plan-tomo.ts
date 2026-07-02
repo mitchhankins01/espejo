@@ -344,7 +344,7 @@ async function main(): Promise<void> {
   console.log("[2/3] gathering context (recent 14d + long-arc 365d)");
   const context = await gatherContext(excluded, 14);
   const recentUuids = new Set(context.map((c) => c.uuid));
-  const longArc = await gatherLongArcContext(excluded, recentUuids, 365);
+  const longArc = await gatherLongArcContext(recentUuids, 365);
   console.log(
     `      recent: ${context.length} items (${context.filter((c) => c.kind === "entry").length} entries, ${context.filter((c) => c.kind === "review").length} reviews)`
   );

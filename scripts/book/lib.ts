@@ -658,14 +658,16 @@ export async function gatherContext(
     ),
   ]);
 
+  // The history exclusion window applies to ENTRIES only. A Review is dense —
+  // one weekly can anchor ten different tomos — so being picked once must not
+  // bench it for 30 tomos; angle-level repetition is the overlap score's job.
   return [
     ...(entries.rows as EntryRow[]).filter((r) => !excludeUuids.has(r.uuid)).map(entryItem),
-    ...(reviews.rows as ArtifactRow[]).filter((r) => !excludeUuids.has(r.id)).map(artifactItem),
+    ...(reviews.rows as ArtifactRow[]).map(artifactItem),
   ];
 }
 
 export async function gatherLongArcContext(
-  excludeUuids: Set<string>,
   excludeRecentUuids: Set<string>,
   daysBack = LONG_ARC_DAYS
 ): Promise<ContextItem[]> {
@@ -679,8 +681,10 @@ export async function gatherLongArcContext(
      ORDER BY updated_at DESC`,
     [sinceDateIso(daysBack)]
   );
+  // excludeRecentUuids only dedupes vs the recent block; the history exclusion
+  // window deliberately does NOT apply to Reviews (see gatherContext).
   return (artifacts.rows as ArtifactRow[])
-    .filter((r) => !excludeUuids.has(r.id) && !excludeRecentUuids.has(r.id))
+    .filter((r) => !excludeRecentUuids.has(r.id))
     .map(artifactItem);
 }
 
