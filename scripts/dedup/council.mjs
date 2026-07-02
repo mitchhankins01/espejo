@@ -60,18 +60,18 @@ function readEnvFile(path) {
 }
 const env = { ...readEnvFile(".env"), ...readEnvFile(".env.production.local"), ...process.env };
 
-// Council leg models — SINGLE SOURCE OF TRUTH is ./council-models.json (sibling
-// file). Swap any leg by editing one line in that file: no env vars, no
-// duplicate defaults elsewhere. This script is plain node and can't import the
-// TS src/config.ts at runtime, so the shared config lives as JSON that both this
-// script and a human edit directly.
+// Council leg models — SINGLE SOURCE OF TRUTH is <repo root>/models.json
+// (`.council` block; shared with src/config.ts and scripts/book/lib.ts). Swap
+// any leg by editing one line in that file: no env vars, no duplicate defaults
+// elsewhere. This script is plain node and can't import the TS src/config.ts
+// at runtime, so the shared config lives as JSON.
 //   - deepseek-v4-pro is the V4 flagship, served via Fireworks.ai since
 //     2026-07-02 (the direct DeepSeek API had multi-minute latencies); it's a
 //     reasoning model, so the DeepSeek leg's max_tokens must cover CoT + answer.
 //   - Rate-limited? Point "deepseek" → another Fireworks slug or "gemini" → a Flash.
 const COUNCIL_MODELS = JSON.parse(
-  readFileSync(new URL("./council-models.json", import.meta.url), "utf8"),
-);
+  readFileSync(new URL("../../models.json", import.meta.url), "utf8"),
+).council;
 const CLAUDE_MODEL = COUNCIL_MODELS.claude;
 const GEMINI_MODEL = COUNCIL_MODELS.gemini;
 const GPT_MODEL = COUNCIL_MODELS.gpt;

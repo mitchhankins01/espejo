@@ -360,7 +360,7 @@ ${stripped}`;
     console.warn(
       `      [writer] body ${overWords} words — over the ${CEILING_WORDS} ceiling; condense pass ${pass}/${MAX_CONDENSE_PASSES}`
     );
-    const condensePrompt = `The body came in at ${overWords} words — over the ${CEILING_WORDS}-word ceiling. Tighten it to about ${TARGET_WORDS} body words. Cut restatement, redundant transitions, and second metaphors that re-make a point you already landed — NOT distinct scenes, mechanisms, or beats. Every concrete biographical detail, person, and quote must survive; preserve the opening and the ending. Sharpen prose; do not summarize away content.
+    const condensePrompt = `The body came in at ${overWords} words — over the ${CEILING_WORDS}-word ceiling. HARD BUDGET: the re-emitted body MUST be under ${CEILING_WORDS} words (aim for ${TARGET_WORDS}); a draft that comes back over budget is a failed pass, so cut ${overWords - TARGET_WORDS}+ words — delete WHOLE sentences and paragraphs of restatement, redundant transitions, and second metaphors that re-make a point you already landed. Trimming a word here and there will not get you under budget. Do NOT cut distinct scenes, mechanisms, or beats. Every concrete biographical detail, person, and quote must survive; preserve the opening and the ending. Sharpen prose; do not summarize away content.
 
 Re-emit the WHOLE tomo from "# <title>" through "## Para llevarte" with its bullets.`;
     const condensed = await bookChat({
@@ -393,7 +393,10 @@ Re-emit the WHOLE tomo from "# <title>" through "## Para llevarte" with its bull
     }
   }
 
-  return markdown;
+  // Normalize quote characters — DeepSeek emits curly “ ”, other legs emit
+  // «guillemets»; house style (and the verbatim-anchoring rule) is straight
+  // double quotes. Deterministic, so no leg can drift.
+  return markdown.replace(/[«»“”]/g, '"');
 }
 
 // ---------------------------------------------------------------------------
@@ -410,6 +413,13 @@ interface VerifyFlag {
   quote: string;
   /** What the sources / current state actually say, and why this is a problem. */
   detail: string;
+  /**
+   * Set when `quote` does NOT appear verbatim in the draft — the verifier
+   * fabricated or paraphrased its own evidence (observed on tomo 91: flagged
+   * "el cuarto mes" against a draft that says "el quinto mes"). Such a flag
+   * points at nothing editable; check the claim by hand before touching text.
+   */
+  quoteMissing?: boolean;
 }
 
 interface VerifyResult {
@@ -520,7 +530,13 @@ async function verifyTomo(
     );
   }
 
-  return parseVerifyOutput(text);
+  const result = parseVerifyOutput(text);
+  // A flag's `quote` must be verbatim draft text; mark the ones that aren't so
+  // the review gate knows the evidence is fabricated/paraphrased.
+  for (const f of result.flags) {
+    if (f.quote && !markdown.includes(f.quote)) f.quoteMissing = true;
+  }
+  return result;
 }
 
 /** Tolerant parse — a malformed verifier reply degrades to "no flags", never throws. */
@@ -565,7 +581,10 @@ function formatVerifyReport(n: number, result: VerifyResult): string {
   );
   const lines = sorted.map((f) => {
     const q = f.quote ? `\n  > ${f.quote}` : "";
-    return `- **[${f.severity}] ${f.type}/${f.issue}**${q}\n  ${f.detail}`;
+    const missing = f.quoteMissing
+      ? "\n  ⚠ quote NOT found verbatim in the draft — the verifier fabricated or paraphrased its evidence; check the claim by hand before editing anything."
+      : "";
+    return `- **[${f.severity}] ${f.type}/${f.issue}**${q}${missing}\n  ${f.detail}`;
   });
   return [
     `# Tomo ${padded} — verifier`,
@@ -730,17 +749,27 @@ function parseArgs(): Args {
   return { picks, verify, dry: argv.includes("--dry") };
 }
 
-/** The distinct legs a pick batch needs live: each author leg + the mechanical route. */
+/**
+ * The distinct legs a pick batch needs live: each author leg + the mechanical
+ * route. The mechanical leg is HARD (every pick needs verify/bilingual);
+ * author legs are SOFT — a dead author provider skips ITS picks with a
+ * warning instead of aborting the whole batch (a zero Anthropic balance
+ * aborted a 4-pick run at preflight on 2026-07-02 when 3 of the legs were
+ * fine).
+ */
 function legsForPicks(picked: Candidate[]): BookLeg[] {
   const legs = new Map<string, BookLeg>();
   const mech = mechanicalLeg();
   legs.set(`${mech.provider}:${mech.model}`, mech);
   for (const c of picked) {
     if (!c.provider || !c.model) continue; // legacy plan — default route covers it
-    legs.set(`${c.provider}:${c.model}`, {
+    const key = `${c.provider}:${c.model}`;
+    if (key === `${mech.provider}:${mech.model}`) continue; // already hard
+    legs.set(key, {
       provider: c.provider,
       model: c.model,
       label: c.leg ?? c.provider,
+      soft: true,
     });
   }
   return [...legs.values()];
@@ -823,7 +852,7 @@ async function main(): Promise<void> {
   if (!candidates) {
     throw new Error(`no saved plan for tomo #${n}. Run pnpm plan-tomo first.`);
   }
-  const picked: Candidate[] = [];
+  let picked: Candidate[] = [];
   for (const id of args.picks) {
     const c = candidates.find((x) => x.id === id);
     if (!c) {
@@ -834,9 +863,26 @@ async function main(): Promise<void> {
     picked.push(c);
   }
 
-  // Only the legs this batch actually needs get preflighted — all are hard here
-  // (a pick whose author leg is down cannot be written by a substitute).
-  await preflightLegs(legsForPicks(picked));
+  // Only the legs this batch actually needs get preflighted. A dead author leg
+  // drops ITS picks (they can't be written by a substitute — re-run --pick=<id>
+  // when the provider is back, or reassign the candidate's provider/model/leg
+  // in the plan file); the rest of the batch proceeds.
+  const liveLegs = await preflightLegs(legsForPicks(picked));
+  const liveKeys = new Set(liveLegs.map((l) => `${l.provider}:${l.model}`));
+  const deadPicks = picked.filter(
+    (c) => c.provider && c.model && !liveKeys.has(`${c.provider}:${c.model}`)
+  );
+  if (deadPicks.length > 0) {
+    for (const c of deadPicks) {
+      console.warn(
+        `      [pick ${c.id}] author leg ${c.leg ?? c.provider} is down — skipping "${c.title}" (re-run --pick=${c.id} when it's back)`
+      );
+    }
+    picked = picked.filter((c) => !deadPicks.includes(c));
+    if (picked.length === 0) {
+      throw new Error("every picked candidate's author leg is down — nothing to write");
+    }
+  }
 
   // Freeze context once; rescue any source UUIDs outside the gather windows.
   const allContext = [...longArc, ...context];

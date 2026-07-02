@@ -12,6 +12,8 @@ RUN npm install -g pnpm
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --prod --frozen-lockfile --ignore-scripts
 COPY --from=builder /app/dist ./dist
+# Shared model-id registry read at runtime by dist/src/config.js (../../models.json).
+COPY --from=builder /app/models.json ./models.json
 ENV NODE_ENV=production
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s \

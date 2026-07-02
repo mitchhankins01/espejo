@@ -126,9 +126,9 @@ export function errorMessage(err: unknown): string {
  * live in src/config (shared with the rest of the app); the non-Anthropic book
  * models are pipeline-local.
  *
- * The dedup council keeps its own copy in `scripts/dedup/council-models.json`
- * because it runs as plain `.mjs` and can't import this TS — if a flagship id
- * changes, update both (see the council-config-consolidation note in memory).
+ * Fireworks-served ids come from `<repo root>/models.json` via config — the
+ * same file the dedup council reads (`.council` block), so a flagship bump is
+ * one edit.
  */
 export const BOOK_MODELS = {
   anthropic: config.models.bookWriter,
@@ -137,10 +137,8 @@ export const BOOK_MODELS = {
   openaiFast: process.env.OPENAI_BOOK_FAST_MODEL || "gpt-5-mini",
   // Both served by Fireworks (provider "fireworks") — the direct DeepSeek API
   // and OpenRouter were retired 2026-07-02 for multi-minute latencies.
-  deepseek:
-    process.env.DEEPSEEK_BOOK_MODEL ||
-    "accounts/fireworks/models/deepseek-v4-pro",
-  glm: process.env.GLM_BOOK_MODEL || "accounts/fireworks/models/glm-5p2",
+  deepseek: process.env.DEEPSEEK_BOOK_MODEL || config.models.fireworksDeepseek,
+  glm: process.env.GLM_BOOK_MODEL || config.models.fireworksGlm,
 } as const;
 
 export interface BookLeg {

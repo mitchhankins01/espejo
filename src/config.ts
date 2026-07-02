@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import dotenv from "dotenv";
 import type { LlmProvider } from "./llm/index.js";
 if (process.env.NODE_ENV === "production") {
@@ -12,6 +13,26 @@ if (process.env.NODE_ENV === "production") {
 }
 
 const env = process.env.NODE_ENV || "development";
+
+// Model ids shared with scripts/book/lib.ts and scripts/dedup/council.mjs —
+// <repo root>/models.json is the single source of truth (JSON because the
+// council runs as plain node and can't import this TS file).
+function loadSharedModels(): { fireworks: { deepseek: string; glm: string } } {
+  // src/config.ts (tsx: dev/test/scripts) sits one level below the root;
+  // dist/src/config.js (prod `node dist/src/index.js`) sits two below.
+  for (const rel of ["../models.json", "../../models.json"]) {
+    const url = new URL(rel, import.meta.url);
+    if (existsSync(url)) {
+      return JSON.parse(readFileSync(url, "utf-8")) as {
+        fireworks: { deepseek: string; glm: string };
+      };
+    }
+  }
+  throw new Error(
+    "models.json not found at the repo root — it holds the shared model ids; restore it or fix the deploy to include it."
+  );
+}
+const sharedModels = loadSharedModels();
 const telegramLlmProvider = (process.env.TELEGRAM_LLM_PROVIDER?.toLowerCase() ||
   "anthropic") as LlmProvider;
 if (
@@ -119,9 +140,7 @@ export const config = {
     llmProvider: telegramLlmProvider,
     // Model backing the conversational chat flow (src/telegram/flows/chat.ts).
     // Chat-only — distinct from the fast/distill tiers in config.models.
-    chatModel:
-      process.env.TELEGRAM_CHAT_MODEL ||
-      "accounts/fireworks/models/deepseek-v4-pro",
+    chatModel: process.env.TELEGRAM_CHAT_MODEL || sharedModels.fireworks.deepseek,
     voiceModel: process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts",
     voiceName: process.env.OPENAI_TTS_VOICE || "alloy",
   },
@@ -137,18 +156,20 @@ export const config = {
     // a daily cron.
     distillProvider: (process.env.HN_DISTILL_PROVIDER ||
       "fireworks") as LlmProvider,
-    distillModel:
-      process.env.HN_DISTILL_MODEL ||
-      "accounts/fireworks/models/deepseek-v4-pro",
+    distillModel: process.env.HN_DISTILL_MODEL || sharedModels.fireworks.deepseek,
     // Long-form tomo writer + planner (scripts/book/*). Restored after the
     // 14d29bd rename dropped the old `anthropicChat` key these depended on.
     bookWriter: process.env.ANTHROPIC_BOOK_MODEL || "claude-opus-4-8",
     openaiVision: process.env.OPENAI_VISION_MODEL || "gpt-4.1",
     openaiTranscribe: process.env.OPENAI_TRANSCRIBE_MODEL || "whisper-1",
     openaiCondense: process.env.OPENAI_CONDENSE_MODEL || "gpt-4o",
-    // Dedup-council leg models live in scripts/dedup/council-models.json — the
-    // council runs as a plain-node .mjs that can't import this TS config, so
-    // that JSON is their single source of truth. Don't re-declare them here.
+    // Fireworks-served model ids for the book pipeline (scripts/book/lib.ts
+    // applies its own env overrides on top of these).
+    fireworksDeepseek: sharedModels.fireworks.deepseek,
+    fireworksGlm: sharedModels.fireworks.glm,
+    // Dedup-council leg models live in <repo root>/models.json (`.council`) —
+    // the council runs as a plain-node .mjs that reads the same file. Don't
+    // re-declare them here.
   },
   oura: {
     accessToken: process.env.OURA_ACCESS_TOKEN || "",
