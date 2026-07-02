@@ -27,7 +27,6 @@ import {
   embedManyTexts,
   readHistory,
   nextTomoNumber,
-  recentSourceUuids,
   recentTomoSummaries,
   savePlan,
   clearSavedPlan,
@@ -337,12 +336,11 @@ async function main(): Promise<void> {
   console.log("[1/3] reading history");
   const history = await readHistory();
   const n = nextTomoNumber(history);
-  const excluded = recentSourceUuids(history, 30);
   const recent = recentTomoSummaries(history, 30);
-  console.log(`      tomo #${n}, ${history.length} prior, ${excluded.size} UUIDs excluded`);
+  console.log(`      tomo #${n}, ${history.length} prior`);
 
   console.log("[2/3] gathering context (recent 14d + long-arc 365d)");
-  const context = await gatherContext(excluded, 14);
+  const context = await gatherContext(14);
   const recentUuids = new Set(context.map((c) => c.uuid));
   const longArc = await gatherLongArcContext(recentUuids, 365);
   console.log(
@@ -352,7 +350,7 @@ async function main(): Promise<void> {
   if (context.length < 3) {
     throw new Error(
       `Only ${context.length} usable context items in the last 14 days. ` +
-        `Either journal more, widen the window, or reduce excluded UUIDs.`
+        `Either journal more or widen the window.`
     );
   }
 

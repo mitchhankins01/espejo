@@ -37,7 +37,6 @@ import {
   readHistory,
   appendHistory,
   nextTomoNumber,
-  recentSourceUuids,
   loadSavedPlan,
   updatePlanAfterBatch,
   gatherContext,
@@ -753,11 +752,10 @@ async function main(): Promise<void> {
   console.log("[1/4] reading history");
   const history = await readHistory();
   const n = nextTomoNumber(history);
-  const excluded = recentSourceUuids(history, 30);
-  console.log(`      tomo #${n}, ${history.length} prior, ${excluded.size} UUIDs excluded`);
+  console.log(`      tomo #${n}, ${history.length} prior`);
 
   console.log("[2/4] gathering context (recent 14d + long-arc 365d)");
-  const context = await gatherContext(excluded, 14);
+  const context = await gatherContext(14);
   const recentUuids = new Set(context.map((c) => c.uuid));
   const longArc = await gatherLongArcContext(recentUuids, 365);
   console.log(`      recent: ${context.length} items, long-arc: ${longArc.length} reviews`);
@@ -783,7 +781,7 @@ async function main(): Promise<void> {
     if (missing.length > 0) {
       const rescued = await fetchContextByUuid(missing);
       if (rescued.length > 0) {
-        console.log(`      rescued ${rescued.length} excluded source UUID(s)`);
+        console.log(`      rescued ${rescued.length} out-of-window source UUID(s)`);
         allContext.push(...rescued);
       }
     }
@@ -840,7 +838,7 @@ async function main(): Promise<void> {
   // (a pick whose author leg is down cannot be written by a substitute).
   await preflightLegs(legsForPicks(picked));
 
-  // Freeze context once; rescue any source UUIDs the recent-exclusion filter hid.
+  // Freeze context once; rescue any source UUIDs outside the gather windows.
   const allContext = [...longArc, ...context];
   const validUuids = new Set(allContext.map((c) => c.uuid));
   const missing = [
@@ -849,7 +847,7 @@ async function main(): Promise<void> {
   if (missing.length > 0) {
     const rescued = await fetchContextByUuid(missing);
     if (rescued.length > 0) {
-      console.log(`      rescuing ${rescued.length} excluded source UUID(s)`);
+      console.log(`      rescuing ${rescued.length} out-of-window source UUID(s)`);
       allContext.push(...rescued);
       rescued.forEach((c) => validUuids.add(c.uuid));
     }

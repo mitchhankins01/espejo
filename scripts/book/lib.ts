@@ -546,14 +546,6 @@ export function nextTomoNumber(h: TomoRecord[]): number {
   return Math.max(...h.map((r) => r.n)) + 1;
 }
 
-export function recentSourceUuids(h: TomoRecord[], n = 30): Set<string> {
-  const out = new Set<string>();
-  for (const tomo of h.slice(-n)) {
-    for (const u of tomo.source_uuids) out.add(u);
-  }
-  return out;
-}
-
 export interface TomoSummary {
   n: number;
   title: string;
@@ -632,10 +624,7 @@ function artifactItem(r: ArtifactRow): ContextItem {
   };
 }
 
-export async function gatherContext(
-  excludeUuids: Set<string>,
-  daysBack = 14
-): Promise<ContextItem[]> {
+export async function gatherContext(daysBack = 14): Promise<ContextItem[]> {
   const sinceDate = sinceDateIso(daysBack);
   const [entries, reviews] = await Promise.all([
     pool.query(
@@ -658,11 +647,11 @@ export async function gatherContext(
     ),
   ]);
 
-  // The history exclusion window applies to ENTRIES only. A Review is dense —
-  // one weekly can anchor ten different tomos — so being picked once must not
-  // bench it for 30 tomos; angle-level repetition is the overlap score's job.
+  // No history-based exclusion — a source being picked once must not bench it
+  // (one Review can anchor ten different tomos); angle-level repetition is the
+  // plan-time overlap score's job (2026-07-02).
   return [
-    ...(entries.rows as EntryRow[]).filter((r) => !excludeUuids.has(r.uuid)).map(entryItem),
+    ...(entries.rows as EntryRow[]).map(entryItem),
     ...(reviews.rows as ArtifactRow[]).map(artifactItem),
   ];
 }
@@ -681,8 +670,8 @@ export async function gatherLongArcContext(
      ORDER BY updated_at DESC`,
     [sinceDateIso(daysBack)]
   );
-  // excludeRecentUuids only dedupes vs the recent block; the history exclusion
-  // window deliberately does NOT apply to Reviews (see gatherContext).
+  // excludeRecentUuids only dedupes vs the recent block (no history-based
+  // exclusion anywhere — see gatherContext).
   return (artifacts.rows as ArtifactRow[])
     .filter((r) => !excludeRecentUuids.has(r.id))
     .map(artifactItem);
