@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Dedup Stage 2 — council fan-out. Runs Claude Opus, Gemini Pro, GPT-5.5
- * (codex), and DeepSeek (when DEEPSEEK_API_KEY is set) in parallel on
+ * (codex), and DeepSeek-on-Fireworks (when FIREWORKS_API_KEY is set) in parallel on
  * /tmp/dedup-plan.json, writes per-leg JSON arrays to /tmp/council/dedup/<stamp>/.
  *
  * Usage:
@@ -65,9 +65,10 @@ const env = { ...readEnvFile(".env"), ...readEnvFile(".env.production.local"), .
 // duplicate defaults elsewhere. This script is plain node and can't import the
 // TS src/config.ts at runtime, so the shared config lives as JSON that both this
 // script and a human edit directly.
-//   - deepseek-v4-pro is the V4 flagship (chat/reasoner aliases retired); it's a
+//   - deepseek-v4-pro is the V4 flagship, served via Fireworks.ai since
+//     2026-07-02 (the direct DeepSeek API had multi-minute latencies); it's a
 //     reasoning model, so the DeepSeek leg's max_tokens must cover CoT + answer.
-//   - Rate-limited? Point "deepseek" → "deepseek-v4-flash" or "gemini" → a Flash.
+//   - Rate-limited? Point "deepseek" → another Fireworks slug or "gemini" → a Flash.
 const COUNCIL_MODELS = JSON.parse(
   readFileSync(new URL("./council-models.json", import.meta.url), "utf8"),
 );
@@ -272,15 +273,17 @@ async function legGpt(items = plan.plan, rawSuffix = "") {
   return { ok: true, parsed: all };
 }
 
-// DeepSeek leg — OpenAI-compatible chat/completions endpoint, modeled on the
-// Gemini leg (single call, big output cap). `deepseek-reasoner` exposes its CoT
-// in a separate `reasoning_content` field; we read only `.message.content` for
-// the JSON array. 4th VOTING leg (not shadow) — once DEEPSEEK_API_KEY is set it
-// counts in the synth tally, so auto_safe now requires 4/4 unanimity. Until the
-// key is set it returns ok:false and the run proceeds on the original trio.
+// DeepSeek leg — deepseek-v4-pro served by Fireworks.ai (OpenAI-compatible
+// chat/completions; the direct DeepSeek API was retired 2026-07-02 for
+// multi-minute latencies). Modeled on the Gemini leg (single call, big output
+// cap); reasoning CoT lands in a separate field, we read only
+// `.message.content` for the JSON array. 4th VOTING leg (not shadow) — once
+// FIREWORKS_API_KEY is set it counts in the synth tally, so auto_safe requires
+// 4/4 unanimity. Without the key it returns ok:false and the run proceeds on
+// the original trio.
 async function legDeepseek(items = plan.plan, rawSuffix = "") {
-  if (!env.DEEPSEEK_API_KEY) {
-    return { ok: false, error: "DEEPSEEK_API_KEY not set — add it to .env.production.local to enable the 4th vote" };
+  if (!env.FIREWORKS_API_KEY) {
+    return { ok: false, error: "FIREWORKS_API_KEY not set — add it to .env.production.local to enable the 4th vote" };
   }
   const input = buildInput(items);
   console.error(`[council] deepseek: launching (${DEEPSEEK_MODEL}, ${items.length} items${rawSuffix ? ` ${rawSuffix}` : ""})`);
@@ -296,9 +299,9 @@ async function legDeepseek(items = plan.plan, rawSuffix = "") {
   });
   const r = await runProc("curl", [
     "-sS",
-    "https://api.deepseek.com/chat/completions",
+    "https://api.fireworks.ai/inference/v1/chat/completions",
     "-H", "Content-Type: application/json",
-    "-H", `Authorization: Bearer ${env.DEEPSEEK_API_KEY}`,
+    "-H", `Authorization: Bearer ${env.FIREWORKS_API_KEY}`,
     "-d", "@-",
   ], body);
   writeFileSync(`${outDir}/deepseek${rawSuffix}.raw.json`, r.stdout);
@@ -335,7 +338,7 @@ const legs = [
   ["claude",   legClaude],
   ["gemini",   legGemini],
   ["gpt",      legGpt],
-  ["deepseek", legDeepseek],  // votes when DEEPSEEK_API_KEY is set; no-ops otherwise
+  ["deepseek", legDeepseek],  // votes when FIREWORKS_API_KEY is set; no-ops otherwise
 ];
 if (INCLUDE_OLLAMA) legs.push(["ollama", legOllama]);
 
@@ -399,7 +402,7 @@ for (const [name, r] of results) {
 // deepseek joins the required set only once its key exists: no-key runs proceed
 // on the trio, but a key-present transient failure must abort rather than
 // silently revert the consensus bar from 4/4 back to 3/3.
-const REQUIRED_LEGS = ["claude", "gemini", "gpt", ...(env.DEEPSEEK_API_KEY ? ["deepseek"] : [])];
+const REQUIRED_LEGS = ["claude", "gemini", "gpt", ...(env.FIREWORKS_API_KEY ? ["deepseek"] : [])];
 const deadLegs = results
   .filter(([name, r]) => REQUIRED_LEGS.includes(name) && !r.ok)
   .map(([name]) => name);

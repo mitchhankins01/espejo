@@ -195,7 +195,7 @@ ANCHORING and anti-hallucination — the failure mode the reader cares most abou
 - Anchor every scene, detail, and quote in the SOURCE MATERIAL provided. Transform it; never invent a scene, a person, a place, an object, or an event that the sources don't support — and never invent one just to satisfy a mold's opening. If the sources don't give you enough concrete texture, open on the abstract tension or the mechanism and develop the IDEA more deeply rather than fabricating biography.
 - Weave in at least TWO short direct quotes of the reader's own words from the source material, in straight double quotes ("así") — translated to Spanish where the source is English, but recognizably HIS phrasing. His own words carry more anchor-weight than any paraphrase; this is what makes the essay his rather than generic.
 - Preserve the DIRECTION of every action exactly as the sources state it: who did what TO whom, who gave and who received, who reached out and who went silent. If the sources don't make the direction unambiguous, don't assert one.
-- Treat the "Current state" block (if present) as authoritative ground truth about who is current vs. past. Source insights/entries are snapshots and may describe situations that have since changed; if a source frames something as live but Current state says it ended, write it in the past.
+- Treat the "Current state" block (if present) as authoritative ground truth about who is current vs. past. Source Reviews/entries are snapshots and may describe situations that have since changed; if a source frames something as live but Current state says it ended, write it in the past.
 - Confidence threshold — applies to PROPER NOUNS AND PRECISE ATTRIBUTIONS ONLY, not to naming concepts. Give a specific researcher's name, a study, a year, or attribute a coined term ONLY when you are confident of the exact spelling AND the attribution. If you'd hesitate to bet $20 on it, make the claim generically instead: "la investigación sobre interocepción sugiere". A wrong proper name contaminates the tomo's authority. This is NOT license to avoid naming the concept itself.
 - The "Planner take" block contains the editor's deeper reasoning for this angle. USE IT as the spine of the tomo — match its specificity, don't dilute it.
 
@@ -419,7 +419,7 @@ interface VerifyResult {
 
 const VERIFY_SYSTEM = `You are a fact-checker for a personalized Spanish-language essay ("tomo") written for one reader (Mitch). The essay is anchored to real events from his life and teaches a domain concept. Your ONE job: catch specifics the essay gets WRONG, before he reads it.
 
-You are given the finished draft plus four reference blocks: SOURCE MATERIAL (the specific insights the writer was told to draw from), WRITER CONTEXT (everything ELSE the writer could see — the rest of the recent + long-arc approved insights and recent entries; biographical anchors frequently live HERE, not in the narrow source list, especially therapy-session details), RECENT JOURNAL (the last few weeks of raw entries — broader ground truth), and CURRENT STATE (a snapshot of who is current vs. past, derived from the recent entries). A specific is supported if it appears in ANY of these blocks — check WRITER CONTEXT before concluding something is unsupported.
+You are given the finished draft plus four reference blocks: SOURCE MATERIAL (the specific Reviews/entries the writer was told to draw from), WRITER CONTEXT (everything ELSE the writer could see — the rest of the recent + long-arc Reviews and recent entries; biographical anchors frequently live HERE, not in the narrow source list, especially therapy-session details), RECENT JOURNAL (the last few weeks of raw entries — broader ground truth), and CURRENT STATE (a snapshot of who is current vs. past, derived from the recent entries). A specific is supported if it appears in ANY of these blocks — check WRITER CONTEXT before concluding something is unsupported.
 
 Flag two classes of problem ONLY:
 
@@ -443,7 +443,7 @@ Rules:
 Output STRICT JSON only — no prose, no markdown, no code fences:
 {
   "flags": [
-    { "type": "biographical", "severity": "high", "issue": "contradicted", "quote": "...", "detail": "The draft says X gave Y flowers, but the source insight says Mitch gave them to Miguel — direction inverted." }
+    { "type": "biographical", "severity": "high", "issue": "contradicted", "quote": "...", "detail": "The draft says X gave Y flowers, but the source Review says Mitch gave them to Miguel — direction inverted." }
   ]
 }
 If the draft is clean, return: { "flags": [] }`;
@@ -466,8 +466,8 @@ async function verifyTomo(
   const recentEntries = await fetchRecentEntries(21);
 
   // The writer's anchors live across the WHOLE context bundle it was given, not
-  // just the planner-picked source_refs — therapy-session insights in particular
-  // sit in the broader pool. Render the picked sources as primary, but expose
+  // just the planner-picked source_refs — therapy Reviews in particular sit in
+  // the broader pool. Render the picked sources as primary, but expose
   // the rest as WRITER CONTEXT so the verifier checks against everything the
   // writer could see (the gap that caused real anchors to be mis-flagged).
   const refSet = new Set(plan.source_refs);
@@ -485,10 +485,10 @@ async function verifyTomo(
     "# DRAFT (the tomo to check)",
     markdown,
     "",
-    "# SOURCE MATERIAL (the specific insights the writer was told to draw from)",
+    "# SOURCE MATERIAL (the specific Reviews/entries the writer was told to draw from)",
     renderContextItems(sources, 2000),
     "",
-    "# WRITER CONTEXT (everything else the writer could see — other approved insights + recent entries; anchors often live here)",
+    "# WRITER CONTEXT (everything else the writer could see — other Reviews + recent entries; anchors often live here)",
     renderContextItems(otherContext, 2000),
     "",
     "# RECENT JOURNAL (last 21 days of raw entries — broader ground truth)",
@@ -502,13 +502,24 @@ async function verifyTomo(
     "Return the JSON flags object now.",
   ].join("\n");
 
-  const text = await bookChat({
+  // The mechanical route defaults to DeepSeek (a reasoning model) whose
+  // thinking tokens bill against this cap. At the old 2048 a whole-essay
+  // fact-check could burn the budget reasoning and return empty text, which
+  // parseVerifyOutput degrades to {flags: []} — a truncated verify is
+  // indistinguishable from a clean draft (suspected cause of the 7-tomo
+  // zero-flag streak, tomos 84-90). Give reasoning headroom AND fail loud.
+  const { text, finishReason } = await bookChatMeta({
     model: BOOK_MODELS.anthropic,
     system: VERIFY_SYSTEM,
     messages: [{ role: "user", content: user }],
-    maxTokens: 2048,
+    maxTokens: 8000,
     label: "verify",
   });
+  if (finishReason === "length") {
+    throw new Error(
+      "verifier reply hit the token ceiling (truncated) — treating as verifier failure, not a clean draft"
+    );
+  }
 
   return parseVerifyOutput(text);
 }
@@ -749,7 +760,7 @@ async function main(): Promise<void> {
   const context = await gatherContext(excluded, 14);
   const recentUuids = new Set(context.map((c) => c.uuid));
   const longArc = await gatherLongArcContext(excluded, recentUuids, 365);
-  console.log(`      recent: ${context.length} items, long-arc: ${longArc.length} insights`);
+  console.log(`      recent: ${context.length} items, long-arc: ${longArc.length} reviews/tenets`);
 
   const currentState = await deriveCurrentState();
   console.log(

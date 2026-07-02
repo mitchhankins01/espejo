@@ -20,10 +20,12 @@ describe("MODEL_PRICING", () => {
     });
   });
 
-  it("includes deepseek-v4-pro at $0.435/$0.87 per MTok", () => {
-    expect(MODEL_PRICING["deepseek-v4-pro"]).toEqual({
-      inputPerMTok: 0.435,
-      outputPerMTok: 0.87,
+  it("includes Fireworks deepseek-v4-pro at $1.74/$3.48 per MTok", () => {
+    expect(
+      MODEL_PRICING["accounts/fireworks/models/deepseek-v4-pro"]
+    ).toEqual({
+      inputPerMTok: 1.74,
+      outputPerMTok: 3.48,
     });
   });
 });

@@ -135,8 +135,12 @@ export const BOOK_MODELS = {
   anthropicFast: config.models.anthropicFast,
   openai: process.env.OPENAI_BOOK_MODEL || "gpt-5.5",
   openaiFast: process.env.OPENAI_BOOK_FAST_MODEL || "gpt-5-mini",
-  deepseek: process.env.DEEPSEEK_BOOK_MODEL || "deepseek-v4-pro",
-  openrouter: process.env.OPENROUTER_BOOK_MODEL || "z-ai/glm-5.2",
+  // Both served by Fireworks (provider "fireworks") — the direct DeepSeek API
+  // and OpenRouter were retired 2026-07-02 for multi-minute latencies.
+  deepseek:
+    process.env.DEEPSEEK_BOOK_MODEL ||
+    "accounts/fireworks/models/deepseek-v4-pro",
+  glm: process.env.GLM_BOOK_MODEL || "accounts/fireworks/models/glm-5p2",
 } as const;
 
 export interface BookLeg {
@@ -159,10 +163,10 @@ export interface BookLeg {
  * by its originating leg so finished tomos can be compared per model.
  */
 export const PLANNER_LEGS: BookLeg[] = [
-  { provider: "deepseek", model: BOOK_MODELS.deepseek, label: "DeepSeek" },
+  { provider: "fireworks", model: BOOK_MODELS.deepseek, label: "DeepSeek" },
   { provider: "anthropic", model: BOOK_MODELS.anthropic, label: "Claude", soft: true },
   { provider: "openai", model: BOOK_MODELS.openai, label: "GPT", soft: true },
-  { provider: "openrouter", model: BOOK_MODELS.openrouter, label: "GLM", soft: true },
+  { provider: "fireworks", model: BOOK_MODELS.glm, label: "GLM", soft: true },
 ];
 
 export const CANDIDATES_PER_LEG = 2;
@@ -174,8 +178,9 @@ export function legByline(leg: { label: string; model: string }): string {
 
 /**
  * Provider for the pipeline's mechanical calls — verify, bilingual interleave,
- * current-state. Default "deepseek" (cost-effective, always funded). Override
- * with BOOK_LLM_PROVIDER=anthropic (highest quality) or =openai.
+ * current-state. Default "fireworks" (DeepSeek model, cost-effective, fast
+ * serving). Override with BOOK_LLM_PROVIDER=anthropic (highest quality) or
+ * =openai.
  *
  * This does NOT change who authors candidates — author legs are pinned per-leg
  * in PLANNER_LEGS. It only routes the model id the mechanical calls pass
@@ -189,21 +194,21 @@ const BOOK_PROVIDER: LlmProvider = ((): LlmProvider => {
     case "anthropic":
       return "anthropic";
     default:
-      return "deepseek";
+      return "fireworks";
   }
 })();
 
 /**
  * Resolve the (provider, model) pair for a given anthropic-tier model id.
- * On the anthropic path this is a pass-through. On the deepseek path both tiers
- * collapse to the single DeepSeek model (no cheap mini tier). On the openai
- * path the fast tier (anthropicFast) maps to the mini model, everything else
- * (the writer/verify tier) maps to the writer model.
+ * On the anthropic path this is a pass-through. On the fireworks path both
+ * tiers collapse to the single DeepSeek model (no cheap mini tier). On the
+ * openai path the fast tier (anthropicFast) maps to the mini model, everything
+ * else (the writer/verify tier) maps to the writer model.
  */
 function resolveModel(model: string): { provider: LlmProvider; model: string } {
   if (BOOK_PROVIDER === "anthropic") return { provider: "anthropic", model };
-  if (BOOK_PROVIDER === "deepseek") {
-    return { provider: "deepseek", model: BOOK_MODELS.deepseek };
+  if (BOOK_PROVIDER === "fireworks") {
+    return { provider: "fireworks", model: BOOK_MODELS.deepseek };
   }
   const isFast = model === BOOK_MODELS.anthropicFast;
   return {
@@ -366,8 +371,7 @@ export async function preflightLegs(legs: BookLeg[]): Promise<BookLeg[]> {
         "  Top up the dead provider(s) and re-run. " +
         "Anthropic: console.anthropic.com → Plans & Billing · " +
         "OpenAI: platform.openai.com → Billing · " +
-        "DeepSeek: platform.deepseek.com → Top up · " +
-        "OpenRouter: openrouter.ai → Credits."
+        "Fireworks: fireworks.ai → Billing."
     );
   }
   console.log(`[preflight] live legs: ${live.map((l) => l.label).join(", ")}`);
@@ -569,12 +573,20 @@ export function recentTomoSummaries(h: TomoRecord[], n = 30): TomoSummary[] {
 }
 
 // ---------------------------------------------------------------------------
-// Context gathering (prod DB: entries + approved insights)
+// Context gathering (prod DB: entries + Reviews [+ Tenets in the long arc])
+//
+// Insights were deprecated as a tomo source on 2026-07-02 — the pipeline now
+// anchors on Reviews (evening/weekly/monthly/therapy syntheses) plus raw
+// journal entries. Tenets (endorsed external claims, the "world graph") join
+// the long-arc pool as mechanism material as soon as any exist.
 // ---------------------------------------------------------------------------
 
 export interface ContextItem {
   uuid: string;
-  kind: "entry" | "insight";
+  // "insight" never comes out of gatherContext/gatherLongArcContext anymore;
+  // it survives only for fetchContextByUuid on saved plans that predate the
+  // Reviews switch.
+  kind: "entry" | "review" | "tenet" | "insight";
   date: string;
   title: string | null;
   text: string;
@@ -593,8 +605,9 @@ interface EntryRow {
   text: string;
 }
 
-interface InsightRow {
+interface ArtifactRow {
   id: string;
+  kind: ContextItem["kind"];
   title: string;
   body: string;
   updated_at: Date;
@@ -610,10 +623,10 @@ function entryItem(r: EntryRow): ContextItem {
   };
 }
 
-function insightItem(r: InsightRow): ContextItem {
+function artifactItem(r: ArtifactRow): ContextItem {
   return {
     uuid: r.id,
-    kind: "insight",
+    kind: r.kind,
     date: r.updated_at.toISOString().slice(0, 10),
     title: r.title,
     text: r.body,
@@ -625,7 +638,7 @@ export async function gatherContext(
   daysBack = 14
 ): Promise<ContextItem[]> {
   const sinceDate = sinceDateIso(daysBack);
-  const [entries, insights] = await Promise.all([
+  const [entries, reviews] = await Promise.all([
     pool.query(
       `SELECT uuid, created_at, text
        FROM entries
@@ -635,9 +648,9 @@ export async function gatherContext(
       [sinceDate, MIN_ENTRY_CHARS]
     ),
     pool.query(
-      `SELECT id, title, body, updated_at
+      `SELECT id, kind, title, body, updated_at
        FROM knowledge_artifacts
-       WHERE kind = 'insight'
+       WHERE kind = 'review'
          AND deleted_at IS NULL
          AND (source_path IS NULL OR source_path NOT LIKE '%Pending/%')
          AND updated_at >= $1
@@ -648,7 +661,7 @@ export async function gatherContext(
 
   return [
     ...(entries.rows as EntryRow[]).filter((r) => !excludeUuids.has(r.uuid)).map(entryItem),
-    ...(insights.rows as InsightRow[]).filter((r) => !excludeUuids.has(r.id)).map(insightItem),
+    ...(reviews.rows as ArtifactRow[]).filter((r) => !excludeUuids.has(r.id)).map(artifactItem),
   ];
 }
 
@@ -657,30 +670,32 @@ export async function gatherLongArcContext(
   excludeRecentUuids: Set<string>,
   daysBack = LONG_ARC_DAYS
 ): Promise<ContextItem[]> {
-  const insights = await pool.query(
-    `SELECT id, title, body, updated_at
+  const artifacts = await pool.query(
+    `SELECT id, kind, title, body, updated_at
      FROM knowledge_artifacts
-     WHERE kind = 'insight'
+     WHERE kind IN ('review', 'tenet')
        AND deleted_at IS NULL
        AND (source_path IS NULL OR source_path NOT LIKE '%Pending/%')
        AND updated_at >= $1
      ORDER BY updated_at DESC`,
     [sinceDateIso(daysBack)]
   );
-  return (insights.rows as InsightRow[])
+  return (artifacts.rows as ArtifactRow[])
     .filter((r) => !excludeUuids.has(r.id) && !excludeRecentUuids.has(r.id))
-    .map(insightItem);
+    .map(artifactItem);
 }
 
 export async function fetchContextByUuid(uuids: string[]): Promise<ContextItem[]> {
   if (uuids.length === 0) return [];
-  const [entries, insights] = await Promise.all([
+  const [entries, artifacts] = await Promise.all([
     pool.query(
       `SELECT uuid, created_at, text FROM entries WHERE uuid = ANY($1::text[])`,
       [uuids]
     ),
+    // Any kind on purpose — saved plans may reference artifacts (including
+    // legacy insights) that the gather functions no longer source.
     pool.query(
-      `SELECT id, title, body, updated_at
+      `SELECT id, kind, title, body, updated_at
        FROM knowledge_artifacts
        WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL`,
       [uuids]
@@ -688,15 +703,15 @@ export async function fetchContextByUuid(uuids: string[]): Promise<ContextItem[]
   ]);
   return [
     ...(entries.rows as EntryRow[]).map(entryItem),
-    ...(insights.rows as InsightRow[]).map(insightItem),
+    ...(artifacts.rows as ArtifactRow[]).map(artifactItem),
   ];
 }
 
 /**
  * Recent raw journal entries (all languages), most-recent first, for the
  * post-draft verifier's ground-truth window. Unlike gatherContext this applies
- * no exclusion set and no insight join — the verifier wants the unfiltered
- * recent record so it can catch staleness (e.g. a breakup the source insight
+ * no exclusion set and no artifact join — the verifier wants the unfiltered
+ * recent record so it can catch staleness (e.g. a breakup the source Review
  * predates) and unsupported specifics.
  */
 export async function fetchRecentEntries(
@@ -731,7 +746,7 @@ export function renderContextItems(items: ContextItem[], maxChars: number): stri
 // Current-state ground truth (staleness guard)
 // ---------------------------------------------------------------------------
 
-const CURRENT_STATE_SYSTEM = `You read a few weeks of one person's (Mitch's) raw journal entries and produce a SHORT "current state" snapshot — the ground truth a months-old insight would get wrong. Downstream this overrides stale framing, so accuracy and recency matter more than completeness.
+const CURRENT_STATE_SYSTEM = `You read a few weeks of one person's (Mitch's) raw journal entries and produce a SHORT "current state" snapshot — the ground truth a months-old Review would get wrong. Downstream this overrides stale framing, so accuracy and recency matter more than completeness.
 
 Output compact markdown, this shape:
 
@@ -771,7 +786,12 @@ export async function deriveCurrentState(daysBack = 30): Promise<string> {
         content: `Recent journal entries (last ${daysBack} days, newest first). Produce the current-state snapshot.\n\n${corpus}`,
       },
     ],
-    maxTokens: 700,
+    // The mechanical route defaults to DeepSeek (a reasoning model) whose
+    // thinking tokens bill against this same cap — at 700 it spent the whole
+    // budget reasoning and returned empty text, silently disabling the
+    // staleness guard (observed 2026-07-02). The snapshot itself stays ≤12
+    // lines; the headroom is for reasoning.
+    maxTokens: 4000,
     temperature: 0,
     label: "current-state",
   });
@@ -1083,7 +1103,9 @@ export async function interleave(markdown: string): Promise<string> {
     model: BOOK_MODELS.anthropicFast,
     system: TAKEAWAYS_SYSTEM,
     messages: [{ role: "user", content: takeawaysMarkdown }],
-    maxTokens: 2000,
+    // Reasoning headroom for the DeepSeek mechanical route (same failure class
+    // as current-state/verify: thinking tokens bill against this cap).
+    maxTokens: 6000,
     label: "bilingual.takeaways",
   });
   return `${body}\n\n${takeaways.trim()}\n`;

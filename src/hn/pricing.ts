@@ -2,8 +2,8 @@
  * Per-million-token pricing for models we use in HN distillation.
  *
  * Claude source of truth: https://platform.claude.com/docs/en/about-claude/pricing
- * DeepSeek source of truth: https://api-docs.deepseek.com/quick_start/pricing
- * Verified against the docs on 2026-06-22 — re-check if the model id changes.
+ * Fireworks source of truth: https://docs.fireworks.ai/serverless/pricing
+ * Verified against the docs on 2026-07-02 — re-check if the model id changes.
  * MEMORY.md flags this as a recurring item to verify on every model bump.
  *
  * `inputPerMTok` is the cache-MISS input rate (our distills don't hit the
@@ -19,8 +19,16 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   "claude-opus-4-7": { inputPerMTok: 5, outputPerMTok: 25 },
   "claude-sonnet-4-6": { inputPerMTok: 3, outputPerMTok: 15 },
   "claude-haiku-4-5-20251001": { inputPerMTok: 1, outputPerMTok: 5 },
-  "deepseek-v4-pro": { inputPerMTok: 0.435, outputPerMTok: 0.87 },
-  "deepseek-v4-flash": { inputPerMTok: 0.14, outputPerMTok: 0.28 },
+  // Fireworks serverless standard tier — ~4x the retired direct DeepSeek API,
+  // paid for sub-2s latency instead of multi-minute queues (2026-07-02).
+  "accounts/fireworks/models/deepseek-v4-pro": {
+    inputPerMTok: 1.74,
+    outputPerMTok: 3.48,
+  },
+  "accounts/fireworks/models/glm-5p2": {
+    inputPerMTok: 1.4,
+    outputPerMTok: 4.4,
+  },
 };
 
 export interface TokenUsage {

@@ -61,7 +61,7 @@ const OVERLAP_RETREAD = 0.8;
 function buildSystem(count: number): string {
   return `You are the editor of a personalized Spanish-language mini-book series for one reader (Mitch), who lives in Barcelona and reads full, natural Spanish fluently.
 
-Each issue is a "tomo" — a standalone ~1400-word essay: direct, anchored on a long-running pattern from the reader's own life AND teaching a real domain concept (${DOMAINS.join(", ")}) in genuine depth. The reader's complaint about recent tomos: they elaborated his own life back to him but taught him no new science. Fix that. Every tomo must do BOTH jobs — the life pattern is the anchor, the domain mechanism is the lesson. Concrete hook, one specific example, a real teaching beat. No "En este tomo vamos a..." intros. Every tomo is transformed from the reader's real journal entries and approved insights — never invented biography.
+Each issue is a "tomo" — a standalone ~1400-word essay: direct, anchored on a long-running pattern from the reader's own life AND teaching a real domain concept (${DOMAINS.join(", ")}) in genuine depth. The reader's complaint about recent tomos: they elaborated his own life back to him but taught him no new science. Fix that. Every tomo must do BOTH jobs — the life pattern is the anchor, the domain mechanism is the lesson. Concrete hook, one specific example, a real teaching beat. No "En este tomo vamos a..." intros. Every tomo is transformed from the reader's real journal entries and Reviews (his evening/weekly/monthly/therapy syntheses) — never invented biography.
 
 Your job: produce ${count} candidate plan(s) for the next tomo. Each candidate is a fully-formed pitch — your ${count} will be merged with other editors' into a single menu the reader picks from.
 
@@ -167,8 +167,16 @@ async function generateLeg(
       const parsed = extractJsonObject<{ candidates: Candidate[] }>(text);
       for (const c of parsed.candidates) {
         c.format = "essay";
-        c.source_refs = c.source_refs.map((r) => r.replace(/^(entry|insight):/, "").trim());
-        if (typeof c.series_vein !== "string" || !c.series_vein.trim()) {
+        c.source_refs = c.source_refs.map((r) =>
+          r.replace(/^(entry|review|tenet|insight):/, "").trim()
+        );
+        // Models sometimes echo the schema hint's literal "OMIT" instead of
+        // omitting the field — treat that (and empty/non-string) as absent.
+        if (
+          typeof c.series_vein !== "string" ||
+          !c.series_vein.trim() ||
+          /^omit\b/i.test(c.series_vein.trim())
+        ) {
           delete c.series_vein;
         }
         c.provider = leg.provider;
@@ -266,7 +274,7 @@ async function scoreOverlap(candidates: Candidate[], recent: TomoSummary[]): Pro
 // ---------------------------------------------------------------------------
 
 /**
- * Print the candidate menu by DOMAIN + SOURCE MATERIAL — the source insights/
+ * Print the candidate menu by DOMAIN + SOURCE MATERIAL — the source Reviews/
  * entries each candidate draws from, resolved to title+date. The angle/take
  * "sell" is intentionally dropped: candidates are presented by what they teach
  * (domain + mechanism) and what they're anchored to (source material), so the
@@ -291,7 +299,9 @@ function printCandidates(candidates: Candidate[], byUuid: Map<string, ContextIte
     for (const u of c.source_refs) {
       const item = byUuid.get(u);
       if (item) {
-        console.log(`        - [${item.kind}] ${item.date} — ${item.title ?? `${item.kind} entry`}`);
+        console.log(
+          `        - [${item.kind}] ${item.date} — ${item.title ?? `journal entry (${item.text.slice(0, 60).replace(/\s+/g, " ")}…)`}`
+        );
       } else {
         console.log(`        - ${u} (not in current pool)`);
       }
@@ -333,9 +343,9 @@ async function main(): Promise<void> {
   const recentUuids = new Set(context.map((c) => c.uuid));
   const longArc = await gatherLongArcContext(excluded, recentUuids, 365);
   console.log(
-    `      recent: ${context.length} items (${context.filter((c) => c.kind === "entry").length} entries, ${context.filter((c) => c.kind === "insight").length} insights)`
+    `      recent: ${context.length} items (${context.filter((c) => c.kind === "entry").length} entries, ${context.filter((c) => c.kind === "review").length} reviews)`
   );
-  console.log(`      long-arc: ${longArc.length} insights from last 365d`);
+  console.log(`      long-arc: ${longArc.length} reviews/tenets from last 365d`);
   if (context.length < 3) {
     throw new Error(
       `Only ${context.length} usable context items in the last 14 days. ` +
@@ -394,12 +404,12 @@ async function main(): Promise<void> {
         ]
       : []),
     "# Standing themes — anchor on these",
-    "(Older approved insights, distilled over months. Candidates should anchor on patterns from this block.)",
+    "(The reader's Reviews — evening/weekly/monthly/therapy syntheses over the last year — plus endorsed Tenets. Candidates should anchor on patterns from this block.)",
     "",
     renderContextItems(longArc, SOURCE_PREVIEW_CHARS),
     "",
     "# Recent material — last 14 days (use as fresh substrate)",
-    "(Recent journal entries and approved insights. Use these for live texture, voice, and sensory specifics.)",
+    "(Recent journal entries and Reviews. Use these for live texture, voice, and sensory specifics.)",
     "",
     renderContextItems(context, SOURCE_PREVIEW_CHARS),
     "",

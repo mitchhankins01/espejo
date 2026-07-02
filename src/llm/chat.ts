@@ -12,20 +12,20 @@ import { openai, createOpenAI } from "@ai-sdk/openai";
  * They're reached through the AI SDK's OpenAI provider (forcing `.chat()`, since
  * these don't implement OpenAI's newer Responses API). To onboard another such
  * provider, add a row here — the book pipeline's model-comparison legs that use
- * them live in `scripts/book/models.ts`.
+ * them live in `scripts/book/lib.ts`.
  */
-type OpenAiCompatibleProvider = "deepseek" | "openrouter";
+type OpenAiCompatibleProvider = "fireworks";
 const OPENAI_COMPATIBLE: Record<
   OpenAiCompatibleProvider,
   { baseURL: string; apiKeyEnv: string }
 > = {
-  // DeepSeek direct API (the dedup council reaches the same host via raw curl).
-  deepseek: { baseURL: "https://api.deepseek.com", apiKeyEnv: "DEEPSEEK_API_KEY" },
-  // OpenRouter: one endpoint fronting many models (GLM, etc.); model id is the
-  // OpenRouter slug, e.g. "z-ai/glm-5.2".
-  openrouter: {
-    baseURL: "https://openrouter.ai/api/v1",
-    apiKeyEnv: "OPENROUTER_API_KEY",
+  // Fireworks.ai: one endpoint fronting DeepSeek, GLM, Kimi, etc. Model id is
+  // the full slug, e.g. "accounts/fireworks/models/deepseek-v4-pro". Replaced
+  // both the direct DeepSeek API (multi-minute latencies, 2026-07-02) and
+  // OpenRouter (the dedup council reaches the same host via raw curl).
+  fireworks: {
+    baseURL: "https://api.fireworks.ai/inference/v1",
+    apiKeyEnv: "FIREWORKS_API_KEY",
   },
 };
 
@@ -95,7 +95,7 @@ export interface ChatResponse {
 function selectModel(provider: LlmProvider, modelId: string) {
   if (provider === "anthropic") return anthropic(modelId);
   if (provider === "openai") return openai(modelId);
-  // Narrowed to OpenAiCompatibleProvider (deepseek | openrouter | …).
+  // Narrowed to OpenAiCompatibleProvider (fireworks | …).
   return openaiCompatible(provider, modelId);
 }
 

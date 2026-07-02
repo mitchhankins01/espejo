@@ -17,10 +17,10 @@ const telegramLlmProvider = (process.env.TELEGRAM_LLM_PROVIDER?.toLowerCase() ||
 if (
   telegramLlmProvider !== "anthropic" &&
   telegramLlmProvider !== "openai" &&
-  telegramLlmProvider !== "deepseek"
+  telegramLlmProvider !== "fireworks"
 ) {
   throw new Error(
-    `Invalid TELEGRAM_LLM_PROVIDER "${telegramLlmProvider}". Use "anthropic", "openai", or "deepseek".`
+    `Invalid TELEGRAM_LLM_PROVIDER "${telegramLlmProvider}". Use "anthropic", "openai", or "fireworks".`
   );
 }
 
@@ -70,8 +70,8 @@ if (env === "production" && process.env.TELEGRAM_BOT_TOKEN) {
   };
   if (telegramLlmProvider === "anthropic") {
     required.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-  } else if (telegramLlmProvider === "deepseek") {
-    required.DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
+  } else if (telegramLlmProvider === "fireworks") {
+    required.FIREWORKS_API_KEY = process.env.FIREWORKS_API_KEY;
   }
   const missing = Object.entries(required)
     .filter(([, v]) => !v)
@@ -119,7 +119,9 @@ export const config = {
     llmProvider: telegramLlmProvider,
     // Model backing the conversational chat flow (src/telegram/flows/chat.ts).
     // Chat-only — distinct from the fast/distill tiers in config.models.
-    chatModel: process.env.TELEGRAM_CHAT_MODEL || "deepseek-v4-pro",
+    chatModel:
+      process.env.TELEGRAM_CHAT_MODEL ||
+      "accounts/fireworks/models/deepseek-v4-pro",
     voiceModel: process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts",
     voiceName: process.env.OPENAI_TTS_VOICE || "alloy",
   },
@@ -130,11 +132,14 @@ export const config = {
     anthropicFast:
       process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5-20251001",
     // HN distillation (src/hn/distill.ts). Routed through the cross-provider
-    // chat() helper, so provider is configurable. Defaults to DeepSeek for
-    // cost — Opus-quality distills are not worth Opus pricing on a daily cron.
+    // chat() helper, so provider is configurable. Defaults to DeepSeek-on-
+    // Fireworks for cost — Opus-quality distills are not worth Opus pricing on
+    // a daily cron.
     distillProvider: (process.env.HN_DISTILL_PROVIDER ||
-      "deepseek") as LlmProvider,
-    distillModel: process.env.HN_DISTILL_MODEL || "deepseek-v4-pro",
+      "fireworks") as LlmProvider,
+    distillModel:
+      process.env.HN_DISTILL_MODEL ||
+      "accounts/fireworks/models/deepseek-v4-pro",
     // Long-form tomo writer + planner (scripts/book/*). Restored after the
     // 14d29bd rename dropped the old `anthropicChat` key these depended on.
     bookWriter: process.env.ANTHROPIC_BOOK_MODEL || "claude-opus-4-8",

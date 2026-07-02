@@ -13,7 +13,7 @@ beforeEach(() => {
 });
 
 describe("distillThread", () => {
-  it("calls DeepSeek with the spec system prompt and user content", async () => {
+  it("calls DeepSeek-on-Fireworks with the spec system prompt and user content", async () => {
     chatMock.mockResolvedValueOnce({
       text: "## Headline facts\n\nA test.",
       usage: { inputTokens: 1000, outputTokens: 200 },
@@ -35,8 +35,8 @@ describe("distillThread", () => {
 
     expect(chatMock).toHaveBeenCalledTimes(1);
     const call = chatMock.mock.calls[0][0];
-    expect(call.provider).toBe("deepseek");
-    expect(call.model).toBe("deepseek-v4-pro");
+    expect(call.provider).toBe("fireworks");
+    expect(call.model).toBe("accounts/fireworks/models/deepseek-v4-pro");
     expect(call.maxTokens).toBe(8192);
     expect(call.system).toContain("distill Hacker News threads");
     expect(call.messages[0].role).toBe("user");
@@ -47,10 +47,10 @@ describe("distillThread", () => {
     expect(call.messages[0].content).toContain("3 comments)");
 
     expect(result.markdown).toBe("## Headline facts\n\nA test.");
-    expect(result.model).toBe("deepseek-v4-pro");
+    expect(result.model).toBe("accounts/fireworks/models/deepseek-v4-pro");
     expect(result.usage).toEqual({ inputTokens: 1000, outputTokens: 200 });
-    // 1000 in * $0.435/M = $0.000435, 200 out * $0.87/M = $0.000174 → $0.000609
-    expect(result.cost.totalCostUsd).toBeCloseTo(0.000609, 6);
+    // 1000 in * $1.74/M = $0.00174, 200 out * $3.48/M = $0.000696 → $0.002436
+    expect(result.cost.totalCostUsd).toBeCloseTo(0.002436, 6);
   });
 
   it("renders the no-article placeholder for self-posts", async () => {

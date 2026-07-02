@@ -215,7 +215,9 @@ describe("config", () => {
 
     const { config } = await import("../../src/config.js");
     expect(config.anthropic.apiKey).toBe("");
-    expect(config.telegram.chatModel).toBe("deepseek-v4-pro");
+    expect(config.telegram.chatModel).toBe(
+      "accounts/fireworks/models/deepseek-v4-pro"
+    );
   });
 
   it("reads TIMEZONE from env", async () => {
@@ -279,37 +281,37 @@ describe("config", () => {
     expect(config.telegram.llmProvider).toBe("openai");
   });
 
-  it("succeeds in production with deepseek provider given DEEPSEEK_API_KEY", async () => {
+  it("succeeds in production with fireworks provider given FIREWORKS_API_KEY", async () => {
     process.env.NODE_ENV = "production";
     process.env.DATABASE_URL = "postgresql://prod:prod@db/journal";
     process.env.R2_PUBLIC_URL = "https://media.example.com";
     process.env.TELEGRAM_BOT_TOKEN = "123:ABC";
     process.env.TELEGRAM_SECRET_TOKEN = "secret123";
     process.env.TELEGRAM_ALLOWED_CHAT_ID = "456789";
-    process.env.TELEGRAM_LLM_PROVIDER = "deepseek";
+    process.env.TELEGRAM_LLM_PROVIDER = "fireworks";
     process.env.OPENAI_API_KEY = "sk-openai-test";
-    process.env.DEEPSEEK_API_KEY = "sk-deepseek-test";
+    process.env.FIREWORKS_API_KEY = "fw_test";
     delete process.env.ANTHROPIC_API_KEY;
 
     const { config } = await import("../../src/config.js");
     expect(config.telegram.botToken).toBe("123:ABC");
-    expect(config.telegram.llmProvider).toBe("deepseek");
+    expect(config.telegram.llmProvider).toBe("fireworks");
   });
 
-  it("throws in production with deepseek provider but no DEEPSEEK_API_KEY", async () => {
+  it("throws in production with fireworks provider but no FIREWORKS_API_KEY", async () => {
     process.env.NODE_ENV = "production";
     process.env.DATABASE_URL = "postgresql://prod:prod@db/journal";
     process.env.R2_PUBLIC_URL = "https://media.example.com";
     process.env.TELEGRAM_BOT_TOKEN = "123:ABC";
     process.env.TELEGRAM_SECRET_TOKEN = "secret123";
     process.env.TELEGRAM_ALLOWED_CHAT_ID = "456789";
-    process.env.TELEGRAM_LLM_PROVIDER = "deepseek";
+    process.env.TELEGRAM_LLM_PROVIDER = "fireworks";
     process.env.OPENAI_API_KEY = "sk-openai-test";
-    delete process.env.DEEPSEEK_API_KEY;
+    delete process.env.FIREWORKS_API_KEY;
     delete process.env.ANTHROPIC_API_KEY;
 
     await expect(() => import("../../src/config.js")).rejects.toThrow(
-      "DEEPSEEK_API_KEY"
+      "FIREWORKS_API_KEY"
     );
   });
 
