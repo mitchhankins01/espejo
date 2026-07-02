@@ -168,7 +168,7 @@ async function generateLeg(
       for (const c of parsed.candidates) {
         c.format = "essay";
         c.source_refs = c.source_refs.map((r) =>
-          r.replace(/^(entry|review|tenet|insight):/, "").trim()
+          r.replace(/^(entry|review|insight):/, "").trim()
         );
         // Models sometimes echo the schema hint's literal "OMIT" instead of
         // omitting the field — treat that (and empty/non-string) as absent.
@@ -345,7 +345,7 @@ async function main(): Promise<void> {
   console.log(
     `      recent: ${context.length} items (${context.filter((c) => c.kind === "entry").length} entries, ${context.filter((c) => c.kind === "review").length} reviews)`
   );
-  console.log(`      long-arc: ${longArc.length} reviews/tenets from last 365d`);
+  console.log(`      long-arc: ${longArc.length} reviews from last 365d`);
   if (context.length < 3) {
     throw new Error(
       `Only ${context.length} usable context items in the last 14 days. ` +
@@ -404,7 +404,7 @@ async function main(): Promise<void> {
         ]
       : []),
     "# Standing themes — anchor on these",
-    "(The reader's Reviews — evening/weekly/monthly/therapy syntheses over the last year — plus endorsed Tenets. Candidates should anchor on patterns from this block.)",
+    "(The reader's Reviews — evening/weekly/monthly/therapy syntheses over the last year. Candidates should anchor on patterns from this block.)",
     "",
     renderContextItems(longArc, SOURCE_PREVIEW_CHARS),
     "",

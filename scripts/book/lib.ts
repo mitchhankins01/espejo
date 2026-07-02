@@ -573,12 +573,11 @@ export function recentTomoSummaries(h: TomoRecord[], n = 30): TomoSummary[] {
 }
 
 // ---------------------------------------------------------------------------
-// Context gathering (prod DB: entries + Reviews [+ Tenets in the long arc])
+// Context gathering (prod DB: entries + Reviews)
 //
-// Insights were deprecated as a tomo source on 2026-07-02 — the pipeline now
-// anchors on Reviews (evening/weekly/monthly/therapy syntheses) plus raw
-// journal entries. Tenets (endorsed external claims, the "world graph") join
-// the long-arc pool as mechanism material as soon as any exist.
+// Insights and tenets were deprecated as tomo sources on 2026-07-02 — the
+// pipeline anchors on Reviews (evening/weekly/monthly/therapy syntheses) plus
+// raw journal entries, nothing else.
 // ---------------------------------------------------------------------------
 
 export interface ContextItem {
@@ -586,7 +585,7 @@ export interface ContextItem {
   // "insight" never comes out of gatherContext/gatherLongArcContext anymore;
   // it survives only for fetchContextByUuid on saved plans that predate the
   // Reviews switch.
-  kind: "entry" | "review" | "tenet" | "insight";
+  kind: "entry" | "review" | "insight";
   date: string;
   title: string | null;
   text: string;
@@ -673,7 +672,7 @@ export async function gatherLongArcContext(
   const artifacts = await pool.query(
     `SELECT id, kind, title, body, updated_at
      FROM knowledge_artifacts
-     WHERE kind IN ('review', 'tenet')
+     WHERE kind = 'review'
        AND deleted_at IS NULL
        AND (source_path IS NULL OR source_path NOT LIKE '%Pending/%')
        AND updated_at >= $1

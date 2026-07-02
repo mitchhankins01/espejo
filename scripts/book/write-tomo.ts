@@ -760,7 +760,7 @@ async function main(): Promise<void> {
   const context = await gatherContext(excluded, 14);
   const recentUuids = new Set(context.map((c) => c.uuid));
   const longArc = await gatherLongArcContext(excluded, recentUuids, 365);
-  console.log(`      recent: ${context.length} items, long-arc: ${longArc.length} reviews/tenets`);
+  console.log(`      recent: ${context.length} items, long-arc: ${longArc.length} reviews`);
 
   const currentState = await deriveCurrentState();
   console.log(
